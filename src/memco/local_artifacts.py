@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from memco.release_check import run_release_check
+from memco.release_check import run_release_check, run_strict_release_check
 
 
 CONTRACT_STATUS_TEST_FILES = (
@@ -49,8 +49,18 @@ def _git_capture(*, project_root: Path, args: list[str]) -> str:
     return completed.stdout.strip()
 
 
+def _step_by_name(artifact: dict, name: str) -> dict:
+    for step in artifact.get("steps", []):
+        if step.get("name") == name:
+            return step
+    raise KeyError(f"release artifact is missing required step: {name}")
+
+
 def build_change_group_snapshot(*, project_root: Path) -> dict:
-    porcelain = _git_capture(project_root=project_root, args=["status", "--porcelain"]).splitlines()
+    porcelain = _run_command(
+        command=["git", "-C", str(project_root), "status", "--porcelain"],
+        cwd=project_root,
+    ).stdout.splitlines()
     changed: list[str] = []
     for line in porcelain:
         if not line.strip():
@@ -107,10 +117,15 @@ def build_repo_local_status_snapshot(
     project_root: Path,
     release_artifact: dict,
     release_postgres_artifact: dict | None,
+    strict_release_artifact: dict | None,
+    benchmark_artifact: dict | None,
     contract_stack_summary: str,
     full_suite_summary: str,
     change_groups_path: Path,
 ) -> dict:
+    release_runtime = _step_by_name(release_artifact, "runtime_policy")
+    release_pytest = _step_by_name(release_artifact, "pytest_gate")
+    release_acceptance = _step_by_name(release_artifact, "acceptance_artifact")
     payload = {
         "artifact_type": "repo_local_status_snapshot",
         "repo": str(project_root),
@@ -123,9 +138,13 @@ def build_repo_local_status_snapshot(
             "contract_stack": contract_stack_summary,
             "release_check": {
                 "ok": release_artifact["ok"],
-                "pytest_gate": _last_nonempty_line(release_artifact["steps"][0]["stdout"]),
-                "acceptance_passed": release_artifact["steps"][1]["artifact_summary"]["passed"],
-                "acceptance_total": release_artifact["steps"][1]["artifact_summary"]["total"],
+                "gate_type": release_artifact["gate_type"],
+                "runtime_policy_ok": release_runtime["ok"],
+                "runtime_provider": release_runtime["provider"],
+                "runtime_profile": release_runtime["runtime_profile"],
+                "pytest_gate": _last_nonempty_line(release_pytest["stdout"]),
+                "acceptance_passed": release_acceptance["artifact_summary"]["passed"],
+                "acceptance_total": release_acceptance["artifact_summary"]["total"],
                 "artifact_path": release_artifact["artifact_path"],
             },
         },
@@ -134,13 +153,39 @@ def build_repo_local_status_snapshot(
         "change_groups_artifact": str(change_groups_path),
     }
     if release_postgres_artifact is not None:
+        release_postgres_runtime = _step_by_name(release_postgres_artifact, "runtime_policy")
+        release_postgres_pytest = _step_by_name(release_postgres_artifact, "pytest_gate")
+        release_postgres_acceptance = _step_by_name(release_postgres_artifact, "acceptance_artifact")
+        release_postgres_smoke = _step_by_name(release_postgres_artifact, "postgres_smoke")
         payload["validation"]["release_check_postgres"] = {
             "ok": release_postgres_artifact["ok"],
-            "pytest_gate": _last_nonempty_line(release_postgres_artifact["steps"][0]["stdout"]),
-            "acceptance_passed": release_postgres_artifact["steps"][1]["artifact_summary"]["passed"],
-            "acceptance_total": release_postgres_artifact["steps"][1]["artifact_summary"]["total"],
-            "postgres_smoke_ok": release_postgres_artifact["steps"][2]["ok"],
+            "gate_type": release_postgres_artifact["gate_type"],
+            "runtime_policy_ok": release_postgres_runtime["ok"],
+            "runtime_provider": release_postgres_runtime["provider"],
+            "runtime_profile": release_postgres_runtime["runtime_profile"],
+            "pytest_gate": _last_nonempty_line(release_postgres_pytest["stdout"]),
+            "acceptance_passed": release_postgres_acceptance["artifact_summary"]["passed"],
+            "acceptance_total": release_postgres_acceptance["artifact_summary"]["total"],
+            "postgres_smoke_ok": release_postgres_smoke["ok"],
             "artifact_path": release_postgres_artifact["artifact_path"],
+        }
+    if strict_release_artifact is not None:
+        strict_benchmark = _step_by_name(strict_release_artifact, "benchmark_artifact")
+        payload["validation"]["strict_release_check"] = {
+            "ok": strict_release_artifact["ok"],
+            "gate_type": strict_release_artifact["gate_type"],
+            "artifact_path": strict_release_artifact["artifact_path"],
+            "benchmark_ok": strict_benchmark["ok"],
+            "core_memory_accuracy": strict_benchmark["policy_checks"]["core_memory_accuracy"]["value"],
+            "adversarial_robustness": strict_benchmark["policy_checks"]["adversarial_robustness"]["value"],
+            "person_isolation": strict_benchmark["policy_checks"]["person_isolation"]["value"],
+        }
+    if benchmark_artifact is not None:
+        payload["validation"]["benchmark"] = {
+            "artifact_path": benchmark_artifact["artifact_path"],
+            "core_memory_accuracy": benchmark_artifact["benchmark_metrics"]["core_memory_accuracy"],
+            "adversarial_robustness": benchmark_artifact["benchmark_metrics"]["adversarial_robustness"],
+            "person_isolation": benchmark_artifact["benchmark_metrics"]["person_isolation"],
         }
     return payload
 
@@ -155,6 +200,8 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
     release_path.write_text(json.dumps(release_artifact, ensure_ascii=False, indent=2), encoding="utf-8")
 
     release_postgres_artifact = None
+    strict_release_artifact = None
+    benchmark_artifact = None
     if postgres_database_url:
         release_postgres_artifact = run_release_check(
             project_root=project_root,
@@ -167,6 +214,24 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
             json.dumps(release_postgres_artifact, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        strict_release_artifact = run_strict_release_check(
+            project_root=project_root,
+            postgres_database_url=postgres_database_url,
+        )
+        strict_release_path = reports_dir / "strict-release-check-current.json"
+        strict_release_artifact["artifact_path"] = str(strict_release_path)
+        strict_release_path.write_text(
+            json.dumps(strict_release_artifact, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        benchmark_step = _step_by_name(strict_release_artifact, "benchmark_artifact")
+        benchmark_artifact = dict(benchmark_step["artifact_summary"])
+        benchmark_path = reports_dir / "benchmark-current.json"
+        benchmark_artifact["artifact_path"] = str(benchmark_path)
+        benchmark_path.write_text(
+            json.dumps(benchmark_artifact, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     change_groups = build_change_group_snapshot(project_root=project_root)
     change_groups_path = reports_dir / "change-groups-current.json"
@@ -174,10 +239,15 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
 
     contract_stack_summary = _run_pytest_summary(project_root=project_root, files=CONTRACT_STATUS_TEST_FILES)
     full_suite_summary = _run_pytest_summary(project_root=project_root)
+    release_runtime = _step_by_name(release_artifact, "runtime_policy")
+    release_pytest = _step_by_name(release_artifact, "pytest_gate")
+    release_acceptance = _step_by_name(release_artifact, "acceptance_artifact")
     status_snapshot = build_repo_local_status_snapshot(
         project_root=project_root,
         release_artifact=release_artifact,
         release_postgres_artifact=release_postgres_artifact,
+        strict_release_artifact=strict_release_artifact,
+        benchmark_artifact=benchmark_artifact,
         contract_stack_summary=contract_stack_summary,
         full_suite_summary=full_suite_summary,
         change_groups_path=change_groups_path,
@@ -191,18 +261,31 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
         "artifacts": {
             "release_check": str(release_path),
             "release_check_postgres": str(reports_dir / "release-check-postgres-current.json") if postgres_database_url else None,
+            "strict_release_check": str(reports_dir / "strict-release-check-current.json") if postgres_database_url else None,
+            "benchmark": str(reports_dir / "benchmark-current.json") if postgres_database_url else None,
             "repo_local_status": str(status_path),
             "change_groups": str(change_groups_path),
         },
         "summaries": {
             "full_suite": full_suite_summary,
             "contract_stack": contract_stack_summary,
-            "release_check_pytest_gate": _last_nonempty_line(release_artifact["steps"][0]["stdout"]),
-            "release_check_acceptance": f"{release_artifact['steps'][1]['artifact_summary']['passed']}/{release_artifact['steps'][1]['artifact_summary']['total']}",
+            "release_check_gate_type": release_artifact["gate_type"],
+            "release_check_runtime_policy": f"{release_runtime['provider']}:{release_runtime['runtime_profile']}:{str(release_runtime['ok']).lower()}",
+            "release_check_pytest_gate": _last_nonempty_line(release_pytest["stdout"]),
+            "release_check_acceptance": f"{release_acceptance['artifact_summary']['passed']}/{release_acceptance['artifact_summary']['total']}",
+            "release_check_postgres_gate_type": (
+                release_postgres_artifact["gate_type"] if release_postgres_artifact is not None else None
+            ),
             "release_check_postgres_pytest_gate": (
-                _last_nonempty_line(release_postgres_artifact["steps"][0]["stdout"])
+                _last_nonempty_line(_step_by_name(release_postgres_artifact, "pytest_gate")["stdout"])
                 if release_postgres_artifact is not None
                 else None
+            ),
+            "strict_release_check_gate_type": (
+                strict_release_artifact["gate_type"] if strict_release_artifact is not None else None
+            ),
+            "benchmark_core_memory_accuracy": (
+                benchmark_artifact["benchmark_metrics"]["core_memory_accuracy"] if benchmark_artifact is not None else None
             ),
         },
     }

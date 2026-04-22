@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from memco.api.deps import get_settings
 from memco.db import get_connection
+from memco.llm import llm_runtime_policy
 
 router = APIRouter()
 
@@ -25,6 +26,7 @@ def health():
         "storage_contract": settings.storage_contract,
         "storage_role": settings.storage_role,
         "database_target": settings.database_target,
+        "llm_runtime": llm_runtime_policy(settings),
         "counts": {
             "workspaces": int(workspace_row["count"]),
             "sources": int(source_row["count"]),

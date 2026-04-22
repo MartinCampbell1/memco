@@ -119,6 +119,48 @@ class EvalService:
             expected_evidence_count_min=1,
         ),
         EvalCase(
+            "supported_residence_when_valid_from",
+            "temporal_update",
+            "When did Alice Eval start living in Lisbon?",
+            "alice-eval",
+            False,
+            expected_values=("since 2026-04-21t10:01:00z",),
+            domain="biography",
+            category="residence",
+            temporal_mode="when",
+            expected_support_level="supported",
+            expected_hit_count=1,
+            expected_evidence_count_min=1,
+        ),
+        EvalCase(
+            "supported_experience_when_observed_only",
+            "temporal_update",
+            "When did Temporal Observed Eval attend WebSummit?",
+            "temporal-observed-eval",
+            False,
+            expected_values=("exact event date is unknown", "recorded on 2026-04-21t10:11:00z"),
+            domain="experiences",
+            category="event",
+            temporal_mode="when",
+            expected_support_level="supported",
+            expected_hit_count=1,
+            expected_evidence_count_min=1,
+        ),
+        EvalCase(
+            "ambiguous_experience_when_conflicting_dates",
+            "temporal_update",
+            "When did Temporal Conflict Eval attend React Summit?",
+            "temporal-conflict-eval",
+            True,
+            expected_values=("conflicting memory evidence about the exact event date",),
+            domain="experiences",
+            category="event",
+            temporal_mode="when",
+            expected_support_level="ambiguous",
+            expected_hit_count=2,
+            expected_evidence_count_min=2,
+        ),
+        EvalCase(
             "supported_bob_preference_current",
             "supported_fact",
             "What does Bob Eval prefer?",
@@ -472,6 +514,7 @@ class EvalService:
         category: str,
         summary: str,
         observed_at: str,
+        valid_from: str = "",
         event_at: str = "",
         source_id: int,
         quote_text: str,
@@ -493,6 +536,7 @@ class EvalService:
                 summary=summary,
                 confidence=0.95,
                 observed_at=observed_at,
+                valid_from=valid_from,
                 event_at=event_at,
                 source_id=source_id,
                 quote_text=quote_text,
@@ -539,6 +583,7 @@ class EvalService:
 
     def seed_fixture_data(self, project_root: Path) -> None:
         settings = load_settings(project_root)
+        settings.runtime.profile = "fixture"
         settings.llm.provider = "mock"
         settings.llm.model = "fixture"
         settings.llm.allow_mock_provider = True
@@ -561,6 +606,18 @@ class EvalService:
             carol = self._person(conn, fact_repo=fact_repo, slug="carol-eval", display_name="Carol Eval")
             self._person(conn, fact_repo=fact_repo, slug="guest-user-eval", display_name="Guest User Eval")
             self._person(conn, fact_repo=fact_repo, slug="style-eval", display_name="Style Eval")
+            temporal_observed = self._person(
+                conn,
+                fact_repo=fact_repo,
+                slug="temporal-observed-eval",
+                display_name="Temporal Observed Eval",
+            )
+            temporal_conflict = self._person(
+                conn,
+                fact_repo=fact_repo,
+                slug="temporal-conflict-eval",
+                display_name="Temporal Conflict Eval",
+            )
 
             direct_main = self._record_source(
                 conn,
@@ -718,6 +775,88 @@ class EvalService:
             self._ensure_fact(
                 conn,
                 consolidation=consolidation,
+                canonical_key="bob-eval:experiences:event:websummit",
+                payload={"event": "WebSummit"},
+                person_id=int(bob["id"]),
+                domain="experiences",
+                category="event",
+                summary="Bob Eval attended WebSummit.",
+                observed_at="2026-04-21T10:11:00Z",
+                source_id=direct_main,
+                quote_text="Bob Eval attended WebSummit.",
+            )
+            self._ensure_fact(
+                conn,
+                consolidation=consolidation,
+                canonical_key="bob-eval:experiences:event:react-summit-2024",
+                payload={"event": "React Summit", "event_at": "2024"},
+                person_id=int(bob["id"]),
+                domain="experiences",
+                category="event",
+                summary="Bob Eval attended React Summit.",
+                observed_at="2026-04-21T10:12:00Z",
+                event_at="2024",
+                source_id=direct_main,
+                quote_text="Bob Eval attended React Summit in 2024.",
+            )
+            self._ensure_fact(
+                conn,
+                consolidation=consolidation,
+                canonical_key="bob-eval:experiences:event:react-summit-2025",
+                payload={"event": "React Summit", "event_at": "2025"},
+                person_id=int(bob["id"]),
+                domain="experiences",
+                category="event",
+                summary="Bob Eval attended React Summit.",
+                observed_at="2026-04-21T10:13:00Z",
+                event_at="2025",
+                source_id=direct_main,
+                quote_text="Bob Eval attended React Summit in 2025.",
+            )
+            self._ensure_fact(
+                conn,
+                consolidation=consolidation,
+                canonical_key="temporal-observed-eval:experiences:event:websummit",
+                payload={"event": "WebSummit"},
+                person_id=int(temporal_observed["id"]),
+                domain="experiences",
+                category="event",
+                summary="Temporal Observed Eval attended WebSummit.",
+                observed_at="2026-04-21T10:11:00Z",
+                source_id=direct_main,
+                quote_text="Temporal Observed Eval attended WebSummit.",
+            )
+            self._ensure_fact(
+                conn,
+                consolidation=consolidation,
+                canonical_key="temporal-conflict-eval:experiences:event:react-summit-2024",
+                payload={"event": "React Summit", "event_at": "2024"},
+                person_id=int(temporal_conflict["id"]),
+                domain="experiences",
+                category="event",
+                summary="Temporal Conflict Eval attended React Summit.",
+                observed_at="2026-04-21T10:12:00Z",
+                event_at="2024",
+                source_id=direct_main,
+                quote_text="Temporal Conflict Eval attended React Summit in 2024.",
+            )
+            self._ensure_fact(
+                conn,
+                consolidation=consolidation,
+                canonical_key="temporal-conflict-eval:experiences:event:react-summit-2025",
+                payload={"event": "React Summit", "event_at": "2025"},
+                person_id=int(temporal_conflict["id"]),
+                domain="experiences",
+                category="event",
+                summary="Temporal Conflict Eval attended React Summit.",
+                observed_at="2026-04-21T10:13:00Z",
+                event_at="2025",
+                source_id=direct_main,
+                quote_text="Temporal Conflict Eval attended React Summit in 2025.",
+            )
+            self._ensure_fact(
+                conn,
+                consolidation=consolidation,
                 canonical_key="style-eval:style:communication_style:humorous",
                 payload={"tone": "humorous", "generation_guidance": "Use light humor."},
                 person_id=int(fact_repo.resolve_person_id(conn, workspace_slug="default", person_slug="style-eval")),
@@ -735,6 +874,33 @@ class EvalService:
                 payload={
                     "framework": "big_five",
                     "trait": "openness",
+                    "extracted_signal": {
+                        "signal_kind": "explicit_self_description",
+                        "explicit_self_description": True,
+                        "signal_confidence": 0.72,
+                        "evidence_count": 1,
+                        "counterevidence_count": 1,
+                        "evidence_quotes": [
+                            {"quote": "I am very curious.", "message_ids": ["2"], "interpretation": "Possible signal for openness."}
+                        ],
+                        "counterevidence_quotes": [
+                            {
+                                "quote": "I am very curious.",
+                                "message_ids": ["2"],
+                                "interpretation": "No direct counterevidence found in this snippet; update conservatively for openness.",
+                            }
+                        ],
+                        "observed_at": "2026-04-21T10:09:00Z",
+                    },
+                    "scored_profile": {
+                        "score": 0.7,
+                        "score_scale": "0_1",
+                        "direction": "high",
+                        "confidence": 0.55,
+                        "framework_threshold": 0.7,
+                        "conservative_update": True,
+                        "use_in_generation": False,
+                    },
                     "score": 0.7,
                     "score_scale": "0_1",
                     "direction": "high",
@@ -751,7 +917,7 @@ class EvalService:
                     ],
                     "conservative_update": True,
                     "last_updated": "2026-04-21T10:09:00Z",
-                    "use_in_generation": True,
+                    "use_in_generation": False,
                     "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
                 },
                 person_id=int(fact_repo.resolve_person_id(conn, workspace_slug="default", person_slug="style-eval")),
@@ -1076,7 +1242,9 @@ class EvalService:
                         "latency_ms": latency_ms,
                         "pending_review_count": pending_review_count,
                         "answer": answer["answer"],
-                    }
+                        "answer_fact_ids": list(answer.get("fact_ids", [])),
+                        "answer_evidence_ids": list(answer.get("evidence_ids", [])),
+                        }
                 )
 
             results.sort(key=lambda item: (item["group"], item["name"]))
@@ -1210,6 +1378,16 @@ class EvalService:
         benchmark_sets = self._benchmark_set_reports(results=results)
         after = self.llm_usage_tracker.summary()
         token_accounting_by_stage = self._token_accounting_by_stage(before=before, after=after)
+        unsupported_premise_supported_count = sum(
+            1
+            for item in results
+            if item["group"] == "unsupported_premise" and item["support_level"] == "supported"
+        )
+        positive_answers_missing_evidence_ids = sum(
+            1
+            for item in results
+            if not item["refused"] and len(item.get("answer_evidence_ids", [])) == 0
+        )
         return {
             "artifact_type": "eval_benchmark_artifact",
             "release_scope": "benchmark-only",
@@ -1218,12 +1396,22 @@ class EvalService:
             "benchmark_metrics": {
                 "core_memory_accuracy": benchmark_sets["internal_golden_set"]["pass_rate"],
                 "adversarial_robustness": benchmark_sets["adversarial_false_premise_set"]["pass_rate"],
+                "person_isolation": benchmark_sets["cross_person_contamination_set"]["pass_rate"],
                 "refusal_correctness": metrics["refusal_correctness"],
                 "evidence_coverage": metrics["evidence_coverage"],
                 "temporal_precision": benchmark_sets["temporal_set"]["pass_rate"],
+                "unsupported_premise_supported_count": unsupported_premise_supported_count,
+                "positive_answers_missing_evidence_ids": positive_answers_missing_evidence_ids,
                 "retrieval_latency_ms": metrics["retrieval_latency_ms"],
                 "token_accounting_by_stage": token_accounting_by_stage,
                 "extra_prompt_tokens": token_accounting_by_stage["extraction"]["input_tokens"],
+            },
+            "benchmark_thresholds": {
+                "core_memory_accuracy_min": 0.9,
+                "adversarial_robustness_min": 0.95,
+                "person_isolation_min": 0.99,
+                "unsupported_premise_supported_count_max": 0,
+                "positive_answers_missing_evidence_ids_max": 0,
             },
             "benchmark_cases": results,
             "benchmark_sets": benchmark_sets,

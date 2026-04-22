@@ -9,8 +9,16 @@ from memco.utils import slugify
 RESIDENCE_PATTERNS = (
     re.compile(r"\bi\s+(?:currently\s+)?live\s+in\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
     re.compile(r"\bi\s+moved\s+to\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
+    re.compile(r"\bi(?:'m| am)\s+based\s+in\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
+    re.compile(r"\b(?P<value>[A-Z][^.!?\n]+?)\s+is\s+my\s+base(?:\s+these\s+days)?", re.IGNORECASE),
     re.compile(r"\bя\s+(?:сейчас\s+)?жив[ыу]\s+в\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
     re.compile(r"\bя\s+переехал(?:а|и)?\s+в\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
+)
+
+UNCERTAIN_RESIDENCE_PATTERNS = (
+    re.compile(r"\bi\s+(?:might|may|could)\s+move\s+to\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
+    re.compile(r"\bi(?:'m| am)\s+(?:thinking about|considering)\s+moving\s+to\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
+    re.compile(r"\bя\s+(?:возможно|может\s+быть)\s+переед[уе]\s+в\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
 )
 
 ORIGIN_PATTERNS = (
@@ -64,10 +72,13 @@ CONSTRAINT_PATTERNS = (
 def extract(context: ExtractionContext) -> list[dict]:
     candidates: list[dict] = []
     evidence = build_evidence(context)
+    residence_is_uncertain = any(pattern.search(context.text) for pattern in UNCERTAIN_RESIDENCE_PATTERNS)
     for pattern in RESIDENCE_PATTERNS:
         match = pattern.search(context.text)
         if not match:
             continue
+        if residence_is_uncertain:
+            break
         city = clean_value(match.group("value"))
         if not city:
             continue

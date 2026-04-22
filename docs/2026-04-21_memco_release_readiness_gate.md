@@ -128,7 +128,7 @@ Most recent recorded evidence:
   - the workflow eval-only gate step passed after sync via `run_release_check(include_pytest=False, include_eval=True)`
 - active local release-check entrypoint:
   - `uv run memco release-check`
-  - passed locally against the active repo-local gate
+  - passed locally against the quick repo-local gate
   - latest local artifact:
     - `pytest_gate`: `47 passed`
     - `acceptance_artifact`: `24/24 passed`
@@ -136,18 +136,24 @@ Most recent recorded evidence:
       - `var/reports/release-check-current.json`
   - implementation note:
     - the temporary acceptance root intentionally uses SQLite fallback when no local runtime config exists there
-    - optional Postgres verification remains a separate smoke step inside `--postgres-database-url ...`
+    - `--postgres-database-url ...` upgrades the command into the canonical Postgres gate rather than adding a cosmetic smoke-only suffix
   - repo-root resolution:
     - defaults to the nearest Memco checkout above the current working directory
     - can be overridden with `--project-root /absolute/path/to/memco`
   - artifact persistence:
     - `uv run memco release-check --output /absolute/path/to/release-check.json`
     - passed locally and wrote the combined gate artifact to disk
-  - optional no-Docker Postgres variant:
+  - canonical no-Docker Postgres variant:
     - `uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
-    - passed locally and produced a single artifact with `pytest_gate`, `acceptance_artifact`, and `postgres_smoke`
+    - passed locally and produced a single artifact with `pytest_gate`, `acceptance_artifact` on Postgres, and `postgres_smoke`
     - latest saved artifact:
       - `var/reports/release-check-postgres-current.json`
+  - strict benchmark-backed quality variant:
+    - `uv run memco strict-release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
+    - this is the gate to use for the full quality claim once benchmark thresholds matter
+    - latest saved artifacts:
+      - `var/reports/strict-release-check-current.json`
+      - `var/reports/benchmark-current.json`
   - local artifact refresh:
     - `uv run memco local-artifacts-refresh --project-root /Users/martin/memco`
     - latest saved artifacts:

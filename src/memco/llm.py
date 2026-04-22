@@ -228,6 +228,29 @@ class OpenAICompatibleLLMProvider:
         )
 
 
+def llm_runtime_policy(settings) -> dict[str, Any]:
+    provider = settings.llm.provider.strip().lower()
+    runtime_profile = getattr(settings, "runtime_profile", "repo-local")
+    provider_is_mock = provider == "mock"
+    fixture_only = provider_is_mock
+    release_eligible = runtime_profile == "repo-local" and not fixture_only
+    if provider_is_mock and runtime_profile == "fixture":
+        reason = "mock provider enabled for explicit fixture/test runtime"
+    elif provider_is_mock:
+        reason = "mock provider is fixture-only and does not satisfy the live runtime contract"
+    else:
+        reason = "provider is eligible for live runtime extraction"
+    return {
+        "provider": provider,
+        "model": settings.llm.model,
+        "runtime_profile": runtime_profile,
+        "allow_mock_provider": bool(getattr(settings.llm, "allow_mock_provider", False)),
+        "fixture_only": fixture_only,
+        "release_eligible": release_eligible,
+        "reason": reason,
+    }
+
+
 def build_llm_provider(
     settings,
     *,

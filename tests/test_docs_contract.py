@@ -24,6 +24,9 @@ def test_readme_uses_current_contract_language():
     assert "--output /absolute/path/to/release-check.json" in readme
     assert "var/reports/release-check-current.json" in readme
     assert "var/reports/release-check-postgres-current.json" in readme
+    assert "uv run memco strict-release-check" in readme
+    assert "var/reports/strict-release-check-current.json" in readme
+    assert "var/reports/benchmark-current.json" in readme
     assert "var/reports/repo-local-status-current.json" in readme
     assert "var/reports/change-groups-current.json" in readme
     assert "var/reports/local-artifacts-refresh-current.json" in readme
@@ -76,6 +79,9 @@ def test_release_gate_is_active_repo_local_gate_with_reference_pointer():
     assert "memco release-check" in gate
     assert "var/reports/release-check-current.json" in gate
     assert "var/reports/release-check-postgres-current.json" in gate
+    assert "uv run memco strict-release-check" in gate
+    assert "var/reports/strict-release-check-current.json" in gate
+    assert "var/reports/benchmark-current.json" in gate
     assert "Quick contract-facing regression stack:" in gate
     assert "tests/test_release_check.py" in gate
     assert "tests/test_llm_provider.py" in gate
@@ -107,6 +113,9 @@ def test_postgres_without_docker_guide_mentions_integrated_release_check():
 
     assert "release-check --project-root /Users/martin/memco --postgres-database-url" in guide
     assert "var/reports/release-check-postgres-current.json" in guide
+    assert "strict-release-check --project-root /Users/martin/memco --postgres-database-url" in guide
+    assert "var/reports/strict-release-check-current.json" in guide
+    assert "var/reports/benchmark-current.json" in guide
 
 
 def test_local_operator_artifacts_are_gitignored_but_tracked_status_snapshot_is_not():

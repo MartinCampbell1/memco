@@ -78,6 +78,10 @@ class LoggingSettings(BaseModel):
     query_hash_salt: str = ""
 
 
+class RuntimeSettings(BaseModel):
+    profile: Literal["repo-local", "fixture"] = "repo-local"
+
+
 class Settings(BaseModel):
     root: Path
     default_workspace: str = "default"
@@ -87,6 +91,7 @@ class Settings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
 
     @property
     def db_path(self) -> Path:
@@ -110,6 +115,14 @@ class Settings(BaseModel):
     def config_path(self) -> Path:
         return self.root / "var" / "config" / "settings.yaml"
 
+    @property
+    def runtime_profile(self) -> str:
+        return self.runtime.profile
+
+    @property
+    def is_fixture_runtime(self) -> bool:
+        return self.runtime.profile == "fixture"
+
 
 def discover_root(root: str | Path | None = None) -> Path:
     if root is not None:
@@ -129,6 +142,7 @@ def _settings_payload(settings: Settings) -> dict:
         "storage": settings.storage.model_dump(),
         "ingest": settings.ingest.model_dump(),
         "logging": settings.logging.model_dump(),
+        "runtime": settings.runtime.model_dump(),
     }
 
 
@@ -154,6 +168,7 @@ def load_settings(root: str | Path | None = None) -> Settings:
     env_database_url = os.environ.get("MEMCO_DATABASE_URL")
     env_enable_retrieval_logs = os.environ.get("MEMCO_ENABLE_RETRIEVAL_LOGS")
     env_query_hash_salt = os.environ.get("MEMCO_QUERY_HASH_SALT")
+    env_runtime_profile = os.environ.get("MEMCO_RUNTIME_PROFILE")
 
     if env_timezone:
         raw_data["timezone"] = env_timezone
@@ -196,13 +211,12 @@ def load_settings(root: str | Path | None = None) -> Settings:
     if env_query_hash_salt is not None:
         logging = raw_data.setdefault("logging", {})
         logging["query_hash_salt"] = env_query_hash_salt
+    if env_runtime_profile:
+        runtime = raw_data.setdefault("runtime", {})
+        runtime["profile"] = env_runtime_profile
 
     raw_data["root"] = resolved_root
     settings = Settings.model_validate(raw_data)
-    llm_raw = raw_data.get("llm", {}) or {}
-    explicit_mock_provider = str(llm_raw.get("provider", "")).strip().lower() == "mock"
-    if explicit_mock_provider and "allow_mock_provider" not in llm_raw:
-        settings.llm.allow_mock_provider = True
     if not settings.logging.query_hash_salt:
         settings.logging.query_hash_salt = secrets.token_hex(16)
     return settings

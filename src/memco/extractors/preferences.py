@@ -9,7 +9,10 @@ from memco.utils import slugify
 PREFERENCE_PATTERNS = (
     ("prefer", re.compile(r"\bi\s+prefer\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
     ("like", re.compile(r"\bi\s+like\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
+    ("dislike", re.compile(r"\bi\s+do\s+not\s+like\s+(?P<value>[^.!?\n]+?)(?:\s+because\s+(?P<reason>[^.!?\n]+))?[.!?\n]*$", re.IGNORECASE)),
+    ("dislike", re.compile(r"\bi\s+don't\s+like\s+(?P<value>[^.!?\n]+?)(?:\s+because\s+(?P<reason>[^.!?\n]+))?[.!?\n]*$", re.IGNORECASE)),
     ("dislike", re.compile(r"\bi\s+(?P<strongly>strongly\s+)?dislike\s+(?P<value>[^.!?\n]+?)(?:\s+because\s+(?P<reason>[^.!?\n]+))?[.!?\n]*$", re.IGNORECASE)),
+    ("like", re.compile(r"\b(?P<value>[A-Za-z][^.!?\n]+?)\s+is\s+my\s+go-to\s+(?:drink|snack|meal|food|tool)\b", re.IGNORECASE)),
     ("past_like", re.compile(r"\bi\s+used\s+to\s+like\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
     ("past_prefer", re.compile(r"\bi\s+used\s+to\s+prefer\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
     ("past_dislike", re.compile(r"\bi\s+used\s+to\s+dislike\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),

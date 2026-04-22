@@ -96,6 +96,9 @@ def test_health_reports_postgres_target(monkeypatch, tmp_path):
     assert payload["storage_role"] == "primary"
     assert payload["db"] == "postgresql://memco:memco@db:5432/memco"
     assert payload["database_target"] == "postgresql://memco:memco@db:5432/memco"
+    assert payload["llm_runtime"]["provider"] == "openai-compatible"
+    assert payload["llm_runtime"]["runtime_profile"] == "repo-local"
+    assert payload["llm_runtime"]["release_eligible"] is True
 
 
 def test_sqlite_and_postgres_base_schema_cover_same_core_relations():

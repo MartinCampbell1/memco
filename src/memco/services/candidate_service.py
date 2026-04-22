@@ -12,9 +12,14 @@ class CandidateService:
         candidate_repository: CandidateRepository | None = None,
         review_repository: ReviewRepository | None = None,
     ) -> None:
-        self.extraction_service = extraction_service or ExtractionService()
+        self.extraction_service = extraction_service
         self.candidate_repository = candidate_repository or CandidateRepository()
         self.review_repository = review_repository or ReviewRepository()
+
+    def _require_extraction_service(self) -> ExtractionService:
+        if self.extraction_service is None:
+            raise ValueError("CandidateService requires an explicit ExtractionService for extraction operations.")
+        return self.extraction_service
 
     def extract_from_conversation(
         self,
@@ -25,7 +30,7 @@ class CandidateService:
         include_style: bool = False,
         include_psychometrics: bool = False,
     ) -> list[dict]:
-        extracted = self.extraction_service.extract_candidates_from_conversation(
+        extracted = self._require_extraction_service().extract_candidates_from_conversation(
             conn,
             conversation_id=conversation_id,
             include_style=include_style,

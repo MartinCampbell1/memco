@@ -13,7 +13,7 @@ from memco.extractors.base import (
     subject_key,
     validate_candidate,
 )
-from memco.llm import LLMProvider, MockLLMProvider, build_llm_provider
+from memco.llm import LLMProvider, build_llm_provider
 from memco.llm_usage import LLMUsageEvent, LLMUsageFileLogger, LLMUsageTracker
 
 
@@ -25,6 +25,8 @@ class ExtractionService:
         llm_provider: LLMProvider | None = None,
         usage_tracker: LLMUsageTracker | None = None,
     ) -> None:
+        if settings is None and llm_provider is None:
+            raise ValueError("ExtractionService requires explicit settings or llm_provider; implicit mock fallback is fixture-only.")
         self._settings = settings
         self.orchestrator = ExtractionOrchestrator()
         self.usage_tracker = usage_tracker or LLMUsageTracker()
@@ -41,10 +43,7 @@ class ExtractionService:
 
     def _build_provider(self) -> LLMProvider:
         if self._settings is None:
-            return MockLLMProvider(
-                json_handler=self._mock_complete_json,
-                text_handler=self._mock_complete_text,
-            )
+            raise ValueError("ExtractionService requires settings to build a runtime provider.")
         settings = self._settings
         return build_llm_provider(
             settings,

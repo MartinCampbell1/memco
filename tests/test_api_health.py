@@ -23,3 +23,7 @@ def test_health_returns_runtime_snapshot(monkeypatch, settings):
     assert payload["storage_contract"] == "postgres-primary"
     assert payload["storage_role"] == "fallback"
     assert Path(payload["database_target"]) == settings.db_path
+    assert payload["llm_runtime"]["provider"] == "mock"
+    assert payload["llm_runtime"]["runtime_profile"] == "fixture"
+    assert payload["llm_runtime"]["fixture_only"] is True
+    assert payload["llm_runtime"]["release_eligible"] is False

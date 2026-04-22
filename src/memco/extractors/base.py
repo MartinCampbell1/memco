@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -7,6 +8,206 @@ from memco.utils import slugify
 
 
 EXTRACTION_SCHEMA_NAME = "memory_fact_candidates"
+EXTRACTION_CONTRACT_VERSION = "v2_llm_first"
+
+
+@dataclass(frozen=True)
+class DomainPromptContract:
+    domain: str
+    instructions: tuple[str, ...]
+    categories: dict[str, tuple[str, ...]]
+    ambiguity_rules: tuple[str, ...]
+    evidence_rules: tuple[str, ...]
+    temporal_rules: tuple[str, ...]
+    negation_rules: tuple[str, ...]
+
+
+DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
+    "biography": DomainPromptContract(
+        domain="biography",
+        instructions=(
+            "Extract stable biographical facts only when the subject describes them directly or with a strong paraphrase.",
+            "Use needs_review=true when the speaker is unresolved or the statement is materially ambiguous.",
+        ),
+        categories={
+            "residence": ("city",),
+            "origin": ("place",),
+            "identity": ("name",),
+            "education": ("institution", "field"),
+            "family": ("relation", "name"),
+            "pets": ("pet_type", "pet_name"),
+            "languages": ("languages",),
+            "habits": ("habit",),
+            "goals": ("goal",),
+            "constraints": ("constraint",),
+        },
+        ambiguity_rules=(
+            "Do not turn tentative relocation plans into current residence facts.",
+            "Indirect phrasing like 'Lisbon is my base' is allowed only when it clearly describes the current state.",
+        ),
+        evidence_rules=(
+            "Every item must carry direct quote evidence from the source snippet.",
+        ),
+        temporal_rules=(
+            "Prefer current-state biography facts unless the snippet explicitly marks them as past.",
+            "When timing is uncertain, keep the fact out instead of inventing a current state.",
+        ),
+        negation_rules=(
+            "Negated constraints can be extracted only as constraints, never as positive preferences or residences.",
+        ),
+    ),
+    "preferences": DomainPromptContract(
+        domain="preferences",
+        instructions=(
+            "Extract likes, dislikes, and preferences with polarity and current-vs-past handling.",
+            "Indirect preference phrasing is allowed when the favorite/go-to choice is explicit.",
+        ),
+        categories={"preference": ("value", "polarity", "strength", "reason", "is_current")},
+        ambiguity_rules=(
+            "Keep hypothetical or uncertain tastes out of the result set.",
+            "Self-corrections should prefer the current statement over the superseded one.",
+        ),
+        evidence_rules=(
+            "Quote the exact preference statement or the closest supporting clause.",
+        ),
+        temporal_rules=(
+            "Use is_current=false for 'used to' preferences or clearly past tastes.",
+        ),
+        negation_rules=(
+            "A negated statement like 'I do not like sushi' must never become a positive preference.",
+        ),
+    ),
+    "social_circle": DomainPromptContract(
+        domain="social_circle",
+        instructions=(
+            "Extract social relations and relationship events only when the subject names the relation or event.",
+            "If the target person cannot be resolved, keep the candidate but mark it needs_review.",
+        ),
+        categories={
+            "relationship_event": ("target_label", "target_person_id", "event", "context"),
+            "friend": ("relation", "target_label", "target_person_id", "is_current"),
+            "brother": ("relation", "target_label", "target_person_id", "is_current"),
+            "sister": ("relation", "target_label", "target_person_id", "is_current"),
+            "wife": ("relation", "target_label", "target_person_id", "is_current"),
+            "husband": ("relation", "target_label", "target_person_id", "is_current"),
+            "partner": ("relation", "target_label", "target_person_id", "is_current"),
+            "mother": ("relation", "target_label", "target_person_id", "is_current"),
+            "father": ("relation", "target_label", "target_person_id", "is_current"),
+            "son": ("relation", "target_label", "target_person_id", "is_current"),
+            "daughter": ("relation", "target_label", "target_person_id", "is_current"),
+            "colleague": ("relation", "target_label", "target_person_id", "is_current"),
+            "boss": ("relation", "target_label", "target_person_id", "is_current"),
+            "manager": ("relation", "target_label", "target_person_id", "is_current"),
+            "roommate": ("relation", "target_label", "target_person_id", "is_current"),
+            "neighbor": ("relation", "target_label", "target_person_id", "is_current"),
+        },
+        ambiguity_rules=(
+            "Do not infer a relationship from weak co-occurrence or event-only evidence.",
+        ),
+        evidence_rules=(
+            "Relation claims need quote evidence naming both the target and relation/event.",
+        ),
+        temporal_rules=(
+            "Use is_current=false only when the snippet explicitly marks the relation as past.",
+        ),
+        negation_rules=(
+            "Do not invert negated relation claims into positive relations.",
+        ),
+    ),
+    "work": DomainPromptContract(
+        domain="work",
+        instructions=(
+            "Extract employment, org, role, project, tool, and skill facts from direct or strong indirect phrasing.",
+            "Current-vs-past work state must be preserved.",
+        ),
+        categories={
+            "employment": ("title", "is_current"),
+            "role": ("role", "is_current"),
+            "org": ("org", "is_current"),
+            "project": ("project",),
+            "skill": ("skill",),
+            "tool": ("tool",),
+        },
+        ambiguity_rules=(
+            "Do not turn plans, interviews, or aspirations into current employment.",
+        ),
+        evidence_rules=(
+            "Work items must quote the relevant clause that names the role, org, tool, skill, or project.",
+        ),
+        temporal_rules=(
+            "Use is_current=false for past employment or org history when the snippet says 'used to' or equivalent.",
+        ),
+        negation_rules=(
+            "Negated capability statements should not become positive skills or tools.",
+        ),
+    ),
+    "experiences": DomainPromptContract(
+        domain="experiences",
+        instructions=(
+            "Extract lived events with summary, participants, outcome, and temporal cues when stated.",
+            "Use event_at only for explicit event dates; use temporal_anchor for approximate or relative timing.",
+        ),
+        categories={"event": ("event", "summary", "participants", "event_at", "temporal_anchor", "outcome", "valence")},
+        ambiguity_rules=(
+            "Keep approximate timing separate from exact event dates.",
+        ),
+        evidence_rules=(
+            "Experience items must include quote evidence for the event description.",
+        ),
+        temporal_rules=(
+            "Do not promote observed narration time into event_at.",
+            "If timing is approximate, leave event_at empty and store the phrase in temporal_anchor.",
+        ),
+        negation_rules=(
+            "Do not extract events that are explicitly denied or described as not having happened.",
+        ),
+    ),
+    "psychometrics": DomainPromptContract(
+        domain="psychometrics",
+        instructions=(
+            "Extract conservative psychometric signals only as non-diagnostic hints.",
+            "Psychometrics must remain separate from factual truth and require evidence plus counterevidence handling.",
+        ),
+        categories={
+            "trait": (
+                "framework",
+                "trait",
+                "score",
+                "score_scale",
+                "direction",
+                "confidence",
+                "evidence_quotes",
+                "counterevidence_quotes",
+                "conservative_update",
+                "use_in_generation",
+                "safety_notes",
+            ),
+        },
+        ambiguity_rules=(
+            "Weak or conflicting signals should stay conservative and may set use_in_generation=false.",
+        ),
+        evidence_rules=(
+            "Every psychometric hint needs evidence_quotes and may include counterevidence_quotes.",
+        ),
+        temporal_rules=(
+            "Psychometric last_updated can reflect when the signal was observed, not when a trait became true.",
+        ),
+        negation_rules=(
+            "Do not infer a high-trait signal from explicit negation of that trait.",
+        ),
+    ),
+    "style": DomainPromptContract(
+        domain="style",
+        instructions=(
+            "Extract communication style only when explicitly requested via include_style=true.",
+        ),
+        categories={"communication_style": ("tone", "generation_guidance")},
+        ambiguity_rules=("Leave style out when the tone is unclear.",),
+        evidence_rules=("Style must still quote the supporting snippet.",),
+        temporal_rules=("Treat style as an observed communication hint, not a permanent trait.",),
+        negation_rules=("Do not infer a tone from explicit denial of that tone.",),
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -26,12 +227,73 @@ class ExtractionContext:
 
 
 def build_extraction_system_prompt(*, include_style: bool, include_psychometrics: bool) -> str:
-    return (
-        "Extract persona-memory candidates as strict JSON. "
-        "Return a JSON array. "
-        f"include_style={str(include_style).lower()} "
-        f"include_psychometrics={str(include_psychometrics).lower()}."
+    contract_payload = build_extraction_contract(
+        include_style=include_style,
+        include_psychometrics=include_psychometrics,
     )
+    return (
+        "You are the Memco extraction runtime. "
+        "The live runtime path is LLM-first structured extraction. "
+        "Rule-based extraction is fallback-only for fixture/test or emergency use. "
+        "Return strict JSON only. "
+        "Use the contract below exactly. "
+        "Never return prose outside JSON. "
+        f"include_style={str(include_style).lower()} "
+        f"include_psychometrics={str(include_psychometrics).lower()}.\n"
+        f"{json.dumps(contract_payload, ensure_ascii=False, sort_keys=True)}"
+    )
+
+
+def _selected_domain_contracts(*, include_style: bool, include_psychometrics: bool) -> list[DomainPromptContract]:
+    selected = [
+        DOMAIN_PROMPT_CONTRACTS["biography"],
+        DOMAIN_PROMPT_CONTRACTS["preferences"],
+        DOMAIN_PROMPT_CONTRACTS["social_circle"],
+        DOMAIN_PROMPT_CONTRACTS["work"],
+        DOMAIN_PROMPT_CONTRACTS["experiences"],
+    ]
+    if include_psychometrics:
+        selected.append(DOMAIN_PROMPT_CONTRACTS["psychometrics"])
+    if include_style:
+        selected.append(DOMAIN_PROMPT_CONTRACTS["style"])
+    return selected
+
+
+def build_extraction_contract(*, include_style: bool, include_psychometrics: bool) -> dict[str, Any]:
+    domains = []
+    for contract in _selected_domain_contracts(
+        include_style=include_style,
+        include_psychometrics=include_psychometrics,
+    ):
+        domains.append(
+            {
+                "domain": contract.domain,
+                "instructions": list(contract.instructions),
+                "categories": {key: list(value) for key, value in contract.categories.items()},
+                "ambiguity_rules": list(contract.ambiguity_rules),
+                "evidence_rules": list(contract.evidence_rules),
+                "temporal_rules": list(contract.temporal_rules),
+                "negation_rules": list(contract.negation_rules),
+            }
+        )
+    return {
+        "contract_version": EXTRACTION_CONTRACT_VERSION,
+        "mode": "llm_first_structured_extraction",
+        "fallback_mode": "rule_based_fixture_only",
+        "top_level_output": {
+            "type": "object",
+            "required_keys": ["items"],
+            "items_value_type": "array",
+        },
+        "candidate_required_keys": sorted(REQUIRED_CANDIDATE_KEYS),
+        "global_rules": [
+            "Only extract facts grounded in the supplied snippet.",
+            "Never convert negation, uncertainty, or hypotheticals into current positive facts.",
+            "Every candidate must carry direct quote evidence.",
+            "When ambiguity is material but still worth surfacing, set needs_review=true and explain in reason.",
+        ],
+        "domains": domains,
+    }
 
 
 def build_prompt_payload(
@@ -41,6 +303,8 @@ def build_prompt_payload(
     include_psychometrics: bool,
 ) -> dict[str, Any]:
     return {
+        "contract_version": EXTRACTION_CONTRACT_VERSION,
+        "extraction_mode": "llm_first_structured_extraction",
         "text": context.text,
         "subject_key": context.subject_key,
         "subject_display": context.subject_display,
@@ -52,6 +316,10 @@ def build_prompt_payload(
         "occurred_at": context.occurred_at,
         "include_style": include_style,
         "include_psychometrics": include_psychometrics,
+        "output_contract": build_extraction_contract(
+            include_style=include_style,
+            include_psychometrics=include_psychometrics,
+        ),
     }
 
 
@@ -229,20 +497,74 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
     if domain == "psychometrics":
         _require_string(payload, "framework")
         _require_string(payload, "trait")
+        extracted_signal = payload.get("extracted_signal")
+        if not isinstance(extracted_signal, dict):
+            raise ValueError("payload.extracted_signal must be a dict")
+        scored_profile = payload.get("scored_profile")
+        if not isinstance(scored_profile, dict):
+            raise ValueError("payload.scored_profile must be a dict")
         if not isinstance(payload.get("score"), (int, float)):
             raise ValueError("payload.score must be numeric")
         _require_string(payload, "score_scale")
         _require_string(payload, "direction")
         if not isinstance(payload.get("confidence"), (int, float)):
             raise ValueError("payload.confidence must be numeric")
+        _require_string(extracted_signal, "signal_kind")
+        if not isinstance(extracted_signal.get("explicit_self_description"), bool):
+            raise ValueError("payload.extracted_signal.explicit_self_description must be a bool")
+        if not isinstance(extracted_signal.get("signal_confidence"), (int, float)):
+            raise ValueError("payload.extracted_signal.signal_confidence must be numeric")
+        if not isinstance(extracted_signal.get("evidence_count"), int):
+            raise ValueError("payload.extracted_signal.evidence_count must be an int")
+        if not isinstance(extracted_signal.get("counterevidence_count"), int):
+            raise ValueError("payload.extracted_signal.counterevidence_count must be an int")
+        if "observed_at" in extracted_signal and not isinstance(extracted_signal.get("observed_at", ""), str):
+            raise ValueError("payload.extracted_signal.observed_at must be a string")
         evidence_quotes = payload.get("evidence_quotes")
         if not isinstance(evidence_quotes, list) or not evidence_quotes:
             raise ValueError("payload.evidence_quotes must be a non-empty list")
         counterevidence_quotes = payload.get("counterevidence_quotes")
         if not isinstance(counterevidence_quotes, list):
             raise ValueError("payload.counterevidence_quotes must be a list")
+        if extracted_signal.get("evidence_count") != len(evidence_quotes):
+            raise ValueError("payload.extracted_signal.evidence_count must match payload.evidence_quotes")
+        if extracted_signal.get("counterevidence_count") != len(counterevidence_quotes):
+            raise ValueError("payload.extracted_signal.counterevidence_count must match payload.counterevidence_quotes")
+        if extracted_signal.get("evidence_quotes") != evidence_quotes:
+            raise ValueError("payload.extracted_signal.evidence_quotes must match payload.evidence_quotes")
+        if extracted_signal.get("counterevidence_quotes") != counterevidence_quotes:
+            raise ValueError("payload.extracted_signal.counterevidence_quotes must match payload.counterevidence_quotes")
+        if not isinstance(scored_profile.get("score"), (int, float)):
+            raise ValueError("payload.scored_profile.score must be numeric")
+        _require_string(scored_profile, "score_scale")
+        _require_string(scored_profile, "direction")
+        if not isinstance(scored_profile.get("confidence"), (int, float)):
+            raise ValueError("payload.scored_profile.confidence must be numeric")
+        if not isinstance(scored_profile.get("framework_threshold"), (int, float)):
+            raise ValueError("payload.scored_profile.framework_threshold must be numeric")
+        if payload.get("score") != scored_profile.get("score"):
+            raise ValueError("payload.score must match payload.scored_profile.score")
+        if payload.get("score_scale") != scored_profile.get("score_scale"):
+            raise ValueError("payload.score_scale must match payload.scored_profile.score_scale")
+        if payload.get("direction") != scored_profile.get("direction"):
+            raise ValueError("payload.direction must match payload.scored_profile.direction")
+        if payload.get("confidence") != scored_profile.get("confidence"):
+            raise ValueError("payload.confidence must match payload.scored_profile.confidence")
         _require_bool(payload, "conservative_update")
         _require_bool(payload, "use_in_generation")
+        if payload.get("conservative_update") != scored_profile.get("conservative_update"):
+            raise ValueError("payload.conservative_update must match payload.scored_profile.conservative_update")
+        if payload.get("use_in_generation") != scored_profile.get("use_in_generation"):
+            raise ValueError("payload.use_in_generation must match payload.scored_profile.use_in_generation")
+        allowed_generation = (
+            (extracted_signal.get("evidence_count", 0) >= 2 or extracted_signal.get("explicit_self_description"))
+            and extracted_signal.get("counterevidence_count", 0) == 0
+            and float(scored_profile.get("confidence", 0.0)) >= float(scored_profile.get("framework_threshold", 0.0))
+        )
+        if payload.get("use_in_generation") and not allowed_generation:
+            raise ValueError("payload.use_in_generation violates conservative psychometric generation policy")
+        if payload.get("conservative_update") is not True:
+            raise ValueError("payload.conservative_update must stay true for psychometrics")
         _require_string(payload, "safety_notes")
         return payload
 
@@ -262,6 +584,20 @@ def validate_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     evidence = candidate.get("evidence")
     if not isinstance(evidence, list):
         raise ValueError("candidate evidence must be a list")
+    if not evidence:
+        raise ValueError("candidate evidence must be non-empty")
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError("candidate evidence items must be objects")
+        quote = item.get("quote")
+        if not isinstance(quote, str) or not quote.strip():
+            raise ValueError("candidate evidence quote must be a non-empty string")
+        chunk_kind = item.get("chunk_kind")
+        if not isinstance(chunk_kind, str) or not chunk_kind.strip():
+            raise ValueError("candidate evidence chunk_kind must be a non-empty string")
+        for list_key in ("message_ids", "source_segment_ids", "session_ids"):
+            if list_key in item and not isinstance(item.get(list_key), list):
+                raise ValueError(f"candidate evidence {list_key} must be a list")
     validate_candidate_payload(
         domain=str(candidate["domain"]),
         category=str(candidate["category"]),

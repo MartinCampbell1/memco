@@ -132,5 +132,9 @@ Validated in this session:
   - `MEMCO_DATABASE_URL='postgresql://martin@127.0.0.1:5432/postgres' uv run memco postgres-bootstrap memco_persistent_test --root /tmp/memco-postgres-persistent`
 - optional live test also passed on this machine:
   - `uv run pytest -q tests/test_postgres_live_smoke.py`
-- integrated repo-local release gate + Postgres smoke also passed and can be persisted with:
+- canonical Postgres release gate also passed and can be persisted with:
   - `uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres' --output /Users/martin/memco/var/reports/release-check-postgres-current.json`
+- strict benchmark-backed quality gate can also be persisted with:
+  - `uv run memco strict-release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres' --output /Users/martin/memco/var/reports/strict-release-check-current.json`
+  - benchmark artifact:
+    - `/Users/martin/memco/var/reports/benchmark-current.json`

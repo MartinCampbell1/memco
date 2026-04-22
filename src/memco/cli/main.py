@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from memco.api.deps import build_internal_actor
-from memco.config import Settings, load_settings
+from memco.config import SQLITE_FALLBACK_ENGINE, Settings, load_settings, write_settings
 from memco.db import get_connection
 from memco.models.candidate import CandidateListRequest
 from memco.models.conversation import ConversationImportRequest
@@ -37,7 +37,7 @@ from memco.repositories.retrieval_log_repository import RetrievalLogRepository
 from memco.postgres_smoke import run_postgres_smoke
 from memco.postgres_admin import ensure_postgres_database
 from memco.local_artifacts import refresh_local_artifacts
-from memco.release_check import resolve_repo_project_root, run_release_check
+from memco.release_check import resolve_repo_project_root, run_release_check, run_strict_release_check
 from memco.services.pipeline_service import IngestPipelineService
 
 app = typer.Typer(help="Memco structured persona-memory CLI.")
@@ -45,6 +45,22 @@ app = typer.Typer(help="Memco structured persona-memory CLI.")
 
 def _settings(root: str | None) -> Settings:
     settings = load_settings(root)
+    ensure_runtime(settings)
+    return settings
+
+
+def _eval_settings(root: str | None) -> Settings:
+    settings = load_settings(root)
+    if settings.config_path.exists():
+        if settings.runtime.profile != "fixture" or settings.storage.engine != SQLITE_FALLBACK_ENGINE:
+            raise typer.BadParameter(
+                "eval-run requires an empty root or an existing fixture/sqlite eval root; "
+                "do not point it at a live repo/runtime root."
+            )
+    else:
+        settings.runtime.profile = "fixture"
+        settings.storage.engine = SQLITE_FALLBACK_ENGINE
+        write_settings(settings)
     ensure_runtime(settings)
     return settings
 
@@ -1212,7 +1228,7 @@ def eval_run_command(
     root: str | None = typer.Option(None, help="Project root."),
     seed_fixture: bool = typer.Option(True, help="Seed fixture data before running eval."),
 ) -> None:
-    settings = _settings(root)
+    settings = _eval_settings(root)
     service = EvalService()
     if seed_fixture:
         service.seed_fixture_data(settings.root)
@@ -1222,14 +1238,14 @@ def eval_run_command(
 
 @app.command(
     "release-check",
-    help="Run the active repo-local release gate. This command is fail-closed and always includes the acceptance eval.",
+    help="Run the release gate. Default mode is the quick repo-local gate; adding --postgres-database-url upgrades it to the canonical Postgres gate. Use `strict-release-check` for the benchmark-backed quality claim.",
 )
 def release_check_command(
     root: str | None = typer.Option(None, help="Temporary runtime root for the eval fixture run."),
     project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
     postgres_database_url: str | None = typer.Option(
         None,
-        help="Optional Postgres maintenance URL. If set, run the no-Docker Postgres smoke as part of the release check.",
+        help="Postgres maintenance URL for the canonical Postgres gate. When set, acceptance runs on Postgres and the API bootstrap smoke is required.",
     ),
     postgres_port: int | None = typer.Option(None, help="Optional port for the temporary Postgres smoke API run."),
     output: str | None = typer.Option(None, help="Optional file path to save the release artifact JSON."),
@@ -1243,6 +1259,39 @@ def release_check_command(
         project_root=resolved_project_root,
         eval_root=eval_root,
         include_eval=True,
+        postgres_database_url=postgres_database_url,
+        postgres_root=postgres_root,
+        postgres_port=postgres_port,
+    )
+    _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command(
+    "strict-release-check",
+    help="Run the benchmark-backed strict quality gate. This path is required for the full quality claim and always includes the canonical Postgres gate plus benchmark thresholds.",
+)
+def strict_release_check_command(
+    root: str | None = typer.Option(None, help="Temporary runtime root for the eval fixture run."),
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    postgres_database_url: str | None = typer.Option(
+        None,
+        help="Required Postgres maintenance URL for the canonical Postgres + benchmark quality gate.",
+    ),
+    postgres_port: int | None = typer.Option(None, help="Optional port for the temporary Postgres smoke API run."),
+    output: str | None = typer.Option(None, help="Optional file path to save the strict release artifact JSON."),
+) -> None:
+    if not postgres_database_url:
+        raise typer.BadParameter("--postgres-database-url is required for strict-release-check")
+    eval_root = Path(root).expanduser().resolve() if root else None
+    resolved_project_root = _project_root(project_root)
+    postgres_root = None
+    if eval_root is not None:
+        postgres_root = eval_root.parent / f"{eval_root.name}-postgres-smoke"
+    result = run_strict_release_check(
+        project_root=resolved_project_root,
+        eval_root=eval_root,
         postgres_database_url=postgres_database_url,
         postgres_root=postgres_root,
         postgres_port=postgres_port,

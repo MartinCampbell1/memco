@@ -111,6 +111,104 @@ def test_answer_service_returns_temporal_answer_for_when_queries():
     assert result["evidence_ids"] == [31]
 
 
+def test_answer_service_uses_valid_from_for_state_start_answers():
+    service = AnswerService()
+    result = service.build_answer(
+        query="When did Alice start living in Lisbon?",
+        retrieval_result=RetrievalResult(
+            query="When did Alice start living in Lisbon?",
+            unsupported_premise_detected=False,
+            support_level="supported",
+            hits=[
+                RetrievalHit(
+                    fact_id=2,
+                    domain="biography",
+                    category="residence",
+                    summary="Alice lives in Lisbon.",
+                    confidence=0.9,
+                    score=2.0,
+                    payload={"city": "Lisbon"},
+                    evidence=[{"evidence_id": 32}],
+                    valid_from="2024-05-01",
+                    observed_at="2026-04-21T10:00:00Z",
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is False
+    assert "since 2024-05-01" in result["answer"]
+
+
+def test_answer_service_marks_observed_only_temporal_answers_as_unknown_exact_date():
+    service = AnswerService()
+    result = service.build_answer(
+        query="When did Alice attend WebSummit?",
+        retrieval_result=RetrievalResult(
+            query="When did Alice attend WebSummit?",
+            unsupported_premise_detected=False,
+            support_level="supported",
+            hits=[
+                RetrievalHit(
+                    fact_id=3,
+                    domain="experiences",
+                    category="event",
+                    summary="Alice attended WebSummit.",
+                    confidence=0.82,
+                    score=1.8,
+                    payload={"event": "WebSummit"},
+                    evidence=[{"evidence_id": 33}],
+                    observed_at="2026-04-21T10:00:00Z",
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is False
+    assert "exact event date is unknown" in result["answer"].lower()
+    assert "recorded on 2026-04-21T10:00:00Z" in result["answer"]
+
+
+def test_answer_service_refuses_conflicting_temporal_event_dates():
+    service = AnswerService()
+    result = service.build_answer(
+        query="When did Alice attend PyCon?",
+        retrieval_result=RetrievalResult(
+            query="When did Alice attend PyCon?",
+            unsupported_premise_detected=True,
+            support_level="ambiguous",
+            unsupported_claims=["Conflicting temporal evidence about the exact event date."],
+            hits=[
+                RetrievalHit(
+                    fact_id=4,
+                    domain="experiences",
+                    category="event",
+                    summary="Alice attended PyCon.",
+                    confidence=0.84,
+                    score=2.0,
+                    payload={"event": "PyCon"},
+                    evidence=[{"evidence_id": 34}],
+                    event_at="2025",
+                ),
+                RetrievalHit(
+                    fact_id=5,
+                    domain="experiences",
+                    category="event",
+                    summary="Alice attended PyCon.",
+                    confidence=0.83,
+                    score=1.9,
+                    payload={"event": "PyCon"},
+                    evidence=[{"evidence_id": 35}],
+                    event_at="2026",
+                ),
+            ],
+        ),
+    )
+
+    assert result["refused"] is True
+    assert "conflicting memory evidence about the exact event date" in result["answer"].lower()
+
+
 def test_answer_service_supports_core_only_detail_policy():
     service = AnswerService()
     result = service.build_answer(
@@ -175,3 +273,32 @@ def test_answer_service_returns_contradiction_refusal_with_confirmed_fact():
     assert result["refused"] is True
     assert "conflicts with that claim" in result["answer"]
     assert "Alice lives in Lisbon." in result["answer"]
+
+
+def test_answer_service_refuses_when_only_psychometric_hits_are_present():
+    service = AnswerService()
+    result = service.build_answer(
+        query="What psychometric trait might Alice have?",
+        retrieval_result=RetrievalResult(
+            query="What psychometric trait might Alice have?",
+            unsupported_premise_detected=False,
+            support_level="supported",
+            hits=[
+                RetrievalHit(
+                    fact_id=1,
+                    domain="psychometrics",
+                    category="trait",
+                    summary="Alice may show openness.",
+                    confidence=0.75,
+                    score=0.78,
+                    payload={"trait": "openness"},
+                    evidence=[{"evidence_id": 51}],
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is True
+    assert result["hits"] == []
+    assert result["fact_ids"] == []
+    assert result["evidence_ids"] == []

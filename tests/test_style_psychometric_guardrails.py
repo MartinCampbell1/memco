@@ -78,6 +78,33 @@ def test_style_and_psychometrics_do_not_answer_factual_questions(monkeypatch, se
                 payload={
                     "framework": "big_five",
                     "trait": "openness",
+                    "extracted_signal": {
+                        "signal_kind": "explicit_self_description",
+                        "explicit_self_description": True,
+                        "signal_confidence": 0.72,
+                        "evidence_count": 1,
+                        "counterevidence_count": 1,
+                        "evidence_quotes": [
+                            {"quote": "I am very curious.", "message_ids": ["2"], "interpretation": "Possible signal for openness."}
+                        ],
+                        "counterevidence_quotes": [
+                            {
+                                "quote": "I am very curious.",
+                                "message_ids": ["2"],
+                                "interpretation": "No direct counterevidence found in this snippet; update conservatively for openness.",
+                            }
+                        ],
+                        "observed_at": "2026-04-21T10:01:00Z",
+                    },
+                    "scored_profile": {
+                        "score": 0.7,
+                        "score_scale": "0_1",
+                        "direction": "high",
+                        "confidence": 0.55,
+                        "framework_threshold": 0.7,
+                        "conservative_update": True,
+                        "use_in_generation": False,
+                    },
                     "score": 0.7,
                     "score_scale": "0_1",
                     "direction": "high",
@@ -94,7 +121,7 @@ def test_style_and_psychometrics_do_not_answer_factual_questions(monkeypatch, se
                     ],
                     "conservative_update": True,
                     "last_updated": "2026-04-21T10:01:00Z",
-                    "use_in_generation": True,
+                    "use_in_generation": False,
                     "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
                 },
                 summary="Alice may score high on openness.",
@@ -138,6 +165,9 @@ def test_psychometric_records_use_evidence_and_counterevidence_fields():
     payload = candidates[0]["payload"]
     assert payload["evidence_quotes"] != []
     assert payload["counterevidence_quotes"] != []
+    assert payload["extracted_signal"]["evidence_quotes"] == payload["evidence_quotes"]
+    assert payload["extracted_signal"]["counterevidence_quotes"] == payload["counterevidence_quotes"]
+    assert payload["scored_profile"]["confidence"] == payload["confidence"]
     assert payload["conservative_update"] is True
     assert payload["use_in_generation"] is False
 
@@ -160,6 +190,7 @@ def test_low_confidence_psychometric_trait_does_not_enable_generation_hint():
     assert len(candidates) == 1
     payload = candidates[0]["payload"]
     assert payload["confidence"] < 0.5
+    assert payload["extracted_signal"]["signal_kind"] == "behavioral_hint"
     assert payload["use_in_generation"] is False
 
 
@@ -181,7 +212,32 @@ def test_counterevidence_reduces_confidence_for_resolved_psychometric_trait():
     assert len(candidates) == 1
     payload = candidates[0]["payload"]
     assert payload["confidence"] < 0.55
+    assert payload["extracted_signal"]["counterevidence_count"] == 1
+    assert payload["scored_profile"]["conservative_update"] is True
     assert payload["use_in_generation"] is False
+
+
+def test_multiple_frameworks_in_one_snippet_stay_conservative():
+    candidates = extract_psychometrics(
+        ExtractionContext(
+            text="I'm very curious and I value independence, but sometimes I avoid new experiences.",
+            subject_key="p1",
+            subject_display="Alice",
+            speaker_label="Alice",
+            person_id=1,
+            message_id=1,
+            source_segment_id=2,
+            session_id=3,
+            occurred_at="2026-04-21T10:00:00Z",
+        )
+    )
+
+    frameworks = {candidate["payload"]["framework"] for candidate in candidates}
+    assert frameworks == {"big_five", "schwartz_values"}
+    for candidate in candidates:
+        payload = candidate["payload"]
+        assert payload["extracted_signal"]["counterevidence_count"] == 1
+        assert payload["use_in_generation"] is False
 
 
 def test_psychometrics_do_not_surface_in_retrieve_results(monkeypatch, settings):
@@ -219,6 +275,27 @@ def test_psychometrics_do_not_surface_in_retrieve_results(monkeypatch, settings)
                 payload={
                     "framework": "big_five",
                     "trait": "openness",
+                    "extracted_signal": {
+                        "signal_kind": "explicit_self_description",
+                        "explicit_self_description": True,
+                        "signal_confidence": 0.72,
+                        "evidence_count": 1,
+                        "counterevidence_count": 0,
+                        "evidence_quotes": [
+                            {"quote": "I am very curious.", "message_ids": ["1"], "interpretation": "Possible signal for openness."}
+                        ],
+                        "counterevidence_quotes": [],
+                        "observed_at": "2026-04-21T10:00:00Z",
+                    },
+                    "scored_profile": {
+                        "score": 0.7,
+                        "score_scale": "0_1",
+                        "direction": "high",
+                        "confidence": 0.55,
+                        "framework_threshold": 0.7,
+                        "conservative_update": True,
+                        "use_in_generation": False,
+                    },
                     "score": 0.7,
                     "score_scale": "0_1",
                     "direction": "high",
@@ -229,7 +306,7 @@ def test_psychometrics_do_not_surface_in_retrieve_results(monkeypatch, settings)
                     "counterevidence_quotes": [],
                     "conservative_update": True,
                     "last_updated": "2026-04-21T10:00:00Z",
-                    "use_in_generation": True,
+                    "use_in_generation": False,
                     "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
                 },
                 summary="Alice may score high on openness.",

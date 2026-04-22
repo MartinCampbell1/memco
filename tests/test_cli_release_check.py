@@ -190,3 +190,68 @@ def test_cli_release_check_returns_nonzero_on_failure(monkeypatch, tmp_path):
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["ok"] is False
+
+
+def test_cli_strict_release_check_wraps_runner(monkeypatch, tmp_path):
+    command = get_command(app)
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    def fake_run_strict_release_check(
+        *,
+        project_root: Path,
+        eval_root: Path | None,
+        postgres_database_url: str,
+        postgres_root: Path | None,
+        postgres_port: int | None,
+    ):
+        captured["project_root"] = project_root
+        captured["eval_root"] = eval_root
+        captured["postgres_database_url"] = postgres_database_url
+        captured["postgres_root"] = postgres_root
+        captured["postgres_port"] = postgres_port
+        return {
+            "artifact_type": "strict_quality_release_check",
+            "ok": True,
+            "steps": [{"name": "benchmark_artifact", "ok": True}],
+        }
+
+    monkeypatch.setattr("memco.cli.main.run_strict_release_check", fake_run_strict_release_check)
+    runtime_root = tmp_path / "strict-release-runtime"
+    result = runner.invoke(
+        command,
+        [
+            "strict-release-check",
+            "--root",
+            str(runtime_root),
+            "--postgres-database-url",
+            "postgresql://example/postgres",
+            "--postgres-port",
+            "8790",
+        ],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "strict_quality_release_check"
+    assert payload["ok"] is True
+    assert captured["project_root"] == Path.cwd().resolve()
+    assert captured["eval_root"] == runtime_root.resolve()
+    assert captured["postgres_database_url"] == "postgresql://example/postgres"
+    assert captured["postgres_root"] == runtime_root.resolve().parent / f"{runtime_root.resolve().name}-postgres-smoke"
+    assert captured["postgres_port"] == 8790
+
+
+def test_cli_strict_release_check_requires_postgres_url(tmp_path):
+    command = get_command(app)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        command,
+        ["strict-release-check"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code != 0
+    assert "--postgres-database-url is required" in result.output

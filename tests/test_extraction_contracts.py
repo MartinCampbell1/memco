@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 from memco.extractors import ExtractionOrchestrator
-from memco.extractors.base import ExtractionContext, validate_candidate_payload
+from memco.extractors.base import (
+    ExtractionContext,
+    build_extraction_contract,
+    build_extraction_system_prompt,
+    build_prompt_payload,
+    validate_candidate_payload,
+)
 from memco.extractors.biography import extract as extract_biography
 from memco.extractors.experiences import extract as extract_experiences
 from memco.extractors.preferences import extract as extract_preferences
@@ -12,6 +19,7 @@ from memco.extractors.social_circle import extract as extract_social_circle
 from memco.extractors.work import extract as extract_work
 from memco.db import get_connection
 from memco.repositories.fact_repository import FactRepository
+from memco.services.candidate_service import CandidateService
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.extraction_service import ExtractionService
 from memco.services.ingest_service import IngestService
@@ -32,6 +40,36 @@ def _context(text: str, *, person_id: int | None = 1, resolve_person_id=None) ->
     )
 
 
+def test_extraction_prompt_contract_exposes_llm_first_domain_rules():
+    prompt = build_extraction_system_prompt(include_style=False, include_psychometrics=True)
+
+    assert "llm-first structured extraction" in prompt.lower()
+    assert "rule-based extraction is fallback-only" in prompt.lower()
+    assert "\"domain\": \"biography\"" in prompt
+    assert "\"domain\": \"preferences\"" in prompt
+    assert "\"domain\": \"social_circle\"" in prompt
+    assert "\"domain\": \"work\"" in prompt
+    assert "\"domain\": \"experiences\"" in prompt
+    assert "\"domain\": \"psychometrics\"" in prompt
+    assert "\"negation_rules\"" in prompt
+    assert "\"temporal_rules\"" in prompt
+    assert "\"evidence_rules\"" in prompt
+
+
+def test_prompt_payload_embeds_output_contract():
+    payload = build_prompt_payload(
+        _context("I moved to Lisbon."),
+        include_style=False,
+        include_psychometrics=True,
+    )
+
+    assert payload["contract_version"]
+    assert payload["extraction_mode"] == "llm_first_structured_extraction"
+    assert payload["output_contract"]["top_level_output"]["required_keys"] == ["items"]
+    domains = {item["domain"] for item in payload["output_contract"]["domains"]}
+    assert {"biography", "preferences", "social_circle", "work", "experiences", "psychometrics"} <= domains
+
+
 def test_extract_candidates_from_conversation_returns_typed_p0a_candidates(settings, tmp_path):
     source = tmp_path / "extract.json"
     source.write_text(
@@ -49,7 +87,7 @@ def test_extract_candidates_from_conversation_returns_typed_p0a_candidates(setti
     )
     ingest = IngestService()
     conversation_service = ConversationIngestService()
-    extraction = ExtractionService()
+    extraction = ExtractionService.from_settings(settings)
     with get_connection(settings.db_path) as conn:
         FactRepository().upsert_person(
             conn,
@@ -110,7 +148,7 @@ def test_extract_candidates_can_include_style_and_psychometrics(settings, tmp_pa
     )
     ingest = IngestService()
     conversation_service = ConversationIngestService()
-    extraction = ExtractionService()
+    extraction = ExtractionService.from_settings(settings)
     with get_connection(settings.db_path) as conn:
         FactRepository().upsert_person(
             conn,
@@ -191,13 +229,16 @@ def test_psychometrics_extractor_returns_trait_candidate():
     candidates = extract_psychometrics(_context("I'm very curious."))
 
     assert len(candidates) == 1
+    payload = candidates[0]["payload"]
     assert candidates[0]["domain"] == "psychometrics"
-    assert candidates[0]["payload"]["trait"] == "openness"
-    assert candidates[0]["payload"]["framework"] == "big_five"
-    assert candidates[0]["payload"]["evidence_quotes"] != []
-    assert candidates[0]["payload"]["counterevidence_quotes"] == []
-    assert candidates[0]["payload"]["use_in_generation"] is True
-    assert "stub" not in candidates[0]["payload"]["safety_notes"].lower()
+    assert payload["trait"] == "openness"
+    assert payload["framework"] == "big_five"
+    assert payload["evidence_quotes"] != []
+    assert payload["counterevidence_quotes"] == []
+    assert payload["extracted_signal"]["signal_kind"] == "explicit_self_description"
+    assert payload["scored_profile"]["conservative_update"] is True
+    assert payload["use_in_generation"] is True
+    assert "stub" not in payload["safety_notes"].lower()
 
 
 def test_psychometrics_extractor_supports_schwartz_values():
@@ -231,6 +272,39 @@ def test_psychometrics_extractor_accumulates_multiple_framework_matches():
 
     frameworks = {candidate["payload"]["framework"] for candidate in candidates}
     assert frameworks == {"big_five", "schwartz_values"}
+
+
+def test_psychometrics_extractor_separates_signal_from_scored_profile():
+    candidates = extract_psychometrics(_context("I'm very curious."))
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert payload["extracted_signal"]["evidence_quotes"] == payload["evidence_quotes"]
+    assert payload["extracted_signal"]["counterevidence_quotes"] == payload["counterevidence_quotes"]
+    assert payload["scored_profile"]["score"] == payload["score"]
+    assert payload["scored_profile"]["confidence"] == payload["confidence"]
+    assert payload["scored_profile"]["use_in_generation"] == payload["use_in_generation"]
+
+
+def test_psychometrics_behavioral_hint_stays_conservative_for_generation():
+    candidates = extract_psychometrics(_context("I feel excited about life."))
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert payload["extracted_signal"]["signal_kind"] == "behavioral_hint"
+    assert payload["use_in_generation"] is False
+
+
+def test_psychometrics_scoring_layer_aggregates_multiple_supporting_signals():
+    candidates = extract_psychometrics(_context("I try to be kind and I help people when they struggle."))
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert payload["framework"] == "via"
+    assert payload["trait"] == "kindness"
+    assert payload["extracted_signal"]["evidence_count"] == 2
+    assert payload["scored_profile"]["score"] > payload["extracted_signal"]["signal_confidence"]
+    assert payload["use_in_generation"] is True
 
 
 def test_orchestrator_combines_core_and_optional_extractors():
@@ -307,6 +381,34 @@ def test_preferences_extractor_marks_past_preference_as_not_current():
     assert len(candidates) == 1
     assert candidates[0]["payload"]["value"] == "tea"
     assert candidates[0]["payload"]["is_current"] is False
+
+
+def test_preferences_extractor_handles_negated_preference_as_dislike():
+    candidates = extract_preferences(_context("I don't like sushi because it feels too heavy."))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["payload"]["value"] == "sushi"
+    assert candidate["payload"]["polarity"] == "dislike"
+    assert candidate["payload"]["is_current"] is True
+    assert candidate["summary"].lower().startswith("alice dislikes")
+
+
+def test_preferences_extractor_prefers_current_self_correction():
+    candidates = extract_preferences(_context("I used to like tea, but now I prefer coffee."))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["payload"]["value"] == "coffee"
+    assert candidate["payload"]["is_current"] is True
+
+
+def test_preferences_extractor_supports_indirect_go_to_phrase():
+    candidates = extract_preferences(_context("Tea is my go-to drink when I need to focus."))
+
+    assert len(candidates) == 1
+    assert candidates[0]["payload"]["value"] == "Tea"
+    assert candidates[0]["payload"]["polarity"] == "like"
 
 
 def test_social_circle_extractor_captures_current_flag_and_relationship_event():
@@ -397,6 +499,25 @@ def test_extractors_support_russian_and_mixed_language_inputs():
     assert social[0]["payload"]["target_person_id"] == 7
 
 
+def test_biography_extractor_supports_indirect_residence_and_skips_hypothetical_move():
+    indirect = extract_biography(_context("Lisbon is my base these days."))
+    hypothetical = extract_biography(_context("I might move to Berlin next year."))
+
+    assert len(indirect) == 1
+    assert indirect[0]["payload"]["city"] == "Lisbon"
+    assert hypothetical == []
+
+
+def test_experiences_extractor_uses_temporal_anchor_for_approximate_dates():
+    candidates = extract_experiences(_context("I attended PyCon around 2024 with Bob and it was great."))
+
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["payload"]["event"] == "PyCon"
+    assert candidate["payload"]["event_at"] == ""
+    assert candidate["payload"]["temporal_anchor"] == "around 2024"
+
+
 def test_validate_candidate_payload_rejects_wrong_domain_shape():
     try:
         validate_candidate_payload(domain="biography", category="residence", payload={"place": "Lisbon"})
@@ -404,3 +525,99 @@ def test_validate_candidate_payload_rejects_wrong_domain_shape():
         assert "payload.city" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected payload validation failure")
+
+
+def test_validate_candidate_payload_rejects_inconsistent_psychometric_counts():
+    payload = {
+        "framework": "big_five",
+        "trait": "openness",
+        "extracted_signal": {
+            "signal_kind": "explicit_self_description",
+            "explicit_self_description": True,
+            "signal_confidence": 0.72,
+            "evidence_count": 2,
+            "counterevidence_count": 0,
+            "evidence_quotes": [{"quote": "I am curious.", "message_ids": ["1"], "interpretation": "signal"}],
+            "counterevidence_quotes": [],
+            "observed_at": "2026-04-21T10:00:00Z",
+        },
+        "scored_profile": {
+            "score": 0.8,
+            "score_scale": "0_1",
+            "direction": "high",
+            "confidence": 0.76,
+            "framework_threshold": 0.7,
+            "conservative_update": True,
+            "use_in_generation": True,
+        },
+        "score": 0.8,
+        "score_scale": "0_1",
+        "direction": "high",
+        "confidence": 0.76,
+        "evidence_quotes": [{"quote": "I am curious.", "message_ids": ["1"], "interpretation": "signal"}],
+        "counterevidence_quotes": [],
+        "conservative_update": True,
+        "use_in_generation": True,
+        "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
+    }
+
+    with pytest.raises(ValueError, match="evidence_count"):
+        validate_candidate_payload(domain="psychometrics", category="trait", payload=payload)
+
+
+def test_validate_candidate_payload_rejects_unsafe_psychometric_generation_flag():
+    payload = {
+        "framework": "panas",
+        "trait": "positive_affect",
+        "extracted_signal": {
+            "signal_kind": "behavioral_hint",
+            "explicit_self_description": False,
+            "signal_confidence": 0.52,
+            "evidence_count": 1,
+            "counterevidence_count": 1,
+            "evidence_quotes": [{"quote": "I feel excited.", "message_ids": ["1"], "interpretation": "signal"}],
+            "counterevidence_quotes": [{"quote": "but sometimes I shut down", "message_ids": ["1"], "interpretation": "counter"}],
+            "observed_at": "2026-04-21T10:00:00Z",
+        },
+        "scored_profile": {
+            "score": 0.7,
+            "score_scale": "0_1",
+            "direction": "high",
+            "confidence": 0.82,
+            "framework_threshold": 0.75,
+            "conservative_update": True,
+            "use_in_generation": True,
+        },
+        "score": 0.7,
+        "score_scale": "0_1",
+        "direction": "high",
+        "confidence": 0.82,
+        "evidence_quotes": [{"quote": "I feel excited.", "message_ids": ["1"], "interpretation": "signal"}],
+        "counterevidence_quotes": [{"quote": "but sometimes I shut down", "message_ids": ["1"], "interpretation": "counter"}],
+        "conservative_update": True,
+        "use_in_generation": True,
+        "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
+    }
+
+    with pytest.raises(ValueError, match="violates conservative psychometric generation policy"):
+        validate_candidate_payload(domain="psychometrics", category="trait", payload=payload)
+
+
+def test_extraction_service_requires_explicit_runtime_wiring():
+    try:
+        ExtractionService()
+    except ValueError as exc:
+        assert "requires explicit settings or llm_provider" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected explicit runtime wiring failure")
+
+
+def test_candidate_service_requires_explicit_extraction_service_for_extraction():
+    service = CandidateService()
+
+    try:
+        service.extract_from_conversation(None, workspace_slug="default", conversation_id=1)
+    except ValueError as exc:
+        assert "requires an explicit ExtractionService" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected explicit extraction service failure")

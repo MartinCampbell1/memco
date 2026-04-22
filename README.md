@@ -166,7 +166,7 @@ uv run memco persona-export --person-slug alice --detail-policy exhaustive --roo
 
 On the HTTP side, the same contract is exposed through `detail_policy` in the JSON request body for `/v1/retrieve`, `/v1/chat`, and `/v1/persona/export`.
 
-The active repo-local release gate can be run locally with:
+The quick repo-local release gate can be run locally with:
 
 ```bash
 uv run memco release-check
@@ -185,18 +185,28 @@ To persist the gate artifact directly to disk:
 uv run memco release-check --output /absolute/path/to/release-check.json
 ```
 
-If you also want to fold the no-Docker Postgres smoke into the same release artifact:
+If you want the canonical Postgres gate instead of the quick local fallback path:
 
 ```bash
 uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
 ```
 
-That variant runs the same active repo-local gate plus a no-Docker Postgres smoke and returns one combined JSON artifact.
+That variant runs pytest plus the acceptance artifact on Postgres and then requires the no-Docker API bootstrap smoke. It returns one combined JSON artifact for the canonical Postgres path.
+
+If you want the full benchmark-backed quality claim instead of an acceptance-only gate:
+
+```bash
+uv run memco strict-release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
+```
+
+That strict variant keeps the canonical Postgres gate and adds the benchmark artifact with enforced quality thresholds.
 
 In this checkout, the latest persisted repo-local gate artifacts are typically kept under `var/reports/`, for example:
 
 - `var/reports/release-check-current.json`
 - `var/reports/release-check-postgres-current.json`
+- `var/reports/strict-release-check-current.json`
+- `var/reports/benchmark-current.json`
 - `var/reports/repo-local-status-current.json`
 - `var/reports/change-groups-current.json`
 - `var/reports/local-artifacts-refresh-current.json`

@@ -331,7 +331,10 @@ class RetrievalService:
                 limit=min(payload.limit, 5),
             )
         unsupported_checks = self._unsupported_checks(planner=planner, hits=hits)
+        temporal_conflict_reason = self._temporal_conflict_reason(hits=hits) if planner.temporal_mode == "when" else ""
         unsupported_claims = self._detect_unsupported_claims(unsupported_checks=unsupported_checks)
+        if temporal_conflict_reason:
+            unsupported_claims.append(temporal_conflict_reason)
         support_level = self._support_level(
             planner=planner,
             hits=hits,
@@ -339,6 +342,8 @@ class RetrievalService:
             unsupported_checks=unsupported_checks,
         )
         unsupported_flag = support_level in {"unsupported", "ambiguous", "contradicted"} or bool(unsupported_checks)
+        if temporal_conflict_reason:
+            unsupported_flag = True
         result = RetrievalResult(
             query=payload.query,
             unsupported_premise_detected=unsupported_flag,
@@ -507,6 +512,10 @@ class RetrievalService:
         return False
 
     def _support_level(self, *, planner: RetrievalPlan, hits: list[dict], fallback_hits: list[dict], unsupported_checks: list) -> str:
+        if planner.temporal_mode == "when":
+            temporal_conflict_reason = self._temporal_conflict_reason(hits=hits)
+            if temporal_conflict_reason:
+                return "ambiguous"
         if hits and self._is_contradicted(planner=planner, hits=hits, unsupported_checks=unsupported_checks):
             return "contradicted"
         if hits and unsupported_checks:
@@ -516,3 +525,13 @@ class RetrievalService:
         if fallback_hits:
             return "ambiguous"
         return "unsupported"
+
+    def _temporal_conflict_reason(self, *, hits: list[dict]) -> str:
+        event_dates = {str(hit.get("event_at") or "").strip() for hit in hits if str(hit.get("event_at") or "").strip()}
+        if len(event_dates) > 1:
+            return "Conflicting temporal evidence about the exact event date."
+        if not event_dates:
+            valid_from_values = {str(hit.get("valid_from") or "").strip() for hit in hits if str(hit.get("valid_from") or "").strip()}
+            if len(valid_from_values) > 1:
+                return "Conflicting temporal evidence about when that state began."
+        return ""

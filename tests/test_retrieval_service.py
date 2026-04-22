@@ -270,6 +270,194 @@ def test_retrieve_supports_when_queries_with_event_at(settings):
     assert result.planner.temporal_mode == "when"
 
 
+def test_retrieve_supports_when_queries_with_valid_from_only(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Bob",
+            slug="bob",
+            person_type="human",
+            aliases=["Bob"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/bob-when-valid-from.md",
+            source_type="note",
+            origin_uri="/tmp/bob-when-valid-from.md",
+            title="bob-when-valid-from",
+            sha256="def458b",
+            parsed_text="Bob has lived in Lisbon since 2024-05-01.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="bob:biography:residence:lisbon",
+                payload={"city": "Lisbon"},
+                summary="Bob lives in Lisbon.",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                valid_from="2024-05-01",
+                source_id=source_id,
+                quote_text="Bob has lived in Lisbon since 2024-05-01.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="bob",
+                query="When did Bob start living in Lisbon?",
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert len(result.hits) == 1
+    assert result.hits[0].event_at == ""
+    assert result.hits[0].valid_from == "2024-05-01"
+    assert result.planner is not None
+    assert result.planner.temporal_mode == "when"
+
+
+def test_retrieve_supports_when_queries_with_observed_at_only(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Bob",
+            slug="bob",
+            person_type="human",
+            aliases=["Bob"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/bob-when-observed.md",
+            source_type="note",
+            origin_uri="/tmp/bob-when-observed.md",
+            title="bob-when-observed",
+            sha256="def458c",
+            parsed_text="Bob attended WebSummit.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="experiences",
+                category="event",
+                canonical_key="bob:experiences:event:websummit",
+                payload={"event": "WebSummit"},
+                summary="Bob attended WebSummit.",
+                confidence=0.82,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Bob attended WebSummit.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="bob",
+                query="When did Bob attend WebSummit?",
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert len(result.hits) == 1
+    assert result.hits[0].event_at == ""
+    assert result.hits[0].valid_from == ""
+    assert result.hits[0].observed_at == "2026-04-21T10:00:00Z"
+
+
+def test_retrieve_marks_ambiguous_support_for_conflicting_event_dates_on_when_queries(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-conflicting-event-dates.md",
+            source_type="note",
+            origin_uri="/tmp/alice-conflicting-event-dates.md",
+            title="alice-conflicting-event-dates",
+            sha256="def458d",
+            parsed_text="Alice attended PyCon.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="experiences",
+                category="event",
+                canonical_key="alice:experiences:event:pycon-2025",
+                payload={"event": "PyCon"},
+                summary="Alice attended PyCon.",
+                confidence=0.84,
+                observed_at="2026-04-21T10:00:00Z",
+                event_at="2025",
+                source_id=source_id,
+                quote_text="Alice attended PyCon in 2025.",
+            ),
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="experiences",
+                category="event",
+                canonical_key="alice:experiences:event:pycon-2026",
+                payload={"event": "PyCon"},
+                summary="Alice attended PyCon.",
+                confidence=0.83,
+                observed_at="2026-04-21T10:01:00Z",
+                event_at="2026",
+                source_id=source_id,
+                quote_text="Alice attended PyCon in 2026.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="When did Alice attend PyCon?",
+            ),
+        )
+
+    assert result.support_level == "ambiguous"
+    assert any("conflicting temporal evidence" in item.lower() for item in result.unsupported_claims)
+
+
 def test_retrieve_marks_partial_support_for_mixed_claims(settings):
     fact_repo = FactRepository()
     source_repo = SourceRepository()

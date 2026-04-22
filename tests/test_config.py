@@ -14,6 +14,7 @@ def test_load_settings_accepts_env_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("MEMCO_LLM_ALLOW_MOCK_PROVIDER", "true")
     monkeypatch.setenv("MEMCO_STORAGE_ENGINE", "postgres")
     monkeypatch.setenv("MEMCO_DATABASE_URL", "postgresql://memco:memco@db:5432/memco")
+    monkeypatch.setenv("MEMCO_RUNTIME_PROFILE", "fixture")
 
     settings = load_settings()
 
@@ -25,6 +26,7 @@ def test_load_settings_accepts_env_overrides(tmp_path, monkeypatch):
     assert settings.llm.allow_mock_provider is True
     assert settings.storage.engine == "postgres"
     assert settings.storage.database_url == "postgresql://memco:memco@db:5432/memco"
+    assert settings.runtime.profile == "fixture"
 
 
 def test_write_settings_roundtrip(tmp_path):
@@ -72,9 +74,10 @@ def test_llm_runtime_defaults_to_openai_compatible_provider(tmp_path):
 
     assert settings.llm.provider == "openai-compatible"
     assert settings.llm.allow_mock_provider is False
+    assert settings.runtime.profile == "repo-local"
 
 
-def test_load_settings_treats_explicit_mock_provider_in_config_as_opt_in(tmp_path):
+def test_load_settings_does_not_treat_mock_provider_in_config_as_implicit_opt_in(tmp_path):
     root = tmp_path / "project"
     (root / "var" / "config").mkdir(parents=True, exist_ok=True)
     (root / "var" / "config" / "settings.yaml").write_text(
@@ -91,7 +94,31 @@ def test_load_settings_treats_explicit_mock_provider_in_config_as_opt_in(tmp_pat
     loaded = load_settings(root)
 
     assert loaded.llm.provider == "mock"
+    assert loaded.llm.allow_mock_provider is False
+
+
+def test_load_settings_preserves_explicit_mock_opt_in_from_config(tmp_path):
+    root = tmp_path / "project"
+    (root / "var" / "config").mkdir(parents=True, exist_ok=True)
+    (root / "var" / "config" / "settings.yaml").write_text(
+        "\n".join(
+            [
+                "llm:",
+                "  provider: mock",
+                "  model: fixture-x",
+                "  allow_mock_provider: true",
+                "runtime:",
+                "  profile: fixture",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = load_settings(root)
+
+    assert loaded.llm.provider == "mock"
     assert loaded.llm.allow_mock_provider is True
+    assert loaded.runtime.profile == "fixture"
 
 
 def test_ingest_source_types_match_current_repo_local_contract(tmp_path):

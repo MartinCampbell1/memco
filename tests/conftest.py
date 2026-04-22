@@ -16,6 +16,7 @@ def project_root(tmp_path: Path) -> Path:
 @pytest.fixture()
 def settings(project_root: Path) -> Settings:
     config = Settings(root=project_root)
+    config.runtime.profile = "fixture"
     config.storage.engine = "sqlite"
     config.llm.provider = "mock"
     config.llm.model = "fixture"
