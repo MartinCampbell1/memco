@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: memco
+      POSTGRES_USER: memco
+      POSTGRES_PASSWORD: memco
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U memco -d memco"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - memco_pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      MEMCO_ROOT: /var/lib/memco
+      MEMCO_STORAGE_ENGINE: postgres
+      MEMCO_DATABASE_URL: postgresql://memco:memco@db:5432/memco
+      MEMCO_API_HOST: 0.0.0.0
+      MEMCO_API_PORT: "8788"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8788:8788"
+    volumes:
+      - memco_data:/var/lib/memco
+
+volumes:
+  memco_pgdata:
+  memco_data:

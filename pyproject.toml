@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memco"
+version = "0.1.0"
+description = "Structured persona-memory system with evidence-first retrieval and refusal-aware answering."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Martin" }]
+dependencies = [
+  "fastapi>=0.116.0",
+  "psycopg[binary]>=3.2.0",
+  "pydantic>=2.11.0",
+  "PyYAML>=6.0.2",
+  "python-dateutil>=2.9.0",
+  "typer>=0.16.0",
+  "uvicorn>=0.35.0",
+]
+
+[project.optional-dependencies]
+parsers = [
+  "beautifulsoup4>=4.13.0",
+  "pypdf>=5.4.0",
+  "python-docx>=1.1.2",
+  "trafilatura>=2.0.0",
+]
+dev = [
+  "httpx>=0.28.0",
+  "pytest>=8.3.0",
+]
+
+[project.scripts]
+memco = "memco.cli.main:app"
+memco-api = "memco.api.app:serve"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/memco"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen --extra dev --extra parsers
+
+      - name: Run test suite
+        run: uv run pytest -q
+
+      - name: Run acceptance eval gate
+        run: |
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+          from memco.release_check import run_release_check
+
+          result = run_release_check(
+              project_root=Path.cwd(),
+              include_pytest=False,
+              include_eval=True,
+          )
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          if not result["ok"]:
+              raise SystemExit(1)
+          PY
