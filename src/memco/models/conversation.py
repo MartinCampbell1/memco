@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from memco.models.retrieval import ActorContext
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -22,6 +23,7 @@ class ConversationImportRequest(BaseModel):
     source_id: int
     conversation_uid: str = "main"
     title: str = ""
+    actor: ActorContext | None = None
 
 
 class ConversationImportResult(BaseModel):
@@ -29,6 +31,7 @@ class ConversationImportResult(BaseModel):
 
     conversation_id: int
     source_id: int
+    session_count: int
     message_count: int
     chunk_count: int
     unresolved_speakers: list[str] = Field(default_factory=list)
@@ -49,6 +52,7 @@ class ConversationSpeakerListRequest(BaseModel):
 
     workspace: str = "default"
     conversation_id: int
+    actor: ActorContext | None = None
 
 
 class ConversationSpeakerResolveRequest(BaseModel):
@@ -61,3 +65,4 @@ class ConversationSpeakerResolveRequest(BaseModel):
     person_slug: str | None = None
     create_person_display_name: str | None = None
     create_person_slug: str | None = None
+    actor: ActorContext | None = None

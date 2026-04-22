@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+import pytest
 
 from memco.api.app import app
 from memco.db import get_connection
@@ -10,13 +11,16 @@ from memco.repositories.source_repository import SourceRepository
 from memco.services.consolidation_service import ConsolidationService
 
 
-def _actor(**overrides):
+def _actor(settings, **overrides):
+    actor_id = overrides.get("actor_id", "dev-owner")
+    policy = settings.api.actor_policies[actor_id]
     payload = {
-        "actor_id": "dev-owner",
-        "actor_type": "owner",
+        "actor_id": actor_id,
+        "actor_type": policy.actor_type,
+        "auth_token": policy.auth_token,
         "allowed_person_ids": [],
         "allowed_domains": [],
-        "can_view_sensitive": True,
+        "can_view_sensitive": policy.can_view_sensitive,
     }
     payload.update(overrides)
     return payload
@@ -28,7 +32,7 @@ def test_chat_returns_refusal_without_memory(monkeypatch, settings):
 
     response = client.post(
         "/v1/chat",
-        json={"workspace": "default", "person_slug": "alice", "query": "Where does Alice live?", "actor": _actor()},
+        json={"workspace": "default", "person_slug": "alice", "query": "Where does Alice live?", "actor": _actor(settings)},
     )
 
     assert response.status_code == 200
@@ -81,13 +85,95 @@ def test_chat_returns_answer_with_memory(monkeypatch, settings):
     client = TestClient(app)
     response = client.post(
         "/v1/chat",
-        json={"workspace": "default", "person_slug": "alice", "query": "Where does Alice live?", "actor": _actor()},
+        json={"workspace": "default", "person_slug": "alice", "query": "Where does Alice live?", "actor": _actor(settings)},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["refused"] is False
     assert "Lisbon" in payload["answer"]
+    assert len(payload["fact_ids"]) == 1
+    assert payload["fact_ids"] == [payload["retrieval"]["hits"][0]["fact_id"]]
+    assert len(payload["evidence_ids"]) == 1
+    assert payload["evidence_ids"][0] == payload["retrieval"]["hits"][0]["evidence"][0]["evidence_id"]
+
+
+def test_chat_supports_core_only_detail_policy(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-core-only-chat.md",
+            source_type="note",
+            origin_uri="/tmp/alice-core-only-chat.md",
+            title="alice-core-only-chat",
+            sha256="ghi789-core",
+            parsed_text="Alice lives in Lisbon.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:lisbon",
+                payload={"city": "Lisbon"},
+                summary="Alice lives in Lisbon.",
+                source_kind="explicit",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice lives in Lisbon.",
+            ),
+        )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={
+            "workspace": "default",
+            "person_slug": "alice",
+            "query": "Where does Alice live?",
+            "detail_policy": "core_only",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["detail_policy"] == "core_only"
+    assert payload["retrieval"]["detail_policy"] == "core_only"
+    assert payload["hits"] == [
+        {
+            "fact_id": payload["fact_ids"][0],
+            "domain": "biography",
+            "category": "residence",
+            "summary": "Alice lives in Lisbon.",
+        }
+    ]
+    assert payload["retrieval"]["hits"] == [
+        {
+            "fact_id": payload["fact_ids"][0],
+            "domain": "biography",
+            "category": "residence",
+            "summary": "Alice lives in Lisbon.",
+            "status": "active",
+            "confidence": 0.9,
+        }
+    ]
 
 
 def test_chat_returns_partial_support_without_hallucinating(monkeypatch, settings):
@@ -139,7 +225,7 @@ def test_chat_returns_partial_support_without_hallucinating(monkeypatch, setting
             "workspace": "default",
             "person_slug": "alice",
             "query": "Does Alice live in Lisbon and work at Stripe?",
-            "actor": _actor(),
+            "actor": _actor(settings),
         },
     )
 
@@ -149,6 +235,200 @@ def test_chat_returns_partial_support_without_hallucinating(monkeypatch, setting
     assert "Lisbon" in payload["answer"]
     assert "Stripe" in payload["answer"]
     assert payload["retrieval"]["support_level"] == "partial"
+
+
+def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Bob",
+            slug="bob",
+            person_type="human",
+            aliases=["Bob"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-chat-subject-mismatch.md",
+            source_type="note",
+            origin_uri="/tmp/alice-chat-subject-mismatch.md",
+            title="alice-chat-subject-mismatch",
+            sha256="ghi792",
+            parsed_text="Alice lives in Lisbon.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:lisbon",
+                payload={"city": "Lisbon"},
+                summary="Alice lives in Lisbon.",
+                source_kind="explicit",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice lives in Lisbon.",
+            ),
+        )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={"workspace": "default", "person_slug": "alice", "query": "Where does Bob live?", "actor": _actor(settings)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refused"] is True
+    assert payload["answer"] == "I don't have confirmed memory evidence for that."
+    assert payload["retrieval"]["hits"] == []
+    assert payload["retrieval"]["fallback_hits"] == []
+    assert payload["retrieval"]["unsupported_claims"] == ["Query subject does not match requested person."]
+
+
+@pytest.mark.parametrize(
+    ("query", "domain", "category", "canonical_key", "payload_data", "summary", "quote_text", "expected_support_level", "expected_fragment"),
+    [
+        (
+            "Does Alice live in Berlin?",
+            "biography",
+            "residence",
+            "alice:biography:residence:lisbon",
+            {"city": "Lisbon"},
+            "Alice lives in Lisbon.",
+            "Alice lives in Lisbon.",
+            "contradicted",
+            "conflicts with that claim",
+        ),
+        (
+            "Does Alice prefer coffee?",
+            "preferences",
+            "preference",
+            "alice:preferences:preference:tea",
+            {"value": "tea", "polarity": "like", "is_current": True},
+            "Alice prefers tea.",
+            "Alice prefers tea.",
+            "contradicted",
+            "conflicts with that claim",
+        ),
+        (
+            "Did Alice attend JSConf?",
+            "experiences",
+            "event",
+            "alice:experiences:event:pycon",
+            {"event": "PyCon", "temporal_anchor": "2026"},
+            "Alice attended PyCon.",
+            "Alice attended PyCon in 2026.",
+            "contradicted",
+            "conflicts with that claim",
+        ),
+        (
+            "Did Alice attend PyCon in 2025?",
+            "experiences",
+            "event",
+            "alice:experiences:event:pycon-2026",
+            {"event": "PyCon", "temporal_anchor": "2026"},
+            "Alice attended PyCon.",
+            "Alice attended PyCon in 2026.",
+            "contradicted",
+            "conflicts with that claim",
+        ),
+        (
+            "Is Bob Alice's brother?",
+            "social_circle",
+            "friend",
+            "alice:social_circle:friend:bob",
+            {"relation": "friend", "target_label": "Bob"},
+            "Alice says Bob is their friend.",
+            "Bob is my friend.",
+            "contradicted",
+            "conflicts with that claim",
+        ),
+    ],
+)
+def test_chat_refuses_false_premise_claims_across_classes(
+    monkeypatch,
+    settings,
+    query,
+    domain,
+    category,
+    canonical_key,
+    payload_data,
+    summary,
+    quote_text,
+    expected_support_level,
+    expected_fragment,
+):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path=f"var/raw/{canonical_key.replace(':', '-')}.md",
+            source_type="note",
+            origin_uri=f"/tmp/{canonical_key.replace(':', '-')}.md",
+            title=canonical_key.replace(":", "-"),
+            sha256=canonical_key.replace(":", "-"),
+            parsed_text=quote_text,
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain=domain,
+                category=category,
+                canonical_key=canonical_key,
+                payload=payload_data,
+                summary=summary,
+                source_kind="explicit",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text=quote_text,
+            ),
+        )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={"workspace": "default", "person_slug": "alice", "query": query, "actor": _actor(settings)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refused"] is True
+    assert expected_fragment in payload["answer"]
+    assert payload["retrieval"]["support_level"] == expected_support_level
+    assert payload["retrieval"]["unsupported_premise_detected"] is True
+    assert len(payload["retrieval"]["hits"]) == 1
 
 
 def test_chat_ignores_style_and_psychometrics_for_factual_answers(monkeypatch, settings):
@@ -197,7 +477,7 @@ def test_chat_ignores_style_and_psychometrics_for_factual_answers(monkeypatch, s
     client = TestClient(app)
     response = client.post(
         "/v1/chat",
-        json={"workspace": "default", "person_slug": "alice", "query": "Does Alice own a cat?", "actor": _actor()},
+        json={"workspace": "default", "person_slug": "alice", "query": "Does Alice own a cat?", "actor": _actor(settings)},
     )
 
     assert response.status_code == 200

@@ -105,6 +105,30 @@ def test_add_candidate_rejects_unknown_domain(settings):
 
     assert style["domain"] == "style"
 
+
+def test_add_candidate_rejects_invalid_payload_shape(settings):
+    repository = CandidateRepository()
+
+    with get_connection(settings.db_path) as conn:
+        person, source_id = _seed_person_and_source(conn)
+        with pytest.raises(ValueError, match="payload.city"):
+            repository.add_candidate(
+                conn,
+                workspace_slug="default",
+                person_id=int(person["id"]),
+                source_id=source_id,
+                conversation_id=None,
+                chunk_kind="conversation",
+                chunk_id=None,
+                domain="biography",
+                category="residence",
+                subcategory="",
+                canonical_key="alice:biography:residence:lisbon",
+                payload={"place": "Lisbon"},
+                summary="Alice lives in Lisbon.",
+                confidence=0.8,
+            )
+
 def test_add_candidate_accepts_p0b_domain(settings):
     repository = CandidateRepository()
 

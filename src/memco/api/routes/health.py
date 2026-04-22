@@ -21,6 +21,9 @@ def health():
         "root": str(settings.root),
         "db": settings.database_target,
         "storage_engine": settings.storage.engine,
+        "storage_contract_engine": settings.storage.contract_engine,
+        "storage_contract": settings.storage_contract,
+        "storage_role": settings.storage_role,
         "database_target": settings.database_target,
         "counts": {
             "workspaces": int(workspace_row["count"]),

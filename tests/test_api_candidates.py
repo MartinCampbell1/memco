@@ -13,6 +13,21 @@ from memco.services.ingest_service import IngestService
 from memco.services.conversation_ingest_service import ConversationIngestService
 
 
+def _actor(settings, **overrides):
+    actor_id = overrides.get("actor_id", "dev-owner")
+    policy = settings.api.actor_policies[actor_id]
+    payload = {
+        "actor_id": actor_id,
+        "actor_type": policy.actor_type,
+        "auth_token": policy.auth_token,
+        "allowed_person_ids": [],
+        "allowed_domains": [],
+        "can_view_sensitive": policy.can_view_sensitive,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _seed_conversation(settings, tmp_path):
     source = tmp_path / "api-candidates.json"
     source.write_text(
@@ -146,7 +161,7 @@ def test_api_candidate_extract_list_publish_and_reject(monkeypatch, settings, tm
 
     extract = client.post(
         "/v1/candidates/extract",
-        json={"workspace": "default", "conversation_id": conversation_id},
+        json={"workspace": "default", "conversation_id": conversation_id, "actor": _actor(settings)},
     )
     assert extract.status_code == 200
     items = extract.json()["items"]
@@ -154,7 +169,7 @@ def test_api_candidate_extract_list_publish_and_reject(monkeypatch, settings, tm
 
     listed = client.post(
         "/v1/candidates/list",
-        json={"workspace": "default", "candidate_status": "validated_candidate"},
+        json={"workspace": "default", "candidate_status": "validated_candidate", "actor": _actor(settings, actor_id="maintenance-admin")},
     )
     assert listed.status_code == 200
     listed_items = listed.json()["items"]
@@ -162,21 +177,21 @@ def test_api_candidate_extract_list_publish_and_reject(monkeypatch, settings, tm
 
     publish = client.post(
         "/v1/candidates/publish",
-        json={"workspace": "default", "candidate_id": biography["id"]},
+        json={"workspace": "default", "candidate_id": biography["id"], "actor": _actor(settings)},
     )
     assert publish.status_code == 200
     assert publish.json()["candidate"]["candidate_status"] == "published"
 
     review_items = client.post(
         "/v1/candidates/list",
-        json={"workspace": "default", "candidate_status": "needs_review"},
+        json={"workspace": "default", "candidate_status": "needs_review", "actor": _actor(settings, actor_id="maintenance-admin")},
     )
     assert review_items.status_code == 200
     social = next(item for item in review_items.json()["items"] if item["domain"] == "social_circle")
 
     reject = client.post(
         "/v1/candidates/reject",
-        json={"candidate_id": social["id"], "reason": "target unresolved"},
+        json={"candidate_id": social["id"], "reason": "target unresolved", "actor": _actor(settings, actor_id="maintenance-admin")},
     )
     assert reject.status_code == 200
     assert reject.json()["candidate_status"] == "rejected"
@@ -189,11 +204,11 @@ def test_api_candidate_extract_is_idempotent(monkeypatch, settings, tmp_path):
 
     first = client.post(
         "/v1/candidates/extract",
-        json={"workspace": "default", "conversation_id": conversation_id},
+        json={"workspace": "default", "conversation_id": conversation_id, "actor": _actor(settings)},
     )
     second = client.post(
         "/v1/candidates/extract",
-        json={"workspace": "default", "conversation_id": conversation_id},
+        json={"workspace": "default", "conversation_id": conversation_id, "actor": _actor(settings)},
     )
 
     assert first.status_code == 200
@@ -247,6 +262,7 @@ def test_api_candidate_extract_can_include_style_and_psychometrics(monkeypatch, 
             "conversation_id": conversation_id,
             "include_style": True,
             "include_psychometrics": True,
+            "actor": _actor(settings),
         },
     )
 
@@ -263,7 +279,7 @@ def test_api_publish_rejects_invalid_candidate_status(monkeypatch, settings):
 
     response = client.post(
         "/v1/candidates/publish",
-        json={"workspace": "default", "candidate_id": candidate_id},
+        json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)},
     )
 
     assert response.status_code == 422
@@ -277,7 +293,7 @@ def test_api_publish_rejects_missing_canonical_key(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "without canonical_key" in response.json()["detail"]
@@ -290,7 +306,7 @@ def test_api_publish_rejects_missing_payload(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "without payload" in response.json()["detail"]
@@ -303,7 +319,7 @@ def test_api_publish_rejects_missing_evidence(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "without evidence" in response.json()["detail"]
@@ -319,7 +335,7 @@ def test_api_publish_rejects_missing_segment_provenance(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "source-segment provenance" in response.json()["detail"]
@@ -330,7 +346,7 @@ def test_api_publish_rejects_low_confidence(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "confidence threshold" in response.json()["detail"]
@@ -348,7 +364,7 @@ def test_api_publish_rejects_unresolved_social_target(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "unresolved hard conflict" in response.json()["detail"]
@@ -359,7 +375,7 @@ def test_api_publish_rejects_workspace_scope_mismatch(monkeypatch, settings):
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    response = client.post("/v1/candidates/publish", json={"workspace": "other-workspace", "candidate_id": candidate_id})
+    response = client.post("/v1/candidates/publish", json={"workspace": "other-workspace", "candidate_id": candidate_id, "actor": _actor(settings)})
 
     assert response.status_code == 422
     assert "workspace scope" in response.json()["detail"]
@@ -370,9 +386,9 @@ def test_api_publish_rejects_workspace_scope_mismatch_for_published_candidate(mo
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
     client = TestClient(app)
 
-    first = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id})
+    first = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
     assert first.status_code == 200
 
-    second = client.post("/v1/candidates/publish", json={"workspace": "other-workspace", "candidate_id": candidate_id})
+    second = client.post("/v1/candidates/publish", json={"workspace": "other-workspace", "candidate_id": candidate_id, "actor": _actor(settings)})
     assert second.status_code == 422
     assert "workspace scope" in second.json()["detail"]

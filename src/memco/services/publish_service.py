@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from memco.consolidation import get_policy
+from memco.extractors.base import validate_candidate_payload
 from memco.models.memory_fact import MemoryFactInput
 from memco.repositories.candidate_repository import CandidateRepository
 from memco.repositories.fact_repository import FactRepository
@@ -44,6 +46,11 @@ class PublishService:
             raise ValueError("Cannot publish candidate without canonical_key")
         if not candidate.get("payload"):
             raise ValueError("Cannot publish candidate without payload")
+        validate_candidate_payload(
+            domain=str(candidate["domain"]),
+            category=str(candidate["category"]),
+            payload=candidate["payload"],
+        )
         if candidate["person_id"] is None:
             raise ValueError("Cannot publish unresolved candidate")
         if float(candidate.get("confidence", 0.0)) < MIN_PUBLISH_CONFIDENCE:
@@ -54,8 +61,12 @@ class PublishService:
         primary_evidence = evidence_items[0]
         if not (primary_evidence.get("source_segment_ids") or []):
             raise ValueError("Cannot publish candidate without source-segment provenance")
-        if candidate["domain"] == "social_circle" and candidate["payload"].get("target_person_id") is None:
-            raise ValueError("Cannot publish social_circle candidate with unresolved hard conflict")
+        publish_block_reason = get_policy(str(candidate["domain"])).publish_block_reason(
+            category=str(candidate["category"]),
+            payload=candidate["payload"],
+        )
+        if publish_block_reason is not None:
+            raise ValueError(publish_block_reason)
         payload = MemoryFactInput(
             workspace=workspace_slug,
             person_id=int(candidate["person_id"]),
@@ -67,22 +78,26 @@ class PublishService:
             summary=candidate["summary"],
             confidence=float(candidate["confidence"]),
             observed_at=candidate["extracted_at"],
+            event_at=str((candidate.get("payload") or {}).get("event_at") or ""),
             source_id=int(candidate["source_id"]),
             quote_text=primary_evidence.get("quote") or candidate["summary"],
         )
         locator = {
             "message_ids": primary_evidence.get("message_ids", []),
             "source_segment_ids": primary_evidence.get("source_segment_ids", []),
+            "session_ids": primary_evidence.get("session_ids", []),
             "chunk_kind": primary_evidence.get("chunk_kind", candidate.get("chunk_kind", "conversation")),
             "candidate_id": int(candidate["id"]),
         }
         source_segment_ids = primary_evidence.get("source_segment_ids") or []
+        session_ids = primary_evidence.get("session_ids") or []
         fact = self.consolidation_service.add_fact(
             conn,
             payload,
             locator=locator,
             source_chunk_id=candidate.get("chunk_id"),
             source_segment_id=int(source_segment_ids[0]) if source_segment_ids else None,
+            session_id=int(session_ids[0]) if session_ids else candidate.get("session_id"),
         )
         updated_candidate = self.candidate_repository.mark_candidate_status(
             conn,

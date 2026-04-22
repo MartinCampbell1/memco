@@ -236,6 +236,8 @@ def build_llm_provider(
 ) -> LLMProvider:
     provider = settings.llm.provider.strip().lower()
     if provider == "mock":
+        if not getattr(settings.llm, "allow_mock_provider", False):
+            raise ValueError("Mock LLM provider is fixture/test-only. Set llm.allow_mock_provider=true to opt in.")
         return MockLLMProvider(
             model=settings.llm.model,
             json_handler=json_handler,

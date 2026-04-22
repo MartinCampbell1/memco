@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timedelta, timezone
 
+from memco.llm import build_llm_provider
 from memco.models.conversation import ConversationImportResult
 from memco.repositories.conversation_repository import ConversationRepository
 from memco.repositories.fact_repository import FactRepository
@@ -18,6 +20,44 @@ def _normalize_speaker_key(label: str) -> str:
     return " ".join(label.strip().lower().split())
 
 
+def _render_message_line(message: dict) -> str:
+    header = []
+    if message.get("occurred_at"):
+        header.append(message["occurred_at"])
+    if message.get("speaker_label"):
+        header.append(message["speaker_label"])
+    prefix = " ".join(header).strip()
+    return f"{prefix}: {message['text']}" if prefix else message["text"]
+
+
+def _parse_occurred_at(value: str) -> datetime | None:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    normalized = normalized.replace(" ", "T")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _explicit_session_key(message: dict) -> str:
+    meta = message.get("meta") or {}
+    raw = (
+        message.get("session_uid")
+        or meta.get("session_uid")
+        or meta.get("session_id")
+        or meta.get("session")
+        or ""
+    )
+    return str(raw).strip()
+
+
 class ConversationIngestService:
     def __init__(
         self,
@@ -27,7 +67,8 @@ class ConversationIngestService:
         self.conversation_repository = conversation_repository or ConversationRepository()
         self.fact_repository = fact_repository or FactRepository()
 
-    def _parse_messages(self, parsed_text: str, source_type: str) -> list[dict]:
+    def _parse_messages(self, parsed_text: str, source_type: str, source_meta: dict | None = None) -> list[dict]:
+        meta = source_meta or {}
         if source_type == "json":
             data = json.loads(parsed_text)
             if isinstance(data, dict):
@@ -41,6 +82,19 @@ class ConversationIngestService:
             for item in data:
                 if not isinstance(item, dict):
                     continue
+                item_meta = item.get("meta")
+                meta = dict(item_meta) if isinstance(item_meta, dict) else {}
+                explicit_session = (
+                    item.get("session_uid")
+                    or item.get("session_id")
+                    or item.get("session")
+                    or meta.get("session_uid")
+                    or meta.get("session_id")
+                    or meta.get("session")
+                    or ""
+                )
+                if explicit_session:
+                    meta["session_uid"] = str(explicit_session).strip()
                 speaker_label = str(
                     item.get("speaker")
                     or item.get("author")
@@ -54,10 +108,30 @@ class ConversationIngestService:
                         "speaker_label": speaker_label,
                         "occurred_at": str(item.get("timestamp") or item.get("occurred_at") or item.get("date") or ""),
                         "text": str(item.get("text") or item.get("content") or item.get("message") or "").strip(),
-                        "meta": {},
+                        "meta": meta,
                     }
                 )
             return [message for message in messages if message["text"]]
+
+        if source_type == "email":
+            raw_messages = meta.get("messages") if isinstance(meta.get("messages"), list) else []
+            messages: list[dict] = []
+            for item in raw_messages:
+                if not isinstance(item, dict):
+                    continue
+                item_meta = item.get("meta")
+                message_meta = dict(item_meta) if isinstance(item_meta, dict) else {}
+                messages.append(
+                    {
+                        "role": str(item.get("role") or "email"),
+                        "speaker_label": str(item.get("speaker") or item.get("from") or ""),
+                        "occurred_at": str(item.get("timestamp") or item.get("date") or ""),
+                        "text": str(item.get("text") or item.get("body") or "").strip(),
+                        "meta": message_meta,
+                    }
+                )
+            if messages:
+                return [message for message in messages if message["text"]]
 
         messages = []
         for line in parsed_text.splitlines():
@@ -128,57 +202,168 @@ class ConversationIngestService:
                 }
         return resolved, list(seen.values())
 
-    def _build_chunks(self, messages: list[dict], max_chars: int) -> list[dict]:
-        chunks: list[dict] = []
-        current_lines: list[str] = []
-        current_len = 0
-        start_index = 0
-        last_index = 0
+    def _assign_sessions(self, messages: list[dict], *, gap_minutes: int) -> tuple[list[dict], list[dict]]:
+        if not messages:
+            return [], []
+        assigned: list[dict] = []
+        sessions: list[dict] = []
+        current_session_index = -1
+        current_explicit_key = ""
+        previous_occurred_at: datetime | None = None
+        gap_threshold = timedelta(minutes=max(1, gap_minutes))
+
+        def start_session(*, detection_method: str, explicit_key: str = "") -> None:
+            nonlocal current_session_index, current_explicit_key
+            current_session_index += 1
+            current_explicit_key = explicit_key
+            sessions.append(
+                {
+                    "session_index": current_session_index,
+                    "session_uid": f"session-{current_session_index + 1:04d}",
+                    "started_at": "",
+                    "ended_at": "",
+                    "detection_method": detection_method,
+                    "meta": {"external_session_key": explicit_key} if explicit_key else {},
+                }
+            )
+
         for index, message in enumerate(messages):
-            header = []
-            if message.get("occurred_at"):
-                header.append(message["occurred_at"])
-            if message.get("speaker_label"):
-                header.append(message["speaker_label"])
-            prefix = " ".join(header).strip()
-            line = f"{prefix}: {message['text']}" if prefix else message["text"]
-            candidate_len = current_len + len(line) + (1 if current_lines else 0)
-            if current_lines and candidate_len > max_chars:
-                text = "\n".join(current_lines)
-                chunks.append(
-                    {
-                        "start_message_index": start_index,
-                        "end_message_index": last_index,
-                        "text": text,
-                        "token_count": max(1, len(text.split())),
-                        "locator": {
-                            "message_indexes": list(range(start_index, last_index + 1)),
-                        },
-                    }
+            explicit_key = _explicit_session_key(message)
+            normalized_explicit = slugify(explicit_key) if explicit_key else ""
+            occurred_at = _parse_occurred_at(message.get("occurred_at", ""))
+            if current_session_index < 0:
+                start_session(detection_method="explicit" if normalized_explicit else "single", explicit_key=normalized_explicit)
+            elif normalized_explicit and normalized_explicit != current_explicit_key:
+                start_session(detection_method="explicit", explicit_key=normalized_explicit)
+            elif not normalized_explicit and previous_occurred_at is not None and occurred_at is not None:
+                if occurred_at - previous_occurred_at > gap_threshold:
+                    start_session(detection_method="gap")
+            session = sessions[current_session_index]
+            if occurred_at is not None:
+                occurred_text = occurred_at.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                if not session["started_at"]:
+                    session["started_at"] = occurred_text
+                session["ended_at"] = occurred_text
+                previous_occurred_at = occurred_at
+            session_meta = dict(message.get("meta") or {})
+            if explicit_key:
+                session_meta["session_uid"] = explicit_key
+            assigned.append(
+                {
+                    **message,
+                    "meta": session_meta,
+                    "session_index": current_session_index,
+                    "session_uid": session["session_uid"],
+                }
+            )
+            session["meta"]["message_indexes"] = [
+                *(session["meta"].get("message_indexes") or []),
+                index,
+            ]
+        return assigned, sessions
+
+    def _build_chunks(
+        self,
+        messages: list[dict],
+        *,
+        max_tokens_per_chunk: int,
+        overlap_tokens: int,
+        count_tokens,
+    ) -> list[dict]:
+        if not messages:
+            return []
+        prepared = [
+            {
+                **message,
+                "message_index": index,
+                "line": _render_message_line(message),
+            }
+            for index, message in enumerate(messages)
+        ]
+        budget = max(1, int(max_tokens_per_chunk))
+        overlap_budget = max(0, int(overlap_tokens))
+        for message in prepared:
+            message["message_token_count"] = max(1, int(count_tokens(text=message["line"])))
+            if int(message["message_token_count"]) > budget:
+                raise ValueError(
+                    "Conversation message exceeds max_tokens_per_chunk; "
+                    "increase ingest.max_tokens_per_chunk or pre-split the source."
                 )
-                current_lines = [line]
-                current_len = len(line)
-                start_index = index
-                last_index = index
-                continue
-            if not current_lines:
-                start_index = index
-            current_lines.append(line)
-            current_len = candidate_len
-            last_index = index
-        if current_lines:
-            text = "\n".join(current_lines)
+
+        chunks: list[dict] = []
+        position = 0
+        overlap_from_indexes: list[int] = []
+
+        while position < len(prepared):
+            start = position
+            session_id = prepared[start].get("session_id")
+            session_uid = prepared[start].get("session_uid", "")
+            token_count = 0
+            end = start - 1
+            cursor = start
+
+            while cursor < len(prepared):
+                message = prepared[cursor]
+                if message.get("session_id") != session_id:
+                    break
+                message_tokens = int(message["message_token_count"])
+                if end >= start and token_count + message_tokens > budget:
+                    break
+                token_count += message_tokens
+                end = cursor
+                cursor += 1
+                if token_count >= budget:
+                    break
+
+            if end < start:
+                end = start
+                cursor = start + 1
+                token_count = int(prepared[start]["message_token_count"])
+
+            chunk_messages = prepared[start : end + 1]
             chunks.append(
                 {
-                    "start_message_index": start_index,
-                    "end_message_index": last_index,
-                    "text": text,
-                    "token_count": max(1, len(text.split())),
+                    "session_id": session_id,
+                    "session_uid": session_uid,
+                    "start_message_index": int(chunk_messages[0]["message_index"]),
+                    "end_message_index": int(chunk_messages[-1]["message_index"]),
+                    "text": "\n".join(item["line"] for item in chunk_messages),
+                    "token_count": token_count,
                     "locator": {
-                        "message_indexes": list(range(start_index, last_index + 1)),
+                        "message_indexes": [int(item["message_index"]) for item in chunk_messages],
+                        "overlap_message_indexes": overlap_from_indexes,
+                        "message_token_counts": {
+                            str(item["message_index"]): int(item["message_token_count"])
+                            for item in chunk_messages
+                        },
+                        "token_budget": budget,
+                        "overlap_tokens": overlap_budget,
+                        "session_id": session_id,
+                        "session_uid": session_uid,
                     },
                 }
             )
+
+            next_position = cursor
+            next_overlap_from_indexes: list[int] = []
+            if next_position < len(prepared) and prepared[next_position].get("session_id") == session_id and overlap_budget > 0:
+                overlap_start = next_position
+                overlap_used = 0
+                for index in range(end, start, -1):
+                    message_tokens = int(prepared[index]["message_token_count"])
+                    if overlap_used + message_tokens > overlap_budget:
+                        break
+                    overlap_used += message_tokens
+                    overlap_start = index
+                if overlap_start < next_position:
+                    next_overlap_from_indexes = [
+                        int(item["message_index"]) for item in prepared[overlap_start:next_position]
+                    ]
+                    next_position = overlap_start
+
+            position = next_position
+            overlap_from_indexes = next_overlap_from_indexes
+
         return chunks
 
     def list_speakers(self, conn, *, conversation_id: int) -> list[dict]:
@@ -234,9 +419,14 @@ class ConversationIngestService:
         if source_row is None:
             raise ValueError("Unknown source")
         source = dict(source_row)
-        messages = self._parse_messages(source["parsed_text"], source["source_type"])
-        started_at = next((message["occurred_at"] for message in messages if message.get("occurred_at")), "")
-        ended_at = next((message["occurred_at"] for message in reversed(messages) if message.get("occurred_at")), "")
+        source_meta = json.loads(source.get("meta_json") or "{}")
+        messages = self._parse_messages(source["parsed_text"], source["source_type"], source_meta)
+        session_messages, session_specs = self._assign_sessions(
+            messages,
+            gap_minutes=settings.ingest.session_gap_minutes,
+        )
+        started_at = next((message["occurred_at"] for message in session_messages if message.get("occurred_at")), "")
+        ended_at = next((message["occurred_at"] for message in reversed(session_messages) if message.get("occurred_at")), "")
         conversation_id = self.conversation_repository.upsert_conversation(
             conn,
             workspace_slug=workspace_slug,
@@ -249,8 +439,23 @@ class ConversationIngestService:
         resolved_messages, speaker_map = self._resolve_speakers(
             conn,
             workspace_slug=workspace_slug,
-            messages=messages,
+            messages=session_messages,
         )
+        token_counter = build_llm_provider(settings).count_tokens
+        self.conversation_repository.prepare_conversation_replace(conn, conversation_id=conversation_id)
+        session_rows = self.conversation_repository.replace_sessions(
+            conn,
+            conversation_id=conversation_id,
+            source_id=source_id,
+            sessions=session_specs,
+        )
+        resolved_messages = [
+            {
+                **message,
+                "session_id": session_rows[int(message["session_index"])]["id"],
+            }
+            for message in resolved_messages
+        ]
         self.conversation_repository.replace_messages(
             conn,
             conversation_id=conversation_id,
@@ -261,7 +466,12 @@ class ConversationIngestService:
             conversation_id=conversation_id,
             mappings=speaker_map,
         )
-        chunks = self._build_chunks(resolved_messages, settings.ingest.max_chunk_chars)
+        chunks = self._build_chunks(
+            resolved_messages,
+            max_tokens_per_chunk=settings.ingest.max_tokens_per_chunk,
+            overlap_tokens=settings.ingest.overlap_tokens,
+            count_tokens=token_counter,
+        )
         self.conversation_repository.replace_chunks(
             conn,
             conversation_id=conversation_id,
@@ -278,6 +488,7 @@ class ConversationIngestService:
         return ConversationImportResult(
             conversation_id=conversation_id,
             source_id=source_id,
+            session_count=len(session_rows),
             message_count=len(resolved_messages),
             chunk_count=len(chunks),
             unresolved_speakers=unresolved,

@@ -59,6 +59,7 @@ This decision does not mean:
 If someone asks the strict original question, the answer must still come from:
 
 - [2026-04-21_memco_release_readiness_gate.md](2026-04-21_memco_release_readiness_gate.md)
+- [2026-04-22_memco_repo_local_status_snapshot.md](2026-04-22_memco_repo_local_status_snapshot.md)
 
 and not from this decision alone.
 

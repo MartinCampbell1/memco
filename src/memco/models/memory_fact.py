@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from memco.models.retrieval import ActorContext
+
 
 class PersonUpsertRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -13,6 +15,7 @@ class PersonUpsertRequest(BaseModel):
     slug: str | None = None
     person_type: str = "human"
     aliases: list[str] = Field(default_factory=list)
+    actor: ActorContext | None = None
 
 
 class PersonAliasUpsertRequest(BaseModel):
@@ -23,6 +26,7 @@ class PersonAliasUpsertRequest(BaseModel):
     person_slug: str | None = None
     alias: str
     alias_type: str = "name"
+    actor: ActorContext | None = None
 
 
 class PersonMergeRequest(BaseModel):
@@ -34,6 +38,7 @@ class PersonMergeRequest(BaseModel):
     to_person_id: int | None = None
     to_person_slug: str | None = None
     reason: str = ""
+    actor: ActorContext | None = None
 
 
 class PersonRecord(BaseModel):
@@ -66,6 +71,7 @@ class MemoryFactInput(BaseModel):
     observed_at: str
     valid_from: str = ""
     valid_to: str = ""
+    event_at: str = ""
     source_id: int
     quote_text: str = ""
 
@@ -90,11 +96,14 @@ class MemoryFactRecord(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     summary: str
     status: str
+    sensitivity: str = "normal"
+    visibility: str = "standard"
     confidence: float
     source_kind: str
     observed_at: str
     valid_from: str = ""
     valid_to: str = ""
+    event_at: str = ""
     created_at: str
     updated_at: str
 
@@ -107,6 +116,7 @@ class FactCandidateRecord(BaseModel):
     person_id: int | None = None
     source_id: int
     conversation_id: int | None = None
+    session_id: int | None = None
     chunk_kind: str
     chunk_id: int | None = None
     domain: str

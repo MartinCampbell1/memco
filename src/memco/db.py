@@ -162,8 +162,16 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
     return _sqlite_connection(db_path)
 
 
+def _is_postgres(conn) -> bool:
+    return getattr(conn, "engine", "sqlite") == "postgres"
+
+
+def _engine_sql(conn, *, sqlite_sql: str, postgres_sql: str) -> str:
+    return postgres_sql if _is_postgres(conn) else sqlite_sql
+
+
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
-    if getattr(conn, "engine", "sqlite") == "postgres":
+    if _is_postgres(conn):
         rows = conn.execute(
             """
             SELECT column_name
@@ -181,6 +189,51 @@ def _ensure_column(conn: sqlite3.Connection, table_name: str, column_name: str, 
     if column_name in _table_columns(conn, table_name):
         return
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_sql}")
+
+
+def _ensure_sessions_table(conn) -> None:
+    conn.execute(
+        _engine_sql(
+            conn,
+            sqlite_sql="""
+            CREATE TABLE IF NOT EXISTS sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+              source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+              session_index INTEGER NOT NULL,
+              session_uid TEXT NOT NULL,
+              started_at TEXT NOT NULL DEFAULT '',
+              ended_at TEXT NOT NULL DEFAULT '',
+              detection_method TEXT NOT NULL DEFAULT 'single',
+              meta_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              UNIQUE(conversation_id, session_index),
+              UNIQUE(conversation_id, session_uid)
+            )
+            """,
+            postgres_sql="""
+            CREATE TABLE IF NOT EXISTS sessions (
+              id BIGSERIAL PRIMARY KEY,
+              conversation_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+              source_id BIGINT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+              session_index INTEGER NOT NULL,
+              session_uid TEXT NOT NULL,
+              started_at TEXT NOT NULL DEFAULT '',
+              ended_at TEXT NOT NULL DEFAULT '',
+              detection_method TEXT NOT NULL DEFAULT 'single',
+              meta_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              UNIQUE(conversation_id, session_index),
+              UNIQUE(conversation_id, session_uid)
+            )
+            """,
+        )
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_conversation_order ON sessions(conversation_id, session_index)"
+    )
 
 
 def _ensure_migrations_table(conn) -> None:
@@ -220,6 +273,11 @@ def _apply_versioned_sql(conn, *, version: str, script: str) -> None:
 
 
 def run_migrations(conn: sqlite3.Connection) -> None:
+    session_fk_sql = _engine_sql(
+        conn,
+        sqlite_sql="INTEGER REFERENCES sessions(id) ON DELETE SET NULL",
+        postgres_sql="BIGINT REFERENCES sessions(id) ON DELETE SET NULL",
+    )
     _ensure_column(
         conn,
         "fact_candidates",
@@ -240,10 +298,70 @@ def run_migrations(conn: sqlite3.Connection) -> None:
     )
     _ensure_column(
         conn,
+        "memory_facts",
+        "sensitivity",
+        "sensitivity TEXT NOT NULL DEFAULT 'normal'",
+    )
+    _ensure_column(
+        conn,
+        "memory_facts",
+        "visibility",
+        "visibility TEXT NOT NULL DEFAULT 'standard'",
+    )
+    _ensure_column(
+        conn,
+        "memory_facts",
+        "event_at",
+        "event_at TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_column(
+        conn,
         "memory_evidence",
         "source_segment_id",
-        "source_segment_id INTEGER REFERENCES source_segments(id) ON DELETE SET NULL",
+        _engine_sql(
+            conn,
+            sqlite_sql="source_segment_id INTEGER REFERENCES source_segments(id) ON DELETE SET NULL",
+            postgres_sql="source_segment_id BIGINT REFERENCES source_segments(id) ON DELETE SET NULL",
+        ),
     )
+    _ensure_sessions_table(conn)
+    _ensure_column(
+        conn,
+        "conversation_messages",
+        "session_id",
+        f"session_id {session_fk_sql}",
+    )
+    _ensure_column(
+        conn,
+        "conversation_chunks",
+        "session_id",
+        f"session_id {session_fk_sql}",
+    )
+    _ensure_column(
+        conn,
+        "source_segments",
+        "session_id",
+        f"session_id {session_fk_sql}",
+    )
+    _ensure_column(
+        conn,
+        "fact_candidates",
+        "session_id",
+        f"session_id {session_fk_sql}",
+    )
+    _ensure_column(
+        conn,
+        "memory_evidence",
+        "session_id",
+        f"session_id {session_fk_sql}",
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_messages_session ON conversation_messages(session_id, message_index)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversation_chunks_session ON conversation_chunks(session_id, chunk_index)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_source_segments_session ON source_segments(session_id)")
 
 
 def initialize_db(db_path: Path) -> None:
@@ -261,4 +379,4 @@ def initialize_db(db_path: Path) -> None:
                 version=SQLITE_BASE_VERSION,
                 script=SCHEMA_PATH.read_text(encoding="utf-8"),
             )
-            run_migrations(conn)
+        run_migrations(conn)

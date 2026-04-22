@@ -7,6 +7,7 @@ from memco.models.retrieval import RetrievalRequest
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
 from memco.repositories.source_repository import SourceRepository
+from memco.api.deps import build_internal_actor
 from memco.services.consolidation_service import ConsolidationService
 from memco.services.retrieval_service import RetrievalService
 
@@ -18,6 +19,7 @@ def test_retrieval_logs_are_redacted(settings):
     retrieval = RetrievalService()
     log_repo = RetrievalLogRepository()
     loaded_settings = load_settings(settings.root)
+    actor = build_internal_actor(loaded_settings, actor_id="dev-owner")
 
     with get_connection(settings.db_path) as conn:
         person = fact_repo.upsert_person(
@@ -56,7 +58,7 @@ def test_retrieval_logs_are_redacted(settings):
         )
         retrieval.retrieve(
             conn,
-            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"),
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?", actor=actor),
             settings=loaded_settings,
             route_name="retrieve",
         )
@@ -79,6 +81,7 @@ def test_retrieval_logs_store_fallback_refs_without_chunk_text(settings, tmp_pat
     retrieval = RetrievalService()
     log_repo = RetrievalLogRepository()
     loaded_settings = load_settings(settings.root)
+    actor = build_internal_actor(loaded_settings, actor_id="dev-owner")
     source = tmp_path / "fallback-log.json"
     source.write_text(
         '{"messages":[{"speaker":"Alice","timestamp":"2026-04-21T10:00:00Z","text":"I attended PyCon."}]}',
@@ -109,7 +112,7 @@ def test_retrieval_logs_store_fallback_refs_without_chunk_text(settings, tmp_pat
         )
         retrieval.retrieve(
             conn,
-            RetrievalRequest(workspace="default", person_slug="alice", query="Did Alice attend PyCon?"),
+            RetrievalRequest(workspace="default", person_slug="alice", query="Did Alice attend PyCon?", actor=actor),
             settings=loaded_settings,
             route_name="retrieve",
         )
@@ -129,6 +132,7 @@ def test_retrieval_logs_include_temporal_mode_in_domain_filter(settings):
     retrieval = RetrievalService()
     log_repo = RetrievalLogRepository()
     loaded_settings = load_settings(settings.root)
+    actor = build_internal_actor(loaded_settings, actor_id="dev-owner")
 
     with get_connection(settings.db_path) as conn:
         person = fact_repo.upsert_person(
@@ -183,7 +187,7 @@ def test_retrieval_logs_include_temporal_mode_in_domain_filter(settings):
         )
         retrieval.retrieve(
             conn,
-            RetrievalRequest(workspace="default", person_slug="alice", query="Where did Alice live before Lisbon?", temporal_mode="history"),
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where did Alice live before Lisbon?", temporal_mode="history", actor=actor),
             settings=loaded_settings,
             route_name="retrieve",
         )
@@ -199,6 +203,7 @@ def test_retrieval_logs_can_be_filtered_by_person(settings):
     retrieval = RetrievalService()
     log_repo = RetrievalLogRepository()
     loaded_settings = load_settings(settings.root)
+    actor = build_internal_actor(loaded_settings, actor_id="dev-owner")
 
     with get_connection(settings.db_path) as conn:
         alice = fact_repo.upsert_person(
@@ -261,13 +266,13 @@ def test_retrieval_logs_can_be_filtered_by_person(settings):
         )
         retrieval.retrieve(
             conn,
-            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"),
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?", actor=actor),
             settings=loaded_settings,
             route_name="retrieve",
         )
         retrieval.retrieve(
             conn,
-            RetrievalRequest(workspace="default", person_slug="bob", query="Where does Bob live?"),
+            RetrievalRequest(workspace="default", person_slug="bob", query="Where does Bob live?", actor=actor),
             settings=loaded_settings,
             route_name="retrieve",
         )

@@ -16,6 +16,7 @@ class ConsolidationService:
         locator: dict | None = None,
         source_chunk_id: int | None = None,
         source_segment_id: int | None = None,
+        session_id: int | None = None,
     ) -> dict:
         person_id = payload.person_id
         if person_id is None:
@@ -39,10 +40,12 @@ class ConsolidationService:
             observed_at=payload.observed_at,
             valid_from=payload.valid_from,
             valid_to=payload.valid_to,
+            event_at=payload.event_at,
             source_id=payload.source_id,
             quote_text=payload.quote_text,
             source_chunk_id=source_chunk_id,
             source_segment_id=source_segment_id,
+            session_id=session_id,
             locator=locator,
         )
 

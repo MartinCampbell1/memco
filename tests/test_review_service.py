@@ -58,6 +58,7 @@ def _seed_review_candidate(conn):
 
 def test_enqueue_review_queue_serializes_candidate_snapshot_and_reason(settings):
     repository = ReviewRepository()
+    service = ReviewService()
 
     with get_connection(settings.db_path) as conn:
         person, candidate = _seed_review_candidate(conn)
@@ -69,12 +70,16 @@ def test_enqueue_review_queue_serializes_candidate_snapshot_and_reason(settings)
             reason="relation_target_unresolved",
             candidate_id=int(candidate["id"]),
         )
-        row = repository.resolve(conn, queue_id=queue_id, decision="pending")
+        row = service.list_items(conn, workspace_slug="default", status="pending")[0]
 
     assert row["candidate_id"] == int(candidate["id"])
     assert row["status"] == "pending"
     assert row["reason"] == "relation_target_unresolved"
     assert row["candidate"]["canonical_key"] == "alice:social_circle:friend:bob"
+    assert row["candidate_reason_codes"] == ["relation_target_unresolved"]
+    assert row["candidate_domain"] == "social_circle"
+    assert row["candidate_summary"] == "Alice says Bob is their friend."
+    assert row["next_action_hint"] == "review-resolve approved|rejected"
 
 
 def test_resolve_review_queue_updates_status_and_candidate_state(settings):
@@ -218,6 +223,63 @@ def test_rejected_review_does_not_mutate_candidate_person_or_target(settings):
     assert refreshed["candidate_status"] == "rejected"
     assert refreshed["person_id"] == int(person["id"])
     assert refreshed["payload"]["target_person_id"] is None
+
+
+def test_review_resolution_reason_is_enriched_for_operator_use(settings):
+    repository = ReviewRepository()
+    service = ReviewService()
+
+    with get_connection(settings.db_path) as conn:
+        person, candidate = _seed_review_candidate(conn)
+        queue_id = repository.enqueue(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            candidate=candidate,
+            reason="relation_target_unresolved",
+            candidate_id=int(candidate["id"]),
+        )
+        result = service.resolve_with_person(
+            conn,
+            queue_id=queue_id,
+            decision="approved",
+            reason="resolved target manually",
+            candidate_person_id=int(person["id"]),
+        )
+
+    assert "resolution_reason" in result
+    assert result["resolution_reason"] == "resolved target manually"
+    assert "decision_summary" in result
+    assert "approved" in result["decision_summary"]
+    assert result["candidate_reason"] == "resolved target manually"
+    assert result["candidate_reason_codes"] == ["resolved target manually"]
+
+
+def test_review_service_rejects_invalid_decision(settings):
+    repository = ReviewRepository()
+    service = ReviewService()
+
+    with get_connection(settings.db_path) as conn:
+        person, candidate = _seed_review_candidate(conn)
+        queue_id = repository.enqueue(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            candidate=candidate,
+            reason="relation_target_unresolved",
+            candidate_id=int(candidate["id"]),
+        )
+        try:
+            service.resolve_with_person(
+                conn,
+                queue_id=queue_id,
+                decision="maybe",
+                reason="invalid state",
+            )
+        except ValueError as exc:
+            assert "decision must be one of" in str(exc)
+        else:  # pragma: no cover
+            raise AssertionError("expected invalid review decision to be rejected")
 
 
 def test_list_items_for_candidates_does_not_drop_older_matching_review_items(settings):

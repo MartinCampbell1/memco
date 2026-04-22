@@ -41,6 +41,7 @@ class CandidateService:
                 person_id=item.get("person_id"),
                 source_id=int(item["source_id"]),
                 conversation_id=item.get("conversation_id"),
+                session_id=item.get("session_id"),
                 chunk_kind=item.get("chunk_kind", "conversation"),
                 chunk_id=item.get("chunk_id"),
                 domain=item["domain"],

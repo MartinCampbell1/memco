@@ -18,8 +18,8 @@ That means:
 
 ### Infrastructure
 
-- SQLite is the active backend.
-- The private single-user release still defaults to SQLite.
+- PostgreSQL is the canonical storage contract.
+- SQLite remains available only as a compatibility/dev fallback and is not the canonical backend.
 - The repository now includes an initial PostgreSQL + Docker Compose + versioned SQL migration path for the strict original-brief convergence track.
 - The code also supports a no-Docker Postgres path through `MEMCO_STORAGE_ENGINE=postgres` plus `MEMCO_DATABASE_URL`.
 - The no-Docker Postgres path is the recommended local runtime path on this machine.
@@ -58,20 +58,23 @@ That means:
 - The current `sources` table remains the underlying storage table for the shipped slice, with `source_documents` as the explicit source-document contract surface.
 - Conversation tables remain an indexed/convenience projection on top of that source-document/source-segment layer.
 - This materially closes the generic source-layer gap for the current architecture, even though broader future ingestion formats may still add more segment types later.
+- Current implemented ingestion sources for the accepted repo-local contract are `text`, `markdown`, `chat`, `json`, `csv`, `email`, and `pdf`.
+- `WhatsApp` and `Telegram` parser support remain roadmap/reference-track items, not current repo-local contract claims.
 
 ### LLM / Provider Architecture
 
 - The code now includes a provider-agnostic LLM layer with explicit `complete_json`, `complete_text`, `count_tokens`, and `estimate_cost` contracts.
-- The shipped private slice still defaults to the `mock` provider, which uses the deterministic extraction path as its fixture/fallback implementation.
+- The shipped runtime now defaults to the `openai-compatible` provider path.
+- The `mock` provider remains available only as an explicit fixture/test fallback and is no longer the silent runtime default.
 - An OpenAI-compatible adapter now exists and is verified through a local compatible HTTP smoke path.
-- The current private release still defaults to `mock`; that is a product choice, not a missing adapter capability.
+- The private acceptance/eval path still uses the explicit mock/deterministic fixture route where deterministic test behavior is required; that is a testing choice, not the runtime default.
 
 ### Evaluation Surface
 
 - The repository now ships an acceptance-style eval artifact for the private slice.
 - The current eval artifact includes tracked token-usage summaries.
 - Token usage is now tracked for both:
-  - the default mock/deterministic provider path
+  - the explicit mock/deterministic fixture path
   - the OpenAI-compatible provider path exercised in tests
 - This is still not the final strict original-brief acceptance/reporting closure.
 

@@ -3,9 +3,32 @@ from __future__ import annotations
 import os
 import secrets
 from pathlib import Path
+from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+PRIMARY_STORAGE_ENGINE = "postgres"
+SQLITE_FALLBACK_ENGINE = "sqlite"
+SUPPORTED_STORAGE_ENGINES = {PRIMARY_STORAGE_ENGINE, SQLITE_FALLBACK_ENGINE}
+
+
+class ApiActorPolicy(BaseModel):
+    actor_type: Literal["system", "owner", "admin", "eval"]
+    auth_token: str
+    can_view_sensitive: bool = False
+    allowed_person_ids: list[int] = Field(default_factory=list)
+    allowed_domains: list[str] = Field(default_factory=list)
+
+
+def _default_actor_policies() -> dict[str, ApiActorPolicy]:
+    return {
+        "system": ApiActorPolicy(actor_type="system", auth_token=secrets.token_hex(16), can_view_sensitive=True),
+        "dev-owner": ApiActorPolicy(actor_type="owner", auth_token=secrets.token_hex(16), can_view_sensitive=True),
+        "maintenance-admin": ApiActorPolicy(actor_type="admin", auth_token=secrets.token_hex(16), can_view_sensitive=False),
+        "eval-runner": ApiActorPolicy(actor_type="eval", auth_token=secrets.token_hex(16), can_view_sensitive=False),
+    }
 
 
 class ApiSettings(BaseModel):
@@ -13,25 +36,40 @@ class ApiSettings(BaseModel):
     port: int = 8788
     auth_token: str = ""
     require_actor_scope: bool = False
+    actor_policies: dict[str, ApiActorPolicy] = Field(default_factory=_default_actor_policies)
 
 
 class LLMSettings(BaseModel):
-    provider: str = "mock"
-    model: str = "fixture"
+    provider: str = "openai-compatible"
+    model: str = "gpt-4o-mini"
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
+    allow_mock_provider: bool = False
 
 
 class StorageSettings(BaseModel):
-    engine: str = "sqlite"
+    engine: str = PRIMARY_STORAGE_ENGINE
+    contract_engine: str = PRIMARY_STORAGE_ENGINE
     db_path: str = "var/db/memco.db"
     database_url: str = "postgresql://memco:memco@127.0.0.1:5432/memco"
+
+    @field_validator("engine", "contract_engine")
+    @classmethod
+    def _validate_engine(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_STORAGE_ENGINES:
+            supported = ", ".join(sorted(SUPPORTED_STORAGE_ENGINES))
+            raise ValueError(f"storage engine must be one of: {supported}")
+        return normalized
 
 
 class IngestSettings(BaseModel):
     max_chunk_chars: int = 2200
+    max_tokens_per_chunk: int = 400
+    overlap_tokens: int = 40
+    session_gap_minutes: int = 240
     source_types: list[str] = Field(
-        default_factory=lambda: ["note", "chat", "json", "csv", "markdown", "text"]
+        default_factory=lambda: ["note", "chat", "json", "csv", "markdown", "text", "email", "pdf"]
     )
 
 
@@ -56,9 +94,17 @@ class Settings(BaseModel):
 
     @property
     def database_target(self) -> str:
-        if self.storage.engine == "postgres":
+        if self.storage.engine == PRIMARY_STORAGE_ENGINE:
             return self.storage.database_url
         return str(self.db_path)
+
+    @property
+    def storage_contract(self) -> str:
+        return f"{self.storage.contract_engine}-primary"
+
+    @property
+    def storage_role(self) -> str:
+        return "primary" if self.storage.engine == self.storage.contract_engine else "fallback"
 
     @property
     def config_path(self) -> Path:
@@ -103,6 +149,7 @@ def load_settings(root: str | Path | None = None) -> Settings:
     env_llm_model = os.environ.get("MEMCO_LLM_MODEL")
     env_llm_base_url = os.environ.get("MEMCO_LLM_BASE_URL")
     env_llm_api_key = os.environ.get("MEMCO_LLM_API_KEY")
+    env_llm_allow_mock_provider = os.environ.get("MEMCO_LLM_ALLOW_MOCK_PROVIDER")
     env_storage_engine = os.environ.get("MEMCO_STORAGE_ENGINE")
     env_database_url = os.environ.get("MEMCO_DATABASE_URL")
     env_enable_retrieval_logs = os.environ.get("MEMCO_ENABLE_RETRIEVAL_LOGS")
@@ -134,6 +181,9 @@ def load_settings(root: str | Path | None = None) -> Settings:
     if env_llm_api_key is not None:
         llm = raw_data.setdefault("llm", {})
         llm["api_key"] = env_llm_api_key
+    if env_llm_allow_mock_provider is not None:
+        llm = raw_data.setdefault("llm", {})
+        llm["allow_mock_provider"] = env_llm_allow_mock_provider.strip().lower() in {"1", "true", "yes", "on"}
     if env_storage_engine:
         storage = raw_data.setdefault("storage", {})
         storage["engine"] = env_storage_engine
@@ -149,6 +199,10 @@ def load_settings(root: str | Path | None = None) -> Settings:
 
     raw_data["root"] = resolved_root
     settings = Settings.model_validate(raw_data)
+    llm_raw = raw_data.get("llm", {}) or {}
+    explicit_mock_provider = str(llm_raw.get("provider", "")).strip().lower() == "mock"
+    if explicit_mock_provider and "allow_mock_provider" not in llm_raw:
+        settings.llm.allow_mock_provider = True
     if not settings.logging.query_hash_salt:
         settings.logging.query_hash_salt = secrets.token_hex(16)
     return settings

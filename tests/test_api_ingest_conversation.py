@@ -9,6 +9,18 @@ from memco.db import get_connection
 from memco.services.ingest_service import IngestService
 
 
+def _maintenance_actor(settings):
+    policy = settings.api.actor_policies["maintenance-admin"]
+    return {
+        "actor_id": "maintenance-admin",
+        "actor_type": policy.actor_type,
+        "auth_token": policy.auth_token,
+        "allowed_person_ids": [],
+        "allowed_domains": [],
+        "can_view_sensitive": policy.can_view_sensitive,
+    }
+
+
 def test_api_ingest_conversation_route(monkeypatch, settings, tmp_path):
     source = tmp_path / "api-conversation.json"
     source.write_text(
@@ -41,12 +53,14 @@ def test_api_ingest_conversation_route(monkeypatch, settings, tmp_path):
             "source_id": imported.source_id,
             "conversation_uid": "main",
             "title": "API Conversation",
+            "actor": _maintenance_actor(settings),
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["source_id"] == imported.source_id
+    assert payload["session_count"] == 1
     assert payload["message_count"] == 2
     assert payload["chunk_count"] >= 1
 
@@ -61,6 +75,7 @@ def test_api_ingest_text_route(monkeypatch, settings):
             "source_type": "note",
             "title": "inline",
             "text": "Alice lives in Lisbon.",
+            "actor": _maintenance_actor(settings),
         },
     )
 
@@ -94,6 +109,7 @@ def test_api_ingest_pipeline_route_happy_path(monkeypatch, settings, tmp_path):
             "person_display_name": "Alice",
             "person_slug": "alice",
             "aliases": ["Alice"],
+            "actor": _maintenance_actor(settings),
         },
     )
 
@@ -115,6 +131,7 @@ def test_api_ingest_pipeline_route_reports_pending_review_items(monkeypatch, set
             "text": "Guest: Bob is my friend.",
             "source_type": "text",
             "title": "inline-review",
+            "actor": _maintenance_actor(settings),
         },
     )
 

@@ -18,6 +18,10 @@ Use it to answer:
 - can one private owner/operator run the system end to end today?
 - is the current local release honest about what it does and does not cover?
 
+Fast repo-local status summary:
+
+- [2026-04-22_memco_repo_local_status_snapshot.md](2026-04-22_memco_repo_local_status_snapshot.md)
+
 Do not use it to claim:
 
 - strict original execution-brief completion
@@ -55,7 +59,7 @@ uv run pytest -q \
 
 Current recorded result:
 
-- `23 passed in 5.44s`
+- `31 passed in 1.73s`
 
 ## What This Gate Actually Proves
 
@@ -63,7 +67,7 @@ Current recorded result:
 - an operator can create a person, import source material, convert source to conversation, extract candidates, resolve pending review items, publish facts, retrieve facts, and get refusal on unsupported claims
 - rollback of a superseded current-state fact no longer leaves two active facts
 - retrieval logs are redacted and do not store raw private query/fact text
-- the current private eval artifact is still green (`20/20`) and now reports tracked token usage for the mock/deterministic path
+- the current private eval artifact is still green (`24/24`) and now reports tracked token usage for the mock/deterministic path
 
 ## What This Gate Does Not Prove
 

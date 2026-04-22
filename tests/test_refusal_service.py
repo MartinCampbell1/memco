@@ -8,7 +8,12 @@ def test_refusal_service_refuses_when_no_hits():
     service = RefusalService()
     result = service.build_answer(
         query="Does Alice have a sister?",
-        retrieval_result=RetrievalResult(query="Does Alice have a sister?", unsupported_premise_detected=True, hits=[]),
+        retrieval_result=RetrievalResult(
+            query="Does Alice have a sister?",
+            unsupported_premise_detected=True,
+            support_level="unsupported",
+            hits=[],
+        ),
     )
     assert result["refused"] is True
     assert "confirmed memory evidence" in result["answer"]

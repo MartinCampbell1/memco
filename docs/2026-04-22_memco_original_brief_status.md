@@ -12,6 +12,7 @@ It is not the active repo-local release gate.
 For the active repo-local release surface, use:
 
 - [2026-04-21_memco_release_readiness_gate.md](2026-04-21_memco_release_readiness_gate.md)
+- [2026-04-22_memco_repo_local_status_snapshot.md](2026-04-22_memco_repo_local_status_snapshot.md)
 
 ## Current Status
 

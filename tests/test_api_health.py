@@ -19,4 +19,7 @@ def test_health_returns_runtime_snapshot(monkeypatch, settings):
     assert Path(payload["root"]) == settings.root
     assert Path(payload["db"]) == settings.db_path
     assert payload["storage_engine"] == "sqlite"
+    assert payload["storage_contract_engine"] == "postgres"
+    assert payload["storage_contract"] == "postgres-primary"
+    assert payload["storage_role"] == "fallback"
     assert Path(payload["database_target"]) == settings.db_path

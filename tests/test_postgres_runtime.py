@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from memco.api.app import app
 from memco.config import Settings
-from memco.db import POSTGRES_BASE_VERSION, initialize_db
+from memco.db import POSTGRES_BASE_VERSION, POSTGRES_SCHEMA_PATH, SCHEMA_PATH, initialize_db
 
 
 class _FakeRow(dict):
@@ -90,5 +91,38 @@ def test_health_reports_postgres_target(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["storage_engine"] == "postgres"
+    assert payload["storage_contract_engine"] == "postgres"
+    assert payload["storage_contract"] == "postgres-primary"
+    assert payload["storage_role"] == "primary"
     assert payload["db"] == "postgresql://memco:memco@db:5432/memco"
     assert payload["database_target"] == "postgresql://memco:memco@db:5432/memco"
+
+
+def test_sqlite_and_postgres_base_schema_cover_same_core_relations():
+    sqlite_schema = SCHEMA_PATH.read_text(encoding="utf-8")
+    postgres_schema = POSTGRES_SCHEMA_PATH.read_text(encoding="utf-8")
+    relations = {
+        "workspaces",
+        "sources",
+        "source_documents",
+        "source_chunks",
+        "source_chunk_fts",
+        "persons",
+        "conversations",
+        "sessions",
+        "conversation_messages",
+        "conversation_chunks",
+        "conversation_chunk_fts",
+        "source_segments",
+        "memory_facts",
+        "memory_evidence",
+        "memory_operations",
+        "fact_candidates",
+        "review_queue",
+        "retrieval_logs",
+    }
+
+    for relation in relations:
+        pattern = rf"CREATE\s+(?:VIRTUAL\s+TABLE|TABLE|VIEW|OR\s+REPLACE\s+VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?{relation}\b"
+        assert re.search(pattern, sqlite_schema, re.IGNORECASE), relation
+        assert re.search(pattern, postgres_schema, re.IGNORECASE), relation

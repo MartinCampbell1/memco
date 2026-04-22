@@ -97,7 +97,7 @@ But future docs must not:
 
 Most recent verification snapshot:
 
-- `uv run pytest -q` -> `135 passed in 19.95s`
+- `uv run pytest -q` -> `266 passed`
 - `MEMCO_DATABASE_URL='postgresql://USER@127.0.0.1:5432/postgres' uv run memco postgres-smoke` -> passed
 - `uv run pytest -q tests/test_postgres_live_smoke.py` -> passed on this machine
 - `uv run pytest -q tests/test_docs_contract.py` -> `7 passed`

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 
+from memco.consolidation import get_policy
 from memco.repositories.source_repository import SourceRepository
 from memco.utils import isoformat_z, json_dumps, slugify
 
 
 class FactRepository:
-    CURRENT_STATE_CATEGORIES = {
-        ("biography", "residence"),
-        ("preferences", "preference"),
-        ("work", "employment"),
-        ("work", "role"),
+    SENSITIVE_FACT_CATEGORIES = {
+        ("biography", "family"),
+        ("biography", "constraints"),
+        ("biography", "identity"),
+        ("biography", "origin"),
+        ("psychometrics", "trait"),
     }
 
     def ensure_workspace(self, conn, slug: str) -> int:
@@ -134,16 +136,20 @@ class FactRepository:
         observed_at: str,
         valid_from: str,
         valid_to: str,
+        event_at: str,
         source_id: int,
         quote_text: str,
         source_chunk_id: int | None = None,
         source_segment_id: int | None = None,
+        session_id: int | None = None,
         support_type: str = "supports",
         supersedes_fact_id: int | None = None,
         locator: dict | None = None,
     ) -> dict:
         workspace_id = self.ensure_workspace(conn, workspace_slug)
         now = isoformat_z()
+        policy = get_policy(domain)
+        sensitivity, visibility = self.classify_fact_access(domain=domain, category=category)
         normalized_chunk_id = source_chunk_id
         if normalized_chunk_id is not None:
             row = conn.execute("SELECT id FROM source_chunks WHERE id = ?", (normalized_chunk_id,)).fetchone()
@@ -163,6 +169,7 @@ class FactRepository:
                 source_id=source_id,
                 source_chunk_id=normalized_chunk_id,
                 source_segment_id=source_segment_id,
+                session_id=session_id,
                 quote_text=quote_text,
                 support_type=support_type,
                 source_confidence=confidence,
@@ -184,6 +191,14 @@ class FactRepository:
                 ),
             )
             return self.get_fact(conn, fact_id=int(duplicate["id"]))
+        decision = policy.resolve(
+            category=category,
+            canonical_key=canonical_key,
+            payload=payload,
+            observed_at=observed_at,
+            existing_fact=None,
+        )
+        previous = None
         if supersedes_fact_id is None:
             previous = self.find_current_fact(
                 conn,
@@ -194,14 +209,27 @@ class FactRepository:
                 canonical_key=canonical_key,
             )
             if previous is not None:
-                supersedes_fact_id = int(previous["id"])
+                decision = policy.resolve(
+                    category=category,
+                    canonical_key=canonical_key,
+                    payload=payload,
+                    observed_at=observed_at,
+                    existing_fact=previous,
+                )
+                if decision.action == "supersede_existing":
+                    supersedes_fact_id = int(previous["id"])
+        inserted_status = "active"
+        superseded_by_fact_id = None
+        if decision.action == "insert_historical" and previous is not None:
+            inserted_status = "superseded"
+            superseded_by_fact_id = int(previous["id"])
         cursor = conn.execute(
             """
             INSERT INTO memory_facts (
                 workspace_id, person_id, domain, category, subcategory, canonical_key,
-                payload_json, summary, status, confidence, source_kind, observed_at,
-                valid_from, valid_to, supersedes_fact_id, superseded_by_fact_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                payload_json, summary, status, sensitivity, visibility, confidence, source_kind, observed_at,
+                valid_from, valid_to, event_at, supersedes_fact_id, superseded_by_fact_id, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
@@ -212,12 +240,17 @@ class FactRepository:
                 canonical_key,
                 json_dumps(payload),
                 summary,
+                inserted_status,
+                sensitivity,
+                visibility,
                 confidence,
                 source_kind,
                 observed_at,
                 valid_from,
                 valid_to,
+                event_at,
                 supersedes_fact_id,
+                superseded_by_fact_id,
                 now,
                 now,
             ),
@@ -240,20 +273,22 @@ class FactRepository:
                 reason=f"Superseded by fact {fact_id}",
                 superseded_by_fact_id=fact_id,
             )
-        conn.execute(
-            """
-            UPDATE memory_facts
-            SET valid_from = CASE WHEN valid_from = '' THEN ? ELSE valid_from END
-            WHERE id = ?
-            """,
-            (observed_at, fact_id),
-        )
+        if self.is_current_state_category(domain=domain, category=category):
+            conn.execute(
+                """
+                UPDATE memory_facts
+                SET valid_from = CASE WHEN valid_from = '' THEN ? ELSE valid_from END
+                WHERE id = ?
+                """,
+                (observed_at, fact_id),
+            )
         self.add_evidence(
             conn,
             fact_id=fact_id,
             source_id=source_id,
             source_chunk_id=normalized_chunk_id,
             source_segment_id=source_segment_id,
+            session_id=session_id,
             quote_text=quote_text,
             support_type=support_type,
             source_confidence=confidence,
@@ -263,19 +298,24 @@ class FactRepository:
             """
             INSERT INTO memory_operations (
                 workspace_id, person_id, operation_type, target_fact_id, before_json, after_json, reason, created_at
-            ) VALUES (?, ?, 'add', ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, 'add', ?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
                 person_id,
                 fact_id,
-                json_dumps({"supersedes_fact_id": supersedes_fact_id} if supersedes_fact_id else {}),
-                json_dumps({"canonical_key": canonical_key, "domain": domain, "category": category}),
-                "",
+                json_dumps({"supersedes_fact_id": supersedes_fact_id, "conflict_kind": decision.conflict_kind} if supersedes_fact_id else {"conflict_kind": decision.conflict_kind}),
+                json_dumps({"canonical_key": canonical_key, "domain": domain, "category": category, "status": inserted_status}),
+                decision.reason,
                 now,
             ),
         )
         return self.get_fact(conn, fact_id=fact_id)
+
+    def classify_fact_access(self, *, domain: str, category: str) -> tuple[str, str]:
+        if (domain, category) in self.SENSITIVE_FACT_CATEGORIES:
+            return "high", "owner_only"
+        return "normal", "standard"
 
     def find_duplicate_fact(
         self,
@@ -307,6 +347,7 @@ class FactRepository:
         source_id: int,
         source_chunk_id: int | None,
         source_segment_id: int | None,
+        session_id: int | None,
         quote_text: str,
         support_type: str,
         source_confidence: float,
@@ -324,24 +365,26 @@ class FactRepository:
             FROM memory_evidence
             WHERE fact_id = ? AND source_id = ? AND COALESCE(chunk_id, -1) = COALESCE(?, -1)
               AND COALESCE(source_segment_id, -1) = COALESCE(?, -1)
+              AND COALESCE(session_id, -1) = COALESCE(?, -1)
               AND quote_text = ? AND locator_json = ?
             LIMIT 1
             """,
-            (fact_id, source_id, source_chunk_id, normalized_segment_id, quote_text, locator_json),
+            (fact_id, source_id, source_chunk_id, normalized_segment_id, session_id, quote_text, locator_json),
         ).fetchone()
         if existing is not None:
             return
         conn.execute(
             """
             INSERT INTO memory_evidence (
-                fact_id, source_id, chunk_id, source_segment_id, quote_text, locator_json, support_type, source_confidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                fact_id, source_id, chunk_id, source_segment_id, session_id, quote_text, locator_json, support_type, source_confidence
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fact_id,
                 source_id,
                 source_chunk_id,
                 normalized_segment_id,
+                session_id,
                 quote_text,
                 locator_json,
                 support_type,
@@ -528,7 +571,7 @@ class FactRepository:
         return self.get_fact(conn, fact_id=int(target_fact_id))
 
     def is_current_state_category(self, *, domain: str, category: str) -> bool:
-        return (domain, category) in self.CURRENT_STATE_CATEGORIES
+        return get_policy(domain).is_current_state(category)
 
     def find_current_fact(
         self,
@@ -769,7 +812,7 @@ class FactRepository:
         fact["payload"] = json.loads(fact.pop("payload_json") or "{}")
         evidence_rows = conn.execute(
             """
-            SELECT source_id, chunk_id, source_segment_id, quote_text, locator_json, support_type, source_confidence
+            SELECT id AS evidence_id, source_id, chunk_id, source_segment_id, session_id, quote_text, locator_json, support_type, source_confidence
             FROM memory_evidence
             WHERE fact_id = ?
             ORDER BY id ASC

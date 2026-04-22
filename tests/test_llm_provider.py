@@ -5,7 +5,10 @@ import threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
+
 from memco.config import Settings
+from memco.config import load_settings
 from memco.db import get_connection
 from memco.llm import MockLLMProvider, OpenAICompatibleLLMProvider, build_llm_provider
 from memco.repositories.fact_repository import FactRepository
@@ -119,12 +122,45 @@ def test_extraction_service_from_settings_uses_configured_mock_provider():
     settings = Settings(root=Path("/tmp/memco-test-llm"))
     settings.llm.provider = "mock"
     settings.llm.model = "fixture-z"
+    settings.llm.allow_mock_provider = True
 
     service = ExtractionService.from_settings(settings)
     candidates = service.extract_candidates(source_text="I moved to Lisbon.", person_hint="Alice")
 
     assert service.llm_provider.model == "fixture-z"
     assert candidates[0]["domain"] == "biography"
+    assert candidates[0]["payload"]["city"] == "Lisbon"
+
+
+def test_extraction_service_from_settings_defaults_to_openai_compatible_runtime():
+    settings = Settings(root=Path("/tmp/memco-test-runtime-default"))
+
+    service = ExtractionService.from_settings(settings)
+
+    assert service.llm_provider.name == "openai-compatible"
+
+
+def test_extraction_service_supports_legacy_mock_config_file(tmp_path):
+    root = tmp_path / "project"
+    (root / "var" / "config").mkdir(parents=True, exist_ok=True)
+    (root / "var" / "config" / "settings.yaml").write_text(
+        "\n".join(
+            [
+                "llm:",
+                "  provider: mock",
+                "  model: fixture-legacy",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(root)
+    service = ExtractionService.from_settings(settings)
+    candidates = service.extract_candidates(source_text="I moved to Lisbon.", person_hint="Alice")
+
+    assert service.llm_provider.name == "mock"
+    assert settings.llm.allow_mock_provider is True
     assert candidates[0]["payload"]["city"] == "Lisbon"
 
 
@@ -185,6 +221,27 @@ def test_extraction_service_from_settings_uses_configured_openai_compatible_prov
     assert summary["deterministic_usage"]["operation_count"] == 0
 
 
+def test_extraction_service_rejects_malformed_provider_candidates():
+    settings = Settings(root=Path("/tmp/memco-test-openai-invalid"))
+    settings.llm.provider = "openai-compatible"
+    settings.llm.model = "gpt-test"
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = "secret"
+
+    service = ExtractionService.from_settings(settings)
+    service.llm_provider._post_json = lambda **kwargs: {  # type: ignore[method-assign]
+        "choices": [{"message": {"content": json.dumps({"items": [{"domain": "biography"}]})}}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+    }
+
+    try:
+        service.extract_candidates(source_text="I moved to Lisbon.", person_hint="Alice")
+    except ValueError as exc:
+        assert "candidate is missing required keys" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("expected malformed provider candidate to be rejected")
+
+
 def test_extraction_service_openai_compatible_live_http_path():
     server = ThreadingHTTPServer(("127.0.0.1", 0), _OpenAICompatibleHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -224,8 +281,23 @@ def test_build_llm_provider_supports_openai_compatible_alias():
     assert provider.model == "gpt-4o-mini"
 
 
+def test_build_llm_provider_rejects_mock_without_fixture_opt_in():
+    settings = Settings(root=Path("/tmp/memco-test-provider"))
+    settings.llm.provider = "mock"
+    settings.llm.model = "fixture"
+    settings.llm.allow_mock_provider = False
+
+    with pytest.raises(ValueError, match="fixture/test-only"):
+        build_llm_provider(settings)
+
+
 def test_extraction_service_logs_token_usage_file(tmp_path):
-    settings = ensure_runtime(Settings(root=tmp_path / "project"))
+    settings = Settings(root=tmp_path / "project")
+    settings.storage.engine = "sqlite"
+    settings.llm.provider = "mock"
+    settings.llm.model = "fixture"
+    settings.llm.allow_mock_provider = True
+    settings = ensure_runtime(settings)
     source = tmp_path / "conversation.json"
     source.write_text(
         json.dumps(

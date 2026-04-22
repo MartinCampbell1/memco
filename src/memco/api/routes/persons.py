@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header
 
-from memco.api.deps import get_settings, require_api_auth
+from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.memory_fact import PersonAliasUpsertRequest, PersonMergeRequest, PersonUpsertRequest
 from memco.models.person import PersonListRequest
@@ -19,6 +19,13 @@ def list_persons(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/persons/list",
+        allowed_actor_types={"owner", "admin", "eval", "system"},
+        require_actor=True,
+    )
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
         items = repository.list_persons(
@@ -38,6 +45,13 @@ def upsert_person(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/persons/upsert",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
         result = repository.upsert_person(
@@ -59,6 +73,13 @@ def upsert_person_alias(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/persons/aliases/upsert",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
         person_id = request.person_id
@@ -86,6 +107,13 @@ def merge_persons(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/persons/merge",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
         from_person_id = request.from_person_id

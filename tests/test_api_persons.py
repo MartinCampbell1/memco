@@ -10,6 +10,18 @@ from memco.repositories.source_repository import SourceRepository
 from memco.services.consolidation_service import ConsolidationService
 
 
+def _maintenance_actor(settings):
+    policy = settings.api.actor_policies["maintenance-admin"]
+    return {
+        "actor_id": "maintenance-admin",
+        "actor_type": policy.actor_type,
+        "auth_token": policy.auth_token,
+        "allowed_person_ids": [],
+        "allowed_domains": [],
+        "can_view_sensitive": policy.can_view_sensitive,
+    }
+
+
 def test_api_person_alias_and_list(monkeypatch, settings):
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
@@ -27,12 +39,12 @@ def test_api_person_alias_and_list(monkeypatch, settings):
 
     alias = client.post(
         "/v1/persons/aliases/upsert",
-        json={"workspace": "default", "person_id": person["id"], "alias": "A. Example"},
+        json={"workspace": "default", "person_id": person["id"], "alias": "A. Example", "actor": _maintenance_actor(settings)},
     )
     assert alias.status_code == 200
     assert alias.json()["normalized_alias"] == "a. example"
 
-    listed = client.post("/v1/persons/list", json={"workspace": "default"})
+    listed = client.post("/v1/persons/list", json={"workspace": "default", "actor": _maintenance_actor(settings)})
     assert listed.status_code == 200
     assert any(item["slug"] == "alice" for item in listed.json()["items"])
 
@@ -90,10 +102,16 @@ def test_api_person_merge_moves_fact_ownership(monkeypatch, settings):
 
     merge = client.post(
         "/v1/persons/merge",
-        json={"workspace": "default", "from_person_slug": "maria", "to_person_slug": "alice", "reason": "same person"},
+        json={
+            "workspace": "default",
+            "from_person_slug": "maria",
+            "to_person_slug": "alice",
+            "reason": "same person",
+            "actor": _maintenance_actor(settings),
+        },
     )
     assert merge.status_code == 200
 
-    facts = client.post("/v1/facts/list", json={"workspace": "default"})
+    facts = client.post("/v1/facts/list", json={"workspace": "default", "actor": _maintenance_actor(settings)})
     assert facts.status_code == 200
     assert any(item["person_id"] == alice["id"] and item["summary"] == "Maria lives in Lisbon." for item in facts.json()["items"])

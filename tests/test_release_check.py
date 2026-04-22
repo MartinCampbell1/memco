@@ -3,13 +3,15 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+from memco.config import Settings, write_settings
 from memco.release_check import ACTIVE_GATE_TEST_FILES, _run_eval_gate, resolve_repo_project_root, run_release_check
 
 
-def test_run_release_check_runs_pytest_gate_and_eval(monkeypatch, tmp_path):
+def test_run_release_check_runs_pytest_gate_and_acceptance(monkeypatch, tmp_path):
     project_root = tmp_path / "repo"
     eval_root = tmp_path / "eval-runtime"
     project_root.mkdir()
+    monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
 
     monkeypatch.setattr(
         "memco.release_check.subprocess.run",
@@ -27,7 +29,7 @@ def test_run_release_check_runs_pytest_gate_and_eval(monkeypatch, tmp_path):
         def seed_fixture_data(self, root: Path) -> None:
             seen_roots.append(root)
 
-        def run(self, root: Path) -> dict:
+        def run_acceptance(self, root: Path) -> dict:
             seen_roots.append(root)
             return {
                 "artifact_type": "eval_acceptance_artifact",
@@ -55,7 +57,7 @@ def test_run_release_check_runs_pytest_gate_and_eval(monkeypatch, tmp_path):
     assert result["include_pytest"] is True
     assert result["steps"][0]["name"] == "pytest_gate"
     assert result["steps"][0]["command"][-len(ACTIVE_GATE_TEST_FILES) :] == list(ACTIVE_GATE_TEST_FILES)
-    assert result["steps"][1]["name"] == "eval_artifact"
+    assert result["steps"][1]["name"] == "acceptance_artifact"
     assert result["steps"][1]["artifact_summary"]["failed"] == 0
     assert seen_roots == [eval_root, eval_root]
 
@@ -78,7 +80,7 @@ def test_run_release_check_skips_eval_when_pytest_gate_fails(monkeypatch, tmp_pa
         def seed_fixture_data(self, root: Path) -> None:  # pragma: no cover
             raise AssertionError("eval should not run when pytest gate fails")
 
-        def run(self, root: Path) -> dict:  # pragma: no cover
+        def run_acceptance(self, root: Path) -> dict:  # pragma: no cover
             raise AssertionError("eval should not run when pytest gate fails")
 
     monkeypatch.setattr("memco.release_check.EvalService", _FakeEvalService)
@@ -91,11 +93,12 @@ def test_run_release_check_skips_eval_when_pytest_gate_fails(monkeypatch, tmp_pa
     assert result["steps"][1]["reason"] == "pytest_gate_failed"
 
 
-def test_run_release_check_can_run_eval_without_pytest(monkeypatch, tmp_path):
+def test_run_release_check_can_run_acceptance_without_pytest(monkeypatch, tmp_path):
     project_root = tmp_path / "repo"
     eval_root = tmp_path / "eval-runtime"
     project_root.mkdir()
     seen_roots: list[Path] = []
+    monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
 
     def fail_if_called(*args, **kwargs):  # pragma: no cover
         raise AssertionError("pytest gate should not run")
@@ -104,7 +107,7 @@ def test_run_release_check_can_run_eval_without_pytest(monkeypatch, tmp_path):
         def seed_fixture_data(self, root: Path) -> None:
             seen_roots.append(root)
 
-        def run(self, root: Path) -> dict:
+        def run_acceptance(self, root: Path) -> dict:
             seen_roots.append(root)
             return {
                 "artifact_type": "eval_acceptance_artifact",
@@ -136,7 +139,7 @@ def test_run_release_check_can_run_eval_without_pytest(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert result["include_pytest"] is False
     assert result["include_eval"] is True
-    assert [step["name"] for step in result["steps"]] == ["eval_artifact"]
+    assert [step["name"] for step in result["steps"]] == ["acceptance_artifact"]
     assert seen_roots == [eval_root, eval_root]
 
 
@@ -158,6 +161,7 @@ def test_run_release_check_can_run_optional_postgres_smoke(monkeypatch, tmp_path
     postgres_root = tmp_path / "postgres-runtime"
     project_root.mkdir()
     seen_roots: list[Path] = []
+    monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
 
     monkeypatch.setattr(
         "memco.release_check.subprocess.run",
@@ -173,7 +177,7 @@ def test_run_release_check_can_run_optional_postgres_smoke(monkeypatch, tmp_path
         def seed_fixture_data(self, root: Path) -> None:
             seen_roots.append(root)
 
-        def run(self, root: Path) -> dict:
+        def run_acceptance(self, root: Path) -> dict:
             seen_roots.append(root)
             return {
                 "artifact_type": "eval_acceptance_artifact",
@@ -216,7 +220,7 @@ def test_run_release_check_can_run_optional_postgres_smoke(monkeypatch, tmp_path
 
     assert result["ok"] is True
     assert result["include_postgres_smoke"] is True
-    assert [step["name"] for step in result["steps"]] == ["pytest_gate", "eval_artifact", "postgres_smoke"]
+    assert [step["name"] for step in result["steps"]] == ["pytest_gate", "acceptance_artifact", "postgres_smoke"]
     assert result["steps"][2]["schema_migrations"] == 1
     assert result["steps"][2]["health"]["storage_engine"] == "postgres"
     assert seen_roots == [eval_root, eval_root]
@@ -251,18 +255,19 @@ def test_resolve_repo_project_root_fails_outside_checkout(tmp_path):
 def test_run_eval_gate_bootstraps_runtime_before_eval(monkeypatch, tmp_path):
     eval_root = tmp_path / "eval-runtime"
     order: list[tuple[str, Path]] = []
+    settings = Settings(root=eval_root)
 
-    monkeypatch.setattr("memco.release_check.load_settings", lambda root: {"root": Path(root)})
+    monkeypatch.setattr("memco.release_check.load_settings", lambda root: settings)
 
     def fake_ensure_runtime(settings):
-        order.append(("ensure_runtime", Path(settings["root"])))
+        order.append(("ensure_runtime", settings.root))
         return settings
 
     class _FakeEvalService:
         def seed_fixture_data(self, root: Path) -> None:
             order.append(("seed_fixture_data", root))
 
-        def run(self, root: Path) -> dict:
+        def run_acceptance(self, root: Path) -> dict:
             order.append(("run", root))
             return {
                 "artifact_type": "eval_acceptance_artifact",
@@ -287,8 +292,62 @@ def test_run_eval_gate_bootstraps_runtime_before_eval(monkeypatch, tmp_path):
     result = _run_eval_gate(eval_root=eval_root)
 
     assert result["ok"] is True
+    assert result["storage_engine"] == "sqlite"
+    assert result["storage_contract_engine"] == "postgres"
+    assert result["storage_role"] == "fallback"
     assert order == [
         ("ensure_runtime", eval_root),
         ("seed_fixture_data", eval_root),
         ("run", eval_root),
     ]
+
+
+def test_run_eval_gate_uses_postgres_when_runtime_config_requests_it(monkeypatch, tmp_path):
+    eval_root = tmp_path / "eval-runtime"
+    settings = Settings(root=eval_root)
+    settings.storage.engine = "postgres"
+    settings.storage.database_url = "postgresql://memco:memco@db:5432/memco"
+    write_settings(settings)
+    seen: dict[str, str] = {}
+
+    def fake_ensure_runtime(selected: Settings):
+        seen["storage_engine"] = selected.storage.engine
+        seen["database_target"] = selected.database_target
+        return selected
+
+    class _FakeEvalService:
+        def seed_fixture_data(self, root: Path) -> None:
+            assert root == eval_root
+
+        def run_acceptance(self, root: Path) -> dict:
+            assert root == eval_root
+            return {
+                "artifact_type": "eval_acceptance_artifact",
+                "release_scope": "private-single-user",
+                "total": 20,
+                "passed": 20,
+                "failed": 0,
+                "pass_rate": 1.0,
+                "accuracy": 1.0,
+                "refusal_correctness": {"total_cases": 3, "passed_cases": 3, "rate": 1.0},
+                "evidence_coverage": {"cases_with_hits": 10, "cases_with_evidence": 10, "rate": 1.0},
+                "retrieval_latency_ms": {"min": 1, "max": 2, "avg": 1, "p95": 2},
+                "token_accounting": {"status": "tracked"},
+                "behavior_checks_total": 2,
+                "behavior_checks_passed": 2,
+                "groups": [{"name": "supported_fact", "total": 2, "passed": 2, "pass_rate": 1.0}],
+            }
+
+    monkeypatch.setattr("memco.release_check.ensure_runtime", fake_ensure_runtime)
+    monkeypatch.setattr("memco.release_check.EvalService", _FakeEvalService)
+
+    result = _run_eval_gate(eval_root=eval_root)
+
+    assert result["ok"] is True
+    assert seen == {
+        "storage_engine": "postgres",
+        "database_target": "postgresql://memco:memco@db:5432/memco",
+    }
+    assert result["storage_engine"] == "postgres"
+    assert result["storage_contract_engine"] == "postgres"
+    assert result["storage_role"] == "primary"

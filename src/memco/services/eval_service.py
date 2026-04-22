@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from memco.api.deps import build_internal_actor
 from memco.config import load_settings
 from memco.db import get_connection
 from memco.llm_usage import LLMUsageTracker
@@ -60,7 +61,7 @@ class EvalService:
             expected_values=("Lisbon",),
             domain="biography",
             category="residence",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -73,7 +74,7 @@ class EvalService:
             expected_values=("tea",),
             domain="preferences",
             category="preference",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=2,
         ),
@@ -86,7 +87,7 @@ class EvalService:
             expected_values=("software engineer",),
             domain="work",
             category="employment",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -99,7 +100,21 @@ class EvalService:
             expected_values=("PyCon",),
             domain="experiences",
             category="event",
-            expected_support_level="full",
+            expected_support_level="supported",
+            expected_hit_count=1,
+            expected_evidence_count_min=1,
+        ),
+        EvalCase(
+            "supported_experience_when",
+            "supported_fact",
+            "When did Alice Eval attend PyCon?",
+            "alice-eval",
+            False,
+            expected_values=("2025",),
+            domain="experiences",
+            category="event",
+            temporal_mode="when",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -112,7 +127,7 @@ class EvalService:
             expected_values=("coffee",),
             domain="preferences",
             category="preference",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -125,9 +140,37 @@ class EvalService:
             expected_values=("Lisbon",),
             domain="biography",
             category="residence",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
+        ),
+        EvalCase(
+            "supported_residence_current_ru",
+            "multilingual_support",
+            "Где сейчас живет Alice Eval?",
+            "alice-eval",
+            False,
+            expected_values=("Lisbon",),
+            domain="biography",
+            category="residence",
+            temporal_mode="current",
+            expected_support_level="supported",
+            expected_hit_count=1,
+            expected_evidence_count_min=1,
+        ),
+        EvalCase(
+            "supported_preference_current_mixed_language",
+            "multilingual_support",
+            "Что Alice Eval likes сейчас?",
+            "alice-eval",
+            False,
+            expected_values=("tea",),
+            domain="preferences",
+            category="preference",
+            temporal_mode="current",
+            expected_support_level="supported",
+            expected_hit_count=1,
+            expected_evidence_count_min=2,
         ),
         EvalCase(
             "partial_supported_employer_claim",
@@ -142,6 +185,20 @@ class EvalService:
             expected_evidence_count_min=2,
         ),
         EvalCase(
+            "contradicted_residence_claim",
+            "contradicted_premise",
+            "Does Alice Eval live in Berlin?",
+            "alice-eval",
+            True,
+            expected_values=("Lisbon",),
+            forbidden_values=("Berlin",),
+            domain="biography",
+            category="residence",
+            expected_support_level="contradicted",
+            expected_hit_count=1,
+            expected_evidence_count_min=1,
+        ),
+        EvalCase(
             "unsupported_false_premise_sister",
             "unsupported_premise",
             "Does Alice Eval have a sister?",
@@ -149,7 +206,7 @@ class EvalService:
             True,
             domain="social_circle",
             category="sister",
-            expected_support_level="none",
+            expected_support_level="unsupported",
             expected_hit_count=0,
         ),
         EvalCase(
@@ -158,7 +215,7 @@ class EvalService:
             "Does Style Eval own a cat?",
             "style-eval",
             True,
-            expected_support_level="none",
+            expected_support_level="unsupported",
             expected_hit_count=0,
         ),
         EvalCase(
@@ -171,7 +228,7 @@ class EvalService:
             forbidden_values=("coffee",),
             domain="preferences",
             category="preference",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=2,
         ),
@@ -185,7 +242,7 @@ class EvalService:
             forbidden_values=("tea",),
             domain="preferences",
             category="preference",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -199,7 +256,7 @@ class EvalService:
             forbidden_values=("Porto",),
             domain="biography",
             category="residence",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -214,7 +271,7 @@ class EvalService:
             domain="biography",
             category="residence",
             temporal_mode="history",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -229,7 +286,7 @@ class EvalService:
             domain="biography",
             category="residence",
             temporal_mode="history",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -243,7 +300,7 @@ class EvalService:
             domain="biography",
             category="residence",
             temporal_mode="current",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -256,7 +313,7 @@ class EvalService:
             expected_values=("tea",),
             domain="preferences",
             category="preference",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=2,
         ),
@@ -269,7 +326,7 @@ class EvalService:
             expected_values=("tea",),
             domain="preferences",
             category="preference",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=2,
         ),
@@ -280,7 +337,7 @@ class EvalService:
             "alice-eval",
             True,
             domain="social_circle",
-            expected_support_level="none",
+            expected_support_level="unsupported",
             expected_hit_count=0,
             expected_pending_review_count_min=1,
         ),
@@ -294,7 +351,7 @@ class EvalService:
             forbidden_values=("Lisbon",),
             domain="biography",
             category="residence",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
@@ -309,11 +366,26 @@ class EvalService:
             domain="biography",
             category="residence",
             temporal_mode="current",
-            expected_support_level="full",
+            expected_support_level="supported",
             expected_hit_count=1,
             expected_evidence_count_min=1,
         ),
     )
+
+    BENCHMARK_CASE_GROUPS = {
+        "supported_fact",
+        "partial_support",
+        "unsupported_premise",
+        "cross_person_contamination",
+        "temporal_update",
+        "duplicate_merge",
+    }
+    BENCHMARK_SETS = {
+        "internal_golden_set": {"supported_fact", "duplicate_merge"},
+        "adversarial_false_premise_set": {"unsupported_premise", "partial_support"},
+        "temporal_set": {"temporal_update"},
+        "cross_person_contamination_set": {"cross_person_contamination"},
+    }
 
     BEHAVIOR_CHECKS = (
         EvalBehaviorCheck(
@@ -400,6 +472,7 @@ class EvalService:
         category: str,
         summary: str,
         observed_at: str,
+        event_at: str = "",
         source_id: int,
         quote_text: str,
         subcategory: str = "",
@@ -420,6 +493,7 @@ class EvalService:
                 summary=summary,
                 confidence=0.95,
                 observed_at=observed_at,
+                event_at=event_at,
                 source_id=source_id,
                 quote_text=quote_text,
             ),
@@ -465,6 +539,9 @@ class EvalService:
 
     def seed_fixture_data(self, project_root: Path) -> None:
         settings = load_settings(project_root)
+        settings.llm.provider = "mock"
+        settings.llm.model = "fixture"
+        settings.llm.allow_mock_provider = True
         self.llm_usage_tracker.reset()
         fact_repo = FactRepository()
         source_repo = SourceRepository()
@@ -602,14 +679,15 @@ class EvalService:
                 conn,
                 consolidation=consolidation,
                 canonical_key="alice-eval:experiences:event:pycon",
-                payload={"event": "PyCon"},
+                payload={"event": "PyCon", "event_at": "2025"},
                 person_id=int(alice["id"]),
                 domain="experiences",
                 category="event",
                 summary="Alice Eval attended PyCon.",
                 observed_at="2026-04-21T10:05:00Z",
                 source_id=direct_main,
-                quote_text="Alice Eval attended PyCon.",
+                event_at="2025",
+                quote_text="Alice Eval attended PyCon in 2025.",
             )
             self._ensure_fact(
                 conn,
@@ -654,7 +732,28 @@ class EvalService:
                 conn,
                 consolidation=consolidation,
                 canonical_key="style-eval:psychometrics:big_five:openness",
-                payload={"framework": "big_five", "trait": "openness", "score": 0.7},
+                payload={
+                    "framework": "big_five",
+                    "trait": "openness",
+                    "score": 0.7,
+                    "score_scale": "0_1",
+                    "direction": "high",
+                    "confidence": 0.55,
+                    "evidence_quotes": [
+                        {"quote": "I am very curious.", "message_ids": ["2"], "interpretation": "Possible signal for openness."}
+                    ],
+                    "counterevidence_quotes": [
+                        {
+                            "quote": "I am very curious.",
+                            "message_ids": ["2"],
+                            "interpretation": "No direct counterevidence found in this snippet; update conservatively for openness.",
+                        }
+                    ],
+                    "conservative_update": True,
+                    "last_updated": "2026-04-21T10:09:00Z",
+                    "use_in_generation": True,
+                    "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
+                },
                 person_id=int(fact_repo.resolve_person_id(conn, workspace_slug="default", person_slug="style-eval")),
                 domain="psychometrics",
                 category="trait",
@@ -891,24 +990,27 @@ class EvalService:
 
     def _latency_summary(self, values: list[int]) -> dict:
         if not values:
-            return {"min": 0, "max": 0, "avg": 0.0, "p95": 0}
+            return {"min": 0, "max": 0, "avg": 0.0, "p50": 0, "p95": 0}
         ordered = sorted(values)
+        p50_index = max(0, math.ceil(len(ordered) * 0.50) - 1)
         p95_index = max(0, math.ceil(len(ordered) * 0.95) - 1)
         return {
             "min": ordered[0],
             "max": ordered[-1],
             "avg": round(sum(ordered) / len(ordered), 2),
+            "p50": ordered[p50_index],
             "p95": ordered[p95_index],
         }
 
-    def run(self, project_root: Path) -> dict:
+    def _execute_cases(self, project_root: Path, *, cases: tuple[EvalCase, ...], route_name: str) -> tuple[list[dict], list[dict]]:
         settings = load_settings(project_root)
         review_repo = ReviewRepository()
         with get_connection(settings.db_path) as conn:
+            eval_actor = build_internal_actor(settings, actor_id="eval-runner")
             pending_reviews = review_repo.list_items(conn, workspace_slug="default", status="pending")
             pending_review_count = len(pending_reviews)
             results = []
-            for case in self.CASES:
+            for case in cases:
                 started = time.perf_counter()
                 retrieval = self.retrieval_service.retrieve(
                     conn,
@@ -920,9 +1022,10 @@ class EvalService:
                         category=case.category,
                         include_fallback=True,
                         temporal_mode=case.temporal_mode,
+                        actor=eval_actor,
                     ),
                     settings=settings,
-                    route_name="eval",
+                    route_name=route_name,
                 )
                 latency_ms = max(0, int((time.perf_counter() - started) * 1000))
                 answer = self.refusal_service.build_answer(query=case.query, retrieval_result=retrieval)
@@ -942,6 +1045,12 @@ class EvalService:
                     and pending_review_count < case.expected_pending_review_count_min
                 ):
                     failures.append("pending_review_count_too_low")
+                if (
+                    case.expected_pending_review_count_min is not None
+                    and pending_review_count >= case.expected_pending_review_count_min
+                    and (len(retrieval.hits) > 0 or retrieval.support_level != "unsupported" or not answer["refused"])
+                ):
+                    failures.append("pending_review_leakage")
                 for value in case.expected_values:
                     if value.lower() not in combined_text:
                         failures.append(f"missing_expected_value:{value}")
@@ -952,6 +1061,8 @@ class EvalService:
                     {
                         "name": case.name,
                         "group": case.group,
+                        "domain": case.domain or "mixed",
+                        "category": case.category or "",
                         "query": case.query,
                         "passed": not failures,
                         "failures": failures,
@@ -970,7 +1081,9 @@ class EvalService:
 
             results.sort(key=lambda item: (item["group"], item["name"]))
             behavior_checks = self._behavior_checks(conn)
+        return results, behavior_checks
 
+    def _build_common_metrics(self, *, results: list[dict]) -> dict:
         total = len(results)
         passed = sum(1 for item in results if item["passed"])
         latencies = [int(item["latency_ms"]) for item in results]
@@ -991,10 +1104,7 @@ class EvalService:
                     "pass_rate": round(group_passed / len(group_cases), 4) if group_cases else 0.0,
                 }
             )
-
         return {
-            "artifact_type": "eval_acceptance_artifact",
-            "release_scope": "private-single-user",
             "total": total,
             "passed": passed,
             "failed": total - passed,
@@ -1014,8 +1124,111 @@ class EvalService:
             "retrieval_latency_ms": self._latency_summary(latencies),
             "token_accounting": self.llm_usage_tracker.summary(),
             "groups": groups,
+        }
+
+    def _benchmark_set_reports(self, *, results: list[dict]) -> dict[str, dict]:
+        reports: dict[str, dict] = {}
+        for set_name, groups in self.BENCHMARK_SETS.items():
+            selected = [item for item in results if item["group"] in groups]
+            passed = sum(1 for item in selected if item["passed"])
+            reports[set_name] = {
+                "groups": sorted(groups),
+                "total": len(selected),
+                "passed": passed,
+                "pass_rate": round(passed / len(selected), 4) if selected else 0.0,
+            }
+        return reports
+
+    def _usage_delta(self, before: dict, after: dict) -> dict:
+        return {
+            "operation_count": max(0, after["operation_count"] - before["operation_count"]),
+            "input_tokens": max(0, after["input_tokens"] - before["input_tokens"]),
+            "output_tokens": max(0, after["output_tokens"] - before["output_tokens"]),
+            "estimated_cost_usd": round(max(0.0, after["estimated_cost_usd"] - before["estimated_cost_usd"]), 6),
+            "providers": sorted(set(before.get("providers", [])) | set(after.get("providers", []))),
+        }
+
+    def _token_accounting_by_stage(self, *, before: dict, after: dict) -> dict[str, dict]:
+        llm_usage = self._usage_delta(before["llm_usage"], after["llm_usage"])
+        deterministic_usage = self._usage_delta(before["deterministic_usage"], after["deterministic_usage"])
+        return {
+            "extraction": {
+                "status": "measured_delta",
+                "input_tokens": deterministic_usage["input_tokens"] + llm_usage["input_tokens"],
+                "output_tokens": deterministic_usage["output_tokens"] + llm_usage["output_tokens"],
+            },
+            "planner": {"status": "not_instrumented", "input_tokens": 0, "output_tokens": 0},
+            "retrieval": {"status": "not_instrumented", "input_tokens": 0, "output_tokens": 0},
+            "answer": {"status": "not_instrumented", "input_tokens": 0, "output_tokens": 0},
+        }
+
+    def _benchmark_domain_reports(self, *, results: list[dict]) -> dict[str, dict]:
+        reports: dict[str, dict] = {}
+        domain_names = sorted({item["domain"] for item in results})
+        for domain_name in domain_names:
+            domain_cases = [item for item in results if item["domain"] == domain_name]
+            passed = sum(1 for item in domain_cases if item["passed"])
+            category_names = sorted({item["category"] for item in domain_cases if item["category"]})
+            category_reports = {}
+            for category_name in category_names:
+                category_cases = [item for item in domain_cases if item["category"] == category_name]
+                category_passed = sum(1 for item in category_cases if item["passed"])
+                category_reports[category_name] = {
+                    "total": len(category_cases),
+                    "passed": category_passed,
+                    "pass_rate": round(category_passed / len(category_cases), 4) if category_cases else 0.0,
+                }
+            reports[domain_name] = {
+                "total": len(domain_cases),
+                "passed": passed,
+                "pass_rate": round(passed / len(domain_cases), 4) if domain_cases else 0.0,
+                "categories": category_reports,
+            }
+        return reports
+
+    def _run_acceptance_cases(self, project_root: Path) -> dict:
+        results, behavior_checks = self._execute_cases(project_root, cases=self.CASES, route_name="eval")
+        metrics = self._build_common_metrics(results=results)
+        return {
+            "artifact_type": "eval_acceptance_artifact",
+            "release_scope": "private-single-user",
+            **metrics,
             "behavior_checks": behavior_checks,
             "behavior_checks_total": len(behavior_checks),
             "behavior_checks_passed": sum(1 for item in behavior_checks if item["passed"]),
             "cases": results,
         }
+
+    def run_acceptance(self, project_root: Path) -> dict:
+        return self._run_acceptance_cases(project_root)
+
+    def run_benchmark(self, project_root: Path) -> dict:
+        benchmark_cases = tuple(case for case in self.CASES if case.group in self.BENCHMARK_CASE_GROUPS)
+        before = self.llm_usage_tracker.summary()
+        results, _behavior_checks = self._execute_cases(project_root, cases=benchmark_cases, route_name="benchmark")
+        metrics = self._build_common_metrics(results=results)
+        benchmark_sets = self._benchmark_set_reports(results=results)
+        after = self.llm_usage_tracker.summary()
+        token_accounting_by_stage = self._token_accounting_by_stage(before=before, after=after)
+        return {
+            "artifact_type": "eval_benchmark_artifact",
+            "release_scope": "benchmark-only",
+            "benchmark_scope": "internal-approximation",
+            "benchmark_disclaimer": "synthetic benchmark; not paper-equivalent",
+            "benchmark_metrics": {
+                "core_memory_accuracy": benchmark_sets["internal_golden_set"]["pass_rate"],
+                "adversarial_robustness": benchmark_sets["adversarial_false_premise_set"]["pass_rate"],
+                "refusal_correctness": metrics["refusal_correctness"],
+                "evidence_coverage": metrics["evidence_coverage"],
+                "temporal_precision": benchmark_sets["temporal_set"]["pass_rate"],
+                "retrieval_latency_ms": metrics["retrieval_latency_ms"],
+                "token_accounting_by_stage": token_accounting_by_stage,
+                "extra_prompt_tokens": token_accounting_by_stage["extraction"]["input_tokens"],
+            },
+            "benchmark_cases": results,
+            "benchmark_sets": benchmark_sets,
+            "domain_reports": self._benchmark_domain_reports(results=results),
+        }
+
+    def run(self, project_root: Path) -> dict:
+        return self.run_acceptance(project_root)

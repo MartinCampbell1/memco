@@ -44,8 +44,8 @@ def test_eval_harness_is_repeatable(settings):
     service = EvalService()
     service.seed_fixture_data(settings.root)
 
-    first = service.run(settings.root)
-    second = service.run(settings.root)
+    first = service.run_acceptance(settings.root)
+    second = service.run_acceptance(settings.root)
 
     assert _stable_projection(first) == _stable_projection(second)
     assert first["artifact_type"] == "eval_acceptance_artifact"
@@ -61,7 +61,7 @@ def test_eval_harness_emits_acceptance_artifact_fields(settings):
     service = EvalService()
     service.seed_fixture_data(settings.root)
 
-    result = service.run(settings.root)
+    result = service.run_acceptance(settings.root)
     cases = {case["name"]: case for case in result["cases"]}
     groups = {group["name"]: group for group in result["groups"]}
     behavior_checks = {item["name"]: item for item in result["behavior_checks"]}
@@ -87,13 +87,56 @@ def test_eval_harness_emits_acceptance_artifact_fields(settings):
 
     assert cases["supported_residence_current"]["refused"] is False
     assert "Lisbon" in cases["supported_residence_current"]["answer"]
+    assert cases["supported_residence_current"]["support_level"] == "supported"
+    assert cases["supported_residence_current_ru"]["support_level"] == "supported"
+    assert cases["supported_preference_current_mixed_language"]["support_level"] == "supported"
+    assert cases["supported_experience_when"]["support_level"] == "supported"
     assert cases["partial_supported_employer_claim"]["support_level"] == "partial"
+    assert cases["contradicted_residence_claim"]["support_level"] == "contradicted"
+    assert cases["unsupported_false_premise_sister"]["support_level"] == "unsupported"
     assert cases["unsupported_false_premise_sister"]["refused"] is True
     assert cases["style_psychometric_non_leakage"]["refused"] is True
     assert cases["duplicate_merge_preference_evidence"]["evidence_count"] >= 2
     assert cases["review_queue_blocks_social_answer"]["pending_review_count"] >= 1
+    assert cases["review_queue_blocks_social_answer"]["hit_count"] == 0
+    assert cases["review_queue_blocks_social_answer"]["support_level"] == "unsupported"
+    assert cases["review_queue_blocks_social_answer"]["refused"] is True
+    assert "pending_review_leakage" not in cases["review_queue_blocks_social_answer"]["failures"]
     assert "Berlin" in cases["rollback_truth_preserves_current"]["answer"]
+    assert "2025" in cases["supported_experience_when"]["answer"]
+    assert "Lisbon" in cases["supported_residence_current_ru"]["answer"]
+    assert "tea" in cases["supported_preference_current_mixed_language"]["answer"]
 
     assert behavior_checks["pending_review_item_created"]["passed"] is True
     assert behavior_checks["speaker_resolution_can_publish"]["passed"] is True
     assert behavior_checks["rollback_truth_store_single_active"]["passed"] is True
+
+
+def test_eval_harness_emits_separate_benchmark_artifact(settings):
+    service = EvalService()
+    service.seed_fixture_data(settings.root)
+
+    result = service.run_benchmark(settings.root)
+
+    assert result["artifact_type"] == "eval_benchmark_artifact"
+    assert result["benchmark_scope"] == "internal-approximation"
+    assert result["release_scope"] == "benchmark-only"
+    assert result["benchmark_disclaimer"] == "synthetic benchmark; not paper-equivalent"
+    assert "benchmark_metrics" in result
+    assert "benchmark_cases" in result
+    assert "benchmark_sets" in result
+    assert "internal_golden_set" in result["benchmark_sets"]
+    assert "adversarial_false_premise_set" in result["benchmark_sets"]
+    assert "temporal_set" in result["benchmark_sets"]
+    assert "cross_person_contamination_set" in result["benchmark_sets"]
+    assert "domain_reports" in result
+    assert "biography" in result["domain_reports"]
+    assert "core_memory_accuracy" in result["benchmark_metrics"]
+    assert "adversarial_robustness" in result["benchmark_metrics"]
+    assert "temporal_precision" in result["benchmark_metrics"]
+    assert "retrieval_latency_ms" in result["benchmark_metrics"]
+    assert "p50" in result["benchmark_metrics"]["retrieval_latency_ms"]
+    assert "token_accounting_by_stage" in result["benchmark_metrics"]
+    assert "extra_prompt_tokens" in result["benchmark_metrics"]
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["planner"]["status"] == "not_instrumented"
+    assert "behavior_checks" not in result

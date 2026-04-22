@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from memco.models.retrieval import ActorContext
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -9,6 +10,7 @@ class ImportSourceRequest(BaseModel):
     path: str
     source_type: str = "note"
     workspace: str = "default"
+    actor: ActorContext | None = None
 
 
 class ImportTextRequest(BaseModel):
@@ -18,6 +20,7 @@ class ImportTextRequest(BaseModel):
     source_type: str = "note"
     title: str = ""
     text: str
+    actor: ActorContext | None = None
 
 
 class IngestPipelineRequest(BaseModel):
@@ -34,6 +37,7 @@ class IngestPipelineRequest(BaseModel):
     conversation_uid: str = "main"
     include_style: bool = False
     include_psychometrics: bool = False
+    actor: ActorContext | None = None
 
     @model_validator(mode="after")
     def validate_payload(self):

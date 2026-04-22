@@ -6,6 +6,7 @@ from pathlib import Path
 
 import typer
 
+from memco.api.deps import build_internal_actor
 from memco.config import Settings, load_settings
 from memco.db import get_connection
 from memco.models.candidate import CandidateListRequest
@@ -25,15 +26,17 @@ from memco.services.consolidation_service import ConsolidationService
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.ingest_service import IngestService
 from memco.services.extraction_service import ExtractionService
+from memco.services.answer_service import AnswerService
 from memco.services.publish_service import PublishService
 from memco.services.eval_service import EvalService
+from memco.services.export_service import ExportService
 from memco.services.retrieval_service import RetrievalService
-from memco.services.refusal_service import RefusalService
 from memco.services.review_service import ReviewService
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
 from memco.postgres_smoke import run_postgres_smoke
 from memco.postgres_admin import ensure_postgres_database
+from memco.local_artifacts import refresh_local_artifacts
 from memco.release_check import resolve_repo_project_root, run_release_check
 from memco.services.pipeline_service import IngestPipelineService
 
@@ -232,6 +235,8 @@ def _resolve_person_option(
 def init_db(root: str | None = typer.Option(None, help="Project root.")) -> None:
     settings = _settings(root)
     typer.echo(f"Runtime ready at {settings.root}")
+    typer.echo(f"Storage contract: {settings.storage_contract}")
+    typer.echo(f"Storage role: {settings.storage_role}")
     typer.echo(f"Storage engine: {settings.storage.engine}")
     typer.echo(f"Database ready at {settings.database_target}")
 
@@ -489,23 +494,27 @@ def retrieve_command(
     workspace: str = typer.Option("default", help="Workspace slug."),
     domain: str | None = typer.Option(None, help="Domain filter."),
     temporal_mode: str = typer.Option("auto", help="Temporal mode: auto/current/history."),
+    detail_policy: str = typer.Option("balanced", help="Detail policy: core_only|balanced|exhaustive."),
     limit: int = typer.Option(8, help="Hit limit."),
     root: str | None = typer.Option(None, help="Project root."),
 ) -> None:
     settings = _settings(root)
     service = RetrievalService()
+    actor = build_internal_actor(settings, actor_id="dev-owner")
     payload = RetrievalRequest(
         workspace=workspace,
         person_slug=person_slug,
         query=query,
         domain=domain,
         temporal_mode=temporal_mode,
+        detail_policy=detail_policy,
         limit=limit,
         include_fallback=True,
+        actor=actor,
     )
     with get_connection(settings.db_path) as conn:
         result = service.retrieve(conn, payload, settings=settings, route_name="retrieve")
-    typer.echo(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+    typer.echo(json.dumps(service.present_result(result, detail_policy=payload.detail_policy), ensure_ascii=False, indent=2))
 
 
 @app.command("chat", help="Answer from confirmed memory and refuse unsupported claims. Often used after `retrieve`.")
@@ -514,21 +523,25 @@ def chat_command(
     person_slug: str,
     workspace: str = typer.Option("default", help="Workspace slug."),
     temporal_mode: str = typer.Option("auto", help="Temporal mode: auto/current/history."),
+    detail_policy: str = typer.Option("balanced", help="Detail policy: core_only|balanced|exhaustive."),
     root: str | None = typer.Option(None, help="Project root."),
 ) -> None:
     settings = _settings(root)
     retrieval_service = RetrievalService()
-    refusal_service = RefusalService()
+    answer_service = AnswerService()
+    actor = build_internal_actor(settings, actor_id="dev-owner")
     payload = RetrievalRequest(
         workspace=workspace,
         person_slug=person_slug,
         query=query,
         temporal_mode=temporal_mode,
+        detail_policy=detail_policy,
+        actor=actor,
     )
     with get_connection(settings.db_path) as conn:
         retrieval = retrieval_service.retrieve(conn, payload, settings=settings, route_name="chat")
-    answer = refusal_service.build_answer(query=query, retrieval_result=retrieval)
-    typer.echo(json.dumps({"query": query, **answer}, ensure_ascii=False, indent=2))
+    answer = answer_service.build_answer(query=query, retrieval_result=retrieval, detail_policy=payload.detail_policy)
+    typer.echo(json.dumps({"query": query, "retrieval": retrieval_service.present_result(retrieval, detail_policy=payload.detail_policy), **answer}, ensure_ascii=False, indent=2))
 
 
 @app.command(
@@ -953,6 +966,32 @@ def fact_list_command(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command("persona-export", help="Export one persona as structured JSON without raw source content.")
+def persona_export_command(
+    person_id: int | None = typer.Option(None, help="Person id."),
+    person_slug: str | None = typer.Option(None, help="Person slug."),
+    workspace: str = typer.Option("default", help="Workspace slug."),
+    domain: str | None = typer.Option(None, help="Optional domain filter."),
+    detail_policy: str = typer.Option("balanced", help="Detail policy: core_only|balanced|exhaustive."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    service = ExportService()
+    actor = build_internal_actor(settings, actor_id="dev-owner")
+    with get_connection(settings.db_path) as conn:
+        result = service.export_persona(
+            settings,
+            conn,
+            workspace_slug=workspace,
+            person_id=person_id,
+            person_slug=person_slug,
+            domain=domain,
+            detail_policy=detail_policy,
+            actor=actor,
+        )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @app.command("fact-operations", help="List fact lifecycle operations. Often used before `fact-rollback`. Omit `--target-fact-id` with `--latest-target-fact` to target the newest matching fact in the current scope.")
 def fact_operations_command(
     workspace: str = typer.Option("default", help="Workspace slug."),
@@ -1211,6 +1250,30 @@ def release_check_command(
     _emit_json_artifact(result, output=output)
     if not result["ok"]:
         raise typer.Exit(code=1)
+
+
+@app.command(
+    "local-artifacts-refresh",
+    help="Refresh local operator artifacts under var/reports, including release-check snapshots, repo-local status JSON, and change-group JSON.",
+)
+def local_artifacts_refresh_command(
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    postgres_database_url: str | None = typer.Option(
+        None,
+        help="Optional Postgres maintenance URL. If set, also refresh the Postgres-smoke release-check artifact.",
+    ),
+    output: str | None = typer.Option(None, help="Optional file path to save the command summary JSON."),
+) -> None:
+    resolved_project_root = _project_root(project_root)
+    try:
+        result = refresh_local_artifacts(
+            project_root=resolved_project_root,
+            postgres_database_url=postgres_database_url,
+        )
+    except RuntimeError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    _emit_json_artifact(result, output=output)
 
 
 @app.command(

@@ -14,12 +14,19 @@ This repository should not be read as:
 - a broad public SaaS-style multi-user product beyond the currently documented API and operating model
 - a claim that Docker Compose is the preferred day-to-day runtime path on this machine
 - a claim that the strict Docker Compose requirement from the original execution brief has already been waived
+- a claim that WhatsApp or Telegram export parsers are already part of the current repo-local ingestion contract
 
 The current honest status is:
 
 - usable for a technical private owner/operator
 - has a verified no-Docker Postgres operating path on this machine
 - should still be treated as `private release = GO` and `strict original-brief readiness = not yet a clean yes` while the original brief still names Docker Compose explicitly
+
+Current repo-local ingestion scope:
+
+- implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`
+- explicitly not part of the current repo-local contract: `WhatsApp`, `Telegram`
+- `WhatsApp` / `Telegram` remain roadmap/reference-track parser targets and should not be implied as currently shipped support
 
 ## Stage A Actor Contract
 
@@ -46,6 +53,7 @@ Read that file together with [docs/synthius_mem_execution_brief.md](docs/synthiu
 
 The explicit contract decision for current repo-local work lives in [docs/2026-04-22_memco_contract_decision.md](docs/2026-04-22_memco_contract_decision.md).
 The original execution brief is kept as a reference/backlog-only track for current repo-local release management, documented in [docs/2026-04-22_memco_original_brief_track_decision.md](docs/2026-04-22_memco_original_brief_track_decision.md).
+The fastest repo-local status summary now lives in [docs/2026-04-22_memco_repo_local_status_snapshot.md](docs/2026-04-22_memco_repo_local_status_snapshot.md).
 
 ## Single-User Setup And Use
 
@@ -142,6 +150,22 @@ curl -sS http://127.0.0.1:8788/v1/ingest/pipeline \
 
 For `chat` and `retrieve`, the API still requires an `actor` block even in private mode.
 
+If you want narrower answer/retrieval surfaces for agents or operator tooling, `retrieve`, `chat`, and persona export now also accept a detail policy:
+
+- `core_only`
+- `balanced`
+- `exhaustive`
+
+Examples:
+
+```bash
+uv run memco retrieve "Where does Alice live?" alice --detail-policy core_only --root "$ROOT"
+uv run memco chat "Where does Alice live?" alice --detail-policy core_only --root "$ROOT"
+uv run memco persona-export --person-slug alice --detail-policy exhaustive --root "$ROOT"
+```
+
+On the HTTP side, the same contract is exposed through `detail_policy` in the JSON request body for `/v1/retrieve`, `/v1/chat`, and `/v1/persona/export`.
+
 The active repo-local release gate can be run locally with:
 
 ```bash
@@ -169,15 +193,46 @@ uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:
 
 That variant runs the same active repo-local gate plus a no-Docker Postgres smoke and returns one combined JSON artifact.
 
+In this checkout, the latest persisted repo-local gate artifacts are typically kept under `var/reports/`, for example:
+
+- `var/reports/release-check-current.json`
+- `var/reports/release-check-postgres-current.json`
+- `var/reports/repo-local-status-current.json`
+- `var/reports/change-groups-current.json`
+- `var/reports/local-artifacts-refresh-current.json`
+- `var/reports/local-artifacts-refresh-postgres-current.json`
+
+To refresh those local operator artifacts in one step:
+
+```bash
+uv run memco local-artifacts-refresh --project-root /Users/martin/memco
+```
+
+If you also want to refresh the Postgres-smoke artifact in the same run:
+
+```bash
+uv run memco local-artifacts-refresh \
+  --project-root /Users/martin/memco \
+  --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
+```
+
+To persist the refresh summary itself:
+
+```bash
+uv run memco local-artifacts-refresh \
+  --project-root /Users/martin/memco \
+  --output /absolute/path/to/local-artifacts-refresh.json
+```
+
 ## Recommended Runtime Paths
 
-For this machine, the recommended non-SQLite runtime path is:
+For this machine, the canonical storage contract is Postgres-first:
 
 - PostgreSQL via any reachable Postgres instance
 - versioned SQL migrations
 - API running with `MEMCO_STORAGE_ENGINE=postgres`
 
-Current private release work still defaults to SQLite for the local single-user slice.
+SQLite remains available only as a local compatibility/dev fallback and should not be treated as the canonical storage contract.
 
 Preferred no-Docker path:
 

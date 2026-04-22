@@ -59,14 +59,20 @@ def _run_pytest_gate(*, project_root: Path) -> dict:
 
 
 def _run_eval_gate(*, eval_root: Path) -> dict:
-    ensure_runtime(load_settings(eval_root))
+    settings = load_settings(eval_root)
+    if not settings.config_path.exists():
+        settings.storage.engine = "sqlite"
+    ensure_runtime(settings)
     service = EvalService()
     service.seed_fixture_data(eval_root)
-    artifact = service.run(eval_root)
+    artifact = service.run_acceptance(eval_root)
     return {
-        "name": "eval_artifact",
+        "name": "acceptance_artifact",
         "ok": artifact["failed"] == 0 and artifact["behavior_checks_total"] == artifact["behavior_checks_passed"],
         "root": str(eval_root),
+        "storage_engine": settings.storage.engine,
+        "storage_contract_engine": settings.storage.contract_engine,
+        "storage_role": settings.storage_role,
         "artifact_summary": {
             "artifact_type": artifact["artifact_type"],
             "release_scope": artifact["release_scope"],
@@ -142,7 +148,7 @@ def run_release_check(
                     eval_step = _run_eval_gate(eval_root=Path(tmpdir))
         else:
             eval_step = {
-                "name": "eval_artifact",
+                "name": "acceptance_artifact",
                 "ok": False,
                 "skipped": True,
                 "reason": "pytest_gate_failed",

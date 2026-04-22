@@ -32,6 +32,7 @@ Related contract decision:
 - [2026-04-22_memco_contract_decision.md](2026-04-22_memco_contract_decision.md)
 - [2026-04-22_memco_original_brief_track_decision.md](2026-04-22_memco_original_brief_track_decision.md)
 - [2026-04-22_memco_original_brief_status.md](2026-04-22_memco_original_brief_status.md)
+- [2026-04-22_memco_repo_local_status_snapshot.md](2026-04-22_memco_repo_local_status_snapshot.md)
 
 ## Private Release Readiness
 
@@ -86,11 +87,30 @@ tmpdir=$(mktemp -d)
 uv run memco eval-run --root "$tmpdir"
 ```
 
+Quick contract-facing regression stack:
+
+```bash
+uv run pytest -q \
+  tests/test_docs_contract.py \
+  tests/test_release_check.py \
+  tests/test_cli_release_check.py \
+  tests/test_config.py \
+  tests/test_llm_provider.py
+```
+
+Local artifact refresh shortcut:
+
+```bash
+uv run memco local-artifacts-refresh --project-root /Users/martin/memco
+```
+
 Most recent recorded evidence:
 
-- private operator gate: `23 passed in 5.44s`
-- expanded eval artifact on clean root: `total=20`, `passed=20`, `pass_rate=1.0`, `token_accounting.status=tracked`
-- full local test suite: `135 passed in 19.95s`
+- contract-facing regression stack:
+  - `46 passed`
+- active repo-local release-check pytest gate: `47 passed`
+- expanded eval artifact on clean root: `total=24`, `passed=24`, `pass_rate=1.0`, `token_accounting.status=tracked`
+- full local test suite: `266 passed`
 - no-Docker Postgres live proof:
   - `uv run memco-api` with `MEMCO_STORAGE_ENGINE=postgres`
   - `/health` returned `storage_engine=postgres`
@@ -109,6 +129,14 @@ Most recent recorded evidence:
 - active local release-check entrypoint:
   - `uv run memco release-check`
   - passed locally against the active repo-local gate
+  - latest local artifact:
+    - `pytest_gate`: `47 passed`
+    - `acceptance_artifact`: `24/24 passed`
+    - saved artifact:
+      - `var/reports/release-check-current.json`
+  - implementation note:
+    - the temporary acceptance root intentionally uses SQLite fallback when no local runtime config exists there
+    - optional Postgres verification remains a separate smoke step inside `--postgres-database-url ...`
   - repo-root resolution:
     - defaults to the nearest Memco checkout above the current working directory
     - can be overridden with `--project-root /absolute/path/to/memco`
@@ -117,7 +145,14 @@ Most recent recorded evidence:
     - passed locally and wrote the combined gate artifact to disk
   - optional no-Docker Postgres variant:
     - `uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
-    - passed locally and produced a single artifact with `pytest_gate`, `eval_artifact`, and `postgres_smoke`
+    - passed locally and produced a single artifact with `pytest_gate`, `acceptance_artifact`, and `postgres_smoke`
+    - latest saved artifact:
+      - `var/reports/release-check-postgres-current.json`
+  - local artifact refresh:
+    - `uv run memco local-artifacts-refresh --project-root /Users/martin/memco`
+    - latest saved artifacts:
+      - `var/reports/local-artifacts-refresh-current.json`
+      - `var/reports/local-artifacts-refresh-postgres-current.json`
 
 ### Private Gate Checklist
 

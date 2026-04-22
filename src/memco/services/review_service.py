@@ -7,6 +7,7 @@ MIN_REVIEW_APPROVED_CONFIDENCE = 0.6
 
 
 class ReviewService:
+    ALLOWED_DECISIONS = {"approved", "rejected"}
     def __init__(
         self,
         review_repository: ReviewRepository | None = None,
@@ -32,13 +33,14 @@ class ReviewService:
         person_id: int | None = None,
         limit: int = 50,
     ) -> list[dict]:
-        return self.review_repository.list_items(
+        items = self.review_repository.list_items(
             conn,
             workspace_slug=workspace_slug,
             status=status,
             person_id=person_id,
             limit=limit,
         )
+        return [self._enrich_review_item(item) for item in items]
 
     def resolve_with_person(
         self,
@@ -50,6 +52,8 @@ class ReviewService:
         candidate_person_id: int | None = None,
         candidate_target_person_id: int | None = None,
     ) -> dict:
+        if decision not in self.ALLOWED_DECISIONS:
+            raise ValueError("decision must be one of: approved, rejected")
         row = self.review_repository.resolve(
             conn,
             queue_id=queue_id,
@@ -99,4 +103,52 @@ class ReviewService:
                 conn,
                 candidate_id=int(candidate_id),
             )
-        return row
+        row["resolution_reason"] = reason
+        return self._enrich_review_item(row)
+
+    def _reason_codes(self, reason: str) -> list[str]:
+        if not reason:
+            return []
+        return [part.strip() for part in reason.split(",") if part.strip()]
+
+    def _decision_summary(self, *, status: str, candidate: dict | None, reason: str) -> str:
+        candidate_label = ""
+        if candidate is not None:
+            candidate_label = candidate.get("summary") or candidate.get("canonical_key") or "candidate"
+        if status == "approved":
+            return f"approved: {candidate_label}".strip()
+        if status == "rejected":
+            return f"rejected: {candidate_label}".strip()
+        if status == "pending":
+            return f"pending: {candidate_label}".strip()
+        return status
+
+    def _enrich_review_item(self, item: dict) -> dict:
+        candidate = item.get("candidate")
+        enriched = dict(item)
+        candidate_reason = ""
+        candidate_domain = ""
+        candidate_summary = ""
+        candidate_status = ""
+        if isinstance(candidate, dict):
+            candidate_reason = str(item.get("reason") or candidate.get("reason") or "")
+            candidate_domain = str(candidate.get("domain") or "")
+            candidate_summary = str(candidate.get("summary") or candidate.get("canonical_key") or "")
+            candidate_status = str(candidate.get("candidate_status") or "")
+        enriched["candidate_reason"] = candidate_reason
+        enriched["candidate_reason_codes"] = self._reason_codes(candidate_reason or str(item.get("reason") or ""))
+        enriched["candidate_domain"] = candidate_domain
+        enriched["candidate_summary"] = candidate_summary
+        enriched["candidate_status"] = candidate_status
+        enriched["decision_summary"] = self._decision_summary(
+            status=str(item.get("status") or ""),
+            candidate=candidate if isinstance(candidate, dict) else None,
+            reason=str(item.get("reason") or ""),
+        )
+        if str(item.get("status") or "") == "pending":
+            enriched["next_action_hint"] = "review-resolve approved|rejected"
+        elif str(item.get("status") or "") == "approved":
+            enriched["next_action_hint"] = "candidate-publish or inspect candidate"
+        else:
+            enriched["next_action_hint"] = "inspect candidate or queue history"
+        return enriched

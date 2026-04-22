@@ -13,6 +13,7 @@ def test_runtime_initializes_schema(settings):
     assert "sources" in table_names
     assert "source_documents" in table_names
     assert "source_segments" in table_names
+    assert "sessions" in table_names
     assert "schema_migrations" in table_names
     assert "persons" in table_names
     assert "memory_facts" in table_names

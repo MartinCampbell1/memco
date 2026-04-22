@@ -25,6 +25,8 @@ def test_cli_init_and_person_upsert(settings):
         prog_name="memco",
     )
     assert result.exit_code == 0, result.output
+    assert "Storage contract: postgres-primary" in result.output
+    assert "Storage role: fallback" in result.output
     assert "Storage engine: sqlite" in result.output
     assert f"Database ready at {settings.db_path}" in result.output
 
@@ -36,6 +38,110 @@ def test_cli_init_and_person_upsert(settings):
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
     assert payload["display_name"] == "CLI Alice"
+
+
+def test_cli_local_artifacts_refresh_command(monkeypatch, settings):
+    runner = CliRunner()
+    command = get_command(app)
+
+    monkeypatch.setattr(
+        "memco.cli.main._project_root",
+        lambda project_root: settings.root.resolve(),
+    )
+    monkeypatch.setattr(
+        "memco.cli.main.refresh_local_artifacts",
+        lambda **kwargs: {
+            "artifact_type": "local_artifact_refresh",
+            "project_root": str(kwargs["project_root"]),
+            "artifacts": {"repo_local_status": "/tmp/status.json"},
+            "summaries": {"full_suite": "262 passed in 5.00s"},
+        },
+    )
+
+    result = runner.invoke(
+        command,
+        ["local-artifacts-refresh", "--project-root", str(settings.root)],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "local_artifact_refresh"
+    assert payload["project_root"] == str(settings.root.resolve())
+
+
+def test_cli_local_artifacts_refresh_command_supports_postgres_and_output(monkeypatch, settings, tmp_path):
+    runner = CliRunner()
+    command = get_command(app)
+    output_path = tmp_path / "artifacts" / "local-artifacts-refresh.json"
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "memco.cli.main._project_root",
+        lambda project_root: settings.root.resolve(),
+    )
+
+    def fake_refresh_local_artifacts(**kwargs):
+        captured.update(kwargs)
+        return {
+            "artifact_type": "local_artifact_refresh",
+            "project_root": str(kwargs["project_root"]),
+            "artifacts": {
+                "release_check": "/tmp/release-check-current.json",
+                "release_check_postgres": "/tmp/release-check-postgres-current.json",
+            },
+            "summaries": {
+                "full_suite": "264 passed in 5.91s",
+                "contract_stack": "46 passed in 0.76s",
+            },
+        }
+
+    monkeypatch.setattr("memco.cli.main.refresh_local_artifacts", fake_refresh_local_artifacts)
+
+    result = runner.invoke(
+        command,
+        [
+            "local-artifacts-refresh",
+            "--project-root",
+            str(settings.root),
+            "--postgres-database-url",
+            "postgresql://example/postgres",
+            "--output",
+            str(output_path),
+        ],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert captured["project_root"] == settings.root.resolve()
+    assert captured["postgres_database_url"] == "postgresql://example/postgres"
+    assert payload["artifact_path"] == str(output_path.resolve())
+    written = json.loads(output_path.read_text(encoding="utf-8"))
+    assert written == payload
+
+
+def test_cli_local_artifacts_refresh_command_returns_nonzero_on_failure(monkeypatch, settings):
+    runner = CliRunner()
+    command = get_command(app)
+
+    monkeypatch.setattr(
+        "memco.cli.main._project_root",
+        lambda project_root: settings.root.resolve(),
+    )
+    monkeypatch.setattr(
+        "memco.cli.main.refresh_local_artifacts",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("local artifact refresh failed")),
+    )
+
+    result = runner.invoke(
+        command,
+        ["local-artifacts-refresh", "--project-root", str(settings.root)],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1
+    assert "local artifact refresh failed" in result.output
 
 
 def test_cli_ingest_pipeline_happy_path(settings, tmp_path):
@@ -519,12 +625,21 @@ def test_cli_operator_flow_supports_supersede_rollback(settings, tmp_path):
     )
     assert supported_chat["refused"] is False
     assert "Lisbon" in supported_chat["answer"]
+    assert len(supported_chat["fact_ids"]) == 1
+    assert len(supported_chat["evidence_ids"]) == 1
 
     false_premise_chat = invoke_json(
         ["chat", "Does Alice work at Stripe?", "alice", "--root", str(settings.root)]
     )
     assert false_premise_chat["refused"] is True
     assert false_premise_chat["answer"] == "I don't have confirmed memory evidence for that."
+
+    core_only_retrieve = invoke_json(
+        ["retrieve", "Where does Alice live?", "alice", "--detail-policy", "core_only", "--root", str(settings.root)]
+    )
+    assert core_only_retrieve["detail_policy"] == "core_only"
+    assert core_only_retrieve["hits"][0]["summary"] == "Alice lives in Lisbon."
+    assert "payload" not in core_only_retrieve["hits"][0]
 
     facts_before_rollback = invoke_json(
         [
@@ -1442,6 +1557,9 @@ def test_cli_review_flow_supports_latest_review_and_slug_resolution(settings, tm
     review_items = json.loads(result.output)
     assert len(review_items) >= 1
     assert review_items[0]["status"] == "pending"
+    assert "candidate_summary" in review_items[0]
+    assert "candidate_reason_codes" in review_items[0]
+    assert review_items[0]["next_action_hint"] == "review-resolve approved|rejected"
 
     result = runner.invoke(
         command,
@@ -1466,6 +1584,7 @@ def test_cli_review_flow_supports_latest_review_and_slug_resolution(settings, tm
     assert result.exit_code == 0, result.output
     resolved = json.loads(result.output)
     assert resolved["review"]["status"] == "approved"
+    assert resolved["review"]["decision_summary"].startswith("approved")
     assert resolved["review"]["candidate"]["candidate_status"] == "published"
     assert resolved["review"]["candidate"]["payload"]["target_person_id"] is not None
     assert resolved["publish"]["fact"]["domain"] == "social_circle"

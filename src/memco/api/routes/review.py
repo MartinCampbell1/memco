@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, status
 
-from memco.api.deps import get_settings, require_api_auth
+from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.review import ReviewListRequest, ReviewResolveRequest
 from memco.services.review_service import ReviewService
@@ -18,6 +18,13 @@ def list_review_items(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/review/list",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ReviewService()
     with get_connection(settings.db_path) as conn:
         items = service.list_items(
@@ -38,6 +45,13 @@ def resolve_review_item(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/review/resolve",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ReviewService()
     with get_connection(settings.db_path) as conn:
         try:

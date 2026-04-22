@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from memco.extractors.base import validate_candidate_payload
 from memco.utils import isoformat_z
 
 
@@ -38,6 +39,7 @@ class CandidateRepository:
         person_id: int | None,
         source_id: int,
         conversation_id: int | None,
+        session_id: int | None = None,
         chunk_kind: str,
         chunk_id: int | None,
         domain: str,
@@ -52,6 +54,7 @@ class CandidateRepository:
     ) -> dict:
         if domain not in ALLOWED_DOMAINS:
             raise ValueError(f"Unsupported candidate domain: {domain}")
+        validate_candidate_payload(domain=domain, category=category, payload=payload)
         workspace_id = self.ensure_workspace(conn, workspace_slug)
         existing = conn.execute(
             """
@@ -74,17 +77,18 @@ class CandidateRepository:
         cursor = conn.execute(
             """
             INSERT INTO fact_candidates (
-                workspace_id, person_id, source_id, conversation_id, chunk_kind, chunk_id,
+                workspace_id, person_id, source_id, conversation_id, session_id, chunk_kind, chunk_id,
                 domain, category, subcategory, canonical_key, payload_json, summary,
                 confidence, candidate_status, publish_target_fact_id, dedupe_key, reason, evidence_json,
                 extracted_at, reviewed_at, published_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'extracted_candidate', NULL, ?, ?, '[]', ?, '', '', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'extracted_candidate', NULL, ?, ?, '[]', ?, '', '', ?, ?)
             """,
             (
                 workspace_id,
                 person_id,
                 source_id,
                 conversation_id,
+                session_id,
                 chunk_kind,
                 chunk_id,
                 domain,

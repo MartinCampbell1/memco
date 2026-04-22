@@ -104,9 +104,9 @@ class SourceRepository:
             conn.execute(
                 """
                 INSERT INTO source_segments (
-                    source_id, segment_type, segment_index, chunk_id, conversation_id, message_id,
+                    source_id, segment_type, segment_index, chunk_id, conversation_id, session_id, message_id,
                     text, locator_json, occurred_at, created_at
-                ) VALUES (?, 'source_chunk', ?, ?, NULL, NULL, ?, ?, '', ?)
+                ) VALUES (?, 'source_chunk', ?, ?, NULL, NULL, NULL, ?, ?, '', ?)
                 """,
                 (
                     source_id,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, status
 
-from memco.api.deps import get_settings, require_api_auth
+from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.candidate import (
     CandidateExtractRequest,
@@ -25,6 +25,13 @@ def extract_candidates(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/candidates/extract",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = CandidateService(extraction_service=ExtractionService.from_settings(settings))
     with get_connection(settings.db_path) as conn:
         result = service.extract_from_conversation(
@@ -45,6 +52,13 @@ def list_candidates(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/candidates/list",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = CandidateService()
     with get_connection(settings.db_path) as conn:
         result = service.list_candidates(
@@ -66,6 +80,13 @@ def publish_candidate(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/candidates/publish",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = PublishService()
     with get_connection(settings.db_path) as conn:
         try:
@@ -90,6 +111,13 @@ def reject_candidate(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/candidates/reject",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = PublishService()
     with get_connection(settings.db_path) as conn:
         try:

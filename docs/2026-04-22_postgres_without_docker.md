@@ -6,6 +6,9 @@ Date: 2026-04-22
 
 Memco no longer requires Docker as the only way to use PostgreSQL.
 
+PostgreSQL is the primary storage contract for the repo-local runtime.
+SQLite remains only as a local fallback/dev path and is not the canonical storage contract.
+
 The code supports:
 
 - `MEMCO_STORAGE_ENGINE=postgres`
@@ -129,3 +132,5 @@ Validated in this session:
   - `MEMCO_DATABASE_URL='postgresql://martin@127.0.0.1:5432/postgres' uv run memco postgres-bootstrap memco_persistent_test --root /tmp/memco-postgres-persistent`
 - optional live test also passed on this machine:
   - `uv run pytest -q tests/test_postgres_live_smoke.py`
+- integrated repo-local release gate + Postgres smoke also passed and can be persisted with:
+  - `uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres' --output /Users/martin/memco/var/reports/release-check-postgres-current.json`

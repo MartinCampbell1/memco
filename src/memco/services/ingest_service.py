@@ -1,49 +1,44 @@
 from __future__ import annotations
 
-import csv
-import json
 from pathlib import Path
-from typing import Any
 
 from memco.models.source import ImportResult
+from memco.parsers.base import ParsedDocument
+from memco.parsers.delimited_parser import DelimitedParser
+from memco.parsers.email_parser import EmailParser
+from memco.parsers.json_parser import JsonParser
+from memco.parsers.pdf_parser import PdfParser
+from memco.parsers.text_parser import TextParser
 from memco.repositories.source_repository import SourceRepository
 from memco.utils import sha256_file, sha256_text, slugify
 
 
-def _extract_plain_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="ignore")
+DEFAULT_PARSERS = {
+    ".md": TextParser(),
+    ".txt": TextParser(),
+    ".json": JsonParser(),
+    ".csv": DelimitedParser(delimiter=","),
+    ".eml": EmailParser(),
+    ".mbox": EmailParser(),
+    ".pdf": PdfParser(),
+}
+
+SOURCE_TYPE_PARSERS = {
+    "note": TextParser(),
+    "text": TextParser(),
+    "markdown": TextParser(),
+    "chat": TextParser(),
+    "json": JsonParser(),
+    "csv": DelimitedParser(delimiter=","),
+    "email": EmailParser(),
+    "pdf": PdfParser(),
+}
 
 
-def _extract_json(path: Path) -> str:
-    data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
-    return json.dumps(data, ensure_ascii=False, indent=2)
-
-
-def _extract_delimited(path: Path, delimiter: str) -> str:
-    rows: list[list[str]] = []
-    with path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
-        reader = csv.reader(handle, delimiter=delimiter)
-        for row in reader:
-            rows.append([cell.strip() for cell in row])
-    if not rows:
-        return ""
-    header = rows[0]
-    body = rows[1:]
-    lines = [f"# Table Import: {path.name}", "", "## Columns", ", ".join(header), "", "## Rows"]
-    for index, row in enumerate(body, start=1):
-        lines.append("- row {}: {}".format(index, "; ".join(f"{column}: {value}" for column, value in zip(header, row) if value)))
-    return "\n".join(lines).strip() + "\n"
-
-
-def extract_text(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in {".md", ".txt"}:
-        return _extract_plain_text(path)
-    if suffix == ".json":
-        return _extract_json(path)
-    if suffix == ".csv":
-        return _extract_delimited(path, ",")
-    return _extract_plain_text(path)
+def parse_document(path: Path, *, source_type: str | None = None) -> ParsedDocument:
+    normalized_type = (source_type or "").strip().lower()
+    parser = SOURCE_TYPE_PARSERS.get(normalized_type) or DEFAULT_PARSERS.get(path.suffix.lower(), TextParser())
+    return parser.parse(path)
 
 
 def render_normalized_markdown(source_type: str, original_path: Path, parsed_text: str) -> str:
@@ -63,7 +58,8 @@ class IngestService:
         raw_dir.mkdir(parents=True, exist_ok=True)
         copied = raw_dir / path.name
         copied.write_bytes(path.read_bytes())
-        parsed_text = extract_text(path)
+        parsed = parse_document(path, source_type=source_type)
+        parsed_text = parsed.text
         normalized_path = copied if copied.suffix.lower() == ".md" else copied.with_name(f"{copied.stem}-normalized.md")
         if normalized_path != copied:
             normalized_path.write_text(
@@ -79,7 +75,12 @@ class IngestService:
             title=path.stem,
             sha256=sha256_file(copied),
             parsed_text=parsed_text,
-            meta={"normalized_path": str(normalized_path)},
+            meta={
+                "normalized_path": str(normalized_path),
+                "parser_name": parsed.parser_name,
+                "parser_confidence": parsed.confidence,
+                **parsed.metadata,
+            },
         )
         self.source_repository.replace_chunks(conn, source_id=source_id, parsed_text=parsed_text)
         return ImportResult(
@@ -112,7 +113,11 @@ class IngestService:
             title=safe_title,
             sha256=sha256_file(copied),
             parsed_text=parsed_text,
-            meta={"normalized_path": str(normalized_path)},
+            meta={
+                "normalized_path": str(normalized_path),
+                "parser_name": "inline",
+                "parser_confidence": 1.0,
+            },
         )
         self.source_repository.replace_chunks(conn, source_id=source_id, parsed_text=parsed_text)
         return ImportResult(

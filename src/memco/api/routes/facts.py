@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header
 
-from memco.api.deps import get_settings, require_api_auth
+from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.fact import FactListRequest, FactOperationListRequest, FactRollbackRequest, FactStatusUpdateRequest
 from memco.repositories.fact_repository import FactRepository
@@ -19,6 +19,13 @@ def list_facts(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/facts/list",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
         items = repository.list_facts(
@@ -40,6 +47,13 @@ def list_fact_operations(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/facts/operations",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     repository = FactRepository()
     with get_connection(settings.db_path) as conn:
         items = repository.list_operations(
@@ -61,6 +75,13 @@ def delete_fact(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/facts/delete",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ConsolidationService()
     with get_connection(settings.db_path) as conn:
         result = service.mark_deleted(conn, fact_id=request.fact_id, reason=request.reason)
@@ -75,6 +96,13 @@ def restore_fact(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/facts/restore",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ConsolidationService()
     with get_connection(settings.db_path) as conn:
         result = service.restore(conn, fact_id=request.fact_id, reason=request.reason)
@@ -89,6 +117,13 @@ def rollback_fact_operation(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/facts/rollback",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ConsolidationService()
     with get_connection(settings.db_path) as conn:
         result = service.rollback(conn, operation_id=request.operation_id, reason=request.reason)

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from memco.models.retrieval import ActorContext
+
 
 class FactListRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -11,6 +13,7 @@ class FactListRequest(BaseModel):
     status: str | None = None
     domain: str | None = None
     limit: int = 50
+    actor: ActorContext | None = None
 
 
 class FactOperationListRequest(BaseModel):
@@ -21,6 +24,7 @@ class FactOperationListRequest(BaseModel):
     target_fact_id: int | None = None
     operation_type: str | None = None
     limit: int = 50
+    actor: ActorContext | None = None
 
 
 class FactStatusUpdateRequest(BaseModel):
@@ -28,6 +32,7 @@ class FactStatusUpdateRequest(BaseModel):
 
     fact_id: int
     reason: str = ""
+    actor: ActorContext | None = None
 
 
 class FactRollbackRequest(BaseModel):
@@ -35,3 +40,4 @@ class FactRollbackRequest(BaseModel):
 
     operation_id: int
     reason: str = ""
+    actor: ActorContext | None = None

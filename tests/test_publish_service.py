@@ -295,6 +295,78 @@ def test_publish_candidate_rejects_unresolved_social_target(settings):
             )
 
 
+def test_publish_candidate_rejects_unresolved_social_relationship_event(settings):
+    service = PublishService()
+    candidate_repo = CandidateRepository()
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/social-event-source.md",
+            source_type="note",
+            origin_uri="/tmp/social-event-source.md",
+            title="social-event-source",
+            sha256="social-event-source-sha",
+            parsed_text="I met Bob at work.",
+        )
+        source_repo.replace_chunks(conn, source_id=source_id, parsed_text="I met Bob at work.")
+        chunk_id = conn.execute(
+            "SELECT id FROM source_chunks WHERE source_id = ? ORDER BY chunk_index ASC LIMIT 1",
+            (source_id,),
+        ).fetchone()["id"]
+        source_segment_id = source_repo.get_segment_by_chunk_id(conn, chunk_id=int(chunk_id))["id"]
+        candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=source_id,
+            conversation_id=None,
+            chunk_kind="conversation",
+            chunk_id=int(chunk_id),
+            domain="social_circle",
+            category="relationship_event",
+            subcategory="met",
+            canonical_key="alice:social_circle:relationship_event:bob:met",
+            payload={"target_label": "Bob", "target_person_id": None, "event": "met", "context": "work"},
+            summary="Alice met Bob.",
+            confidence=0.8,
+        )
+        candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(candidate["id"]),
+            evidence=[
+                {
+                    "quote": "I met Bob at work.",
+                    "message_ids": ["1"],
+                    "source_segment_ids": [int(source_segment_id)],
+                    "chunk_kind": "conversation",
+                }
+            ],
+        )
+        candidate = candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(candidate["id"]),
+            candidate_status="validated_candidate",
+        )
+        with pytest.raises(ValueError, match="unresolved hard conflict"):
+            service.publish_candidate(
+                conn,
+                workspace_slug="default",
+                candidate_id=int(candidate["id"]),
+            )
+
+
 def test_reject_candidate_marks_status_reason_and_does_not_create_fact(settings):
     service = PublishService()
 

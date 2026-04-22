@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Header
 
-from memco.api.deps import get_settings, require_api_auth
+from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.conversation import (
     ConversationImportRequest,
@@ -29,6 +29,13 @@ def ingest_source(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/ingest",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = IngestService()
     with get_connection(settings.db_path) as conn:
         result = service.import_file(
@@ -49,6 +56,13 @@ def ingest_text(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/ingest/text",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = IngestService()
     with get_connection(settings.db_path) as conn:
         result = service.import_text(
@@ -70,6 +84,13 @@ def ingest_pipeline(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/ingest/pipeline",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = IngestPipelineService()
     with get_connection(settings.db_path) as conn:
         if request.path:
@@ -113,6 +134,13 @@ def ingest_conversation(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/ingest/conversation",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ConversationIngestService()
     with get_connection(settings.db_path) as conn:
         result = service.import_conversation(
@@ -134,6 +162,13 @@ def list_conversation_speakers(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/conversations/speakers",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     service = ConversationIngestService()
     with get_connection(settings.db_path) as conn:
         items = service.list_speakers(
@@ -151,6 +186,13 @@ def resolve_conversation_speaker(
 ):
     settings = get_settings()
     require_api_auth(settings, authorization=authorization, x_memco_token=x_memco_token)
+    resolve_actor_context(
+        settings,
+        request.actor,
+        route_label="/v1/conversations/speakers/resolve",
+        allowed_actor_types={"owner", "admin", "system"},
+        require_actor=True,
+    )
     conversation_service = ConversationIngestService()
     candidate_service = CandidateService(extraction_service=ExtractionService.from_settings(settings))
     with get_connection(settings.db_path) as conn:

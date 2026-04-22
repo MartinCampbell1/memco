@@ -111,9 +111,29 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE INDEX IF NOT EXISTS idx_conversations_workspace_started
   ON conversations(workspace_id, started_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  session_index INTEGER NOT NULL,
+  session_uid TEXT NOT NULL,
+  started_at TEXT NOT NULL DEFAULT '',
+  ended_at TEXT NOT NULL DEFAULT '',
+  detection_method TEXT NOT NULL DEFAULT 'single',
+  meta_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(conversation_id, session_index),
+  UNIQUE(conversation_id, session_uid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_conversation_order
+  ON sessions(conversation_id, session_index);
+
 CREATE TABLE IF NOT EXISTS conversation_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
   message_index INTEGER NOT NULL,
   role TEXT NOT NULL DEFAULT 'unknown',
   speaker_label TEXT NOT NULL DEFAULT '',
@@ -135,10 +155,14 @@ CREATE INDEX IF NOT EXISTS idx_conversation_messages_speaker_key
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_person
   ON conversation_messages(speaker_person_id);
 
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_session
+  ON conversation_messages(session_id, message_index);
+
 CREATE TABLE IF NOT EXISTS conversation_chunks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
   chunk_index INTEGER NOT NULL,
   start_message_index INTEGER NOT NULL,
   end_message_index INTEGER NOT NULL,
@@ -155,6 +179,9 @@ CREATE INDEX IF NOT EXISTS idx_conversation_chunks_order
 CREATE INDEX IF NOT EXISTS idx_conversation_chunks_source
   ON conversation_chunks(source_id, chunk_index);
 
+CREATE INDEX IF NOT EXISTS idx_conversation_chunks_session
+  ON conversation_chunks(session_id, chunk_index);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS conversation_chunk_fts USING fts5(
   text,
   tokenize='porter unicode61'
@@ -167,6 +194,7 @@ CREATE TABLE IF NOT EXISTS source_segments (
   segment_index INTEGER NOT NULL,
   chunk_id INTEGER REFERENCES source_chunks(id) ON DELETE SET NULL,
   conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
   message_id INTEGER REFERENCES conversation_messages(id) ON DELETE CASCADE,
   text TEXT NOT NULL DEFAULT '',
   locator_json TEXT NOT NULL DEFAULT '{}',
@@ -183,6 +211,9 @@ CREATE INDEX IF NOT EXISTS idx_source_segments_message
 
 CREATE INDEX IF NOT EXISTS idx_source_segments_chunk
   ON source_segments(chunk_id);
+
+CREATE INDEX IF NOT EXISTS idx_source_segments_session
+  ON source_segments(session_id);
 
 CREATE TABLE IF NOT EXISTS conversation_speaker_map (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -208,11 +239,14 @@ CREATE TABLE IF NOT EXISTS memory_facts (
   payload_json TEXT NOT NULL DEFAULT '{}',
   summary TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active',
+  sensitivity TEXT NOT NULL DEFAULT 'normal',
+  visibility TEXT NOT NULL DEFAULT 'standard',
   confidence REAL NOT NULL DEFAULT 0.5,
   source_kind TEXT NOT NULL DEFAULT 'explicit',
   observed_at TEXT NOT NULL,
   valid_from TEXT NOT NULL DEFAULT '',
   valid_to TEXT NOT NULL DEFAULT '',
+  event_at TEXT NOT NULL DEFAULT '',
   supersedes_fact_id INTEGER REFERENCES memory_facts(id) ON DELETE SET NULL,
   superseded_by_fact_id INTEGER REFERENCES memory_facts(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL,
@@ -231,6 +265,7 @@ CREATE TABLE IF NOT EXISTS memory_evidence (
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
   chunk_id INTEGER REFERENCES source_chunks(id) ON DELETE SET NULL,
   source_segment_id INTEGER REFERENCES source_segments(id) ON DELETE SET NULL,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
   quote_text TEXT NOT NULL DEFAULT '',
   locator_json TEXT NOT NULL DEFAULT '{}',
   support_type TEXT NOT NULL DEFAULT 'supports',
@@ -255,6 +290,7 @@ CREATE TABLE IF NOT EXISTS fact_candidates (
   person_id INTEGER REFERENCES persons(id) ON DELETE SET NULL,
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
   conversation_id INTEGER REFERENCES conversations(id) ON DELETE SET NULL,
+  session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
   chunk_kind TEXT NOT NULL DEFAULT 'conversation',
   chunk_id INTEGER,
   domain TEXT NOT NULL,
