@@ -422,11 +422,19 @@ class EvalService:
         "temporal_update",
         "duplicate_merge",
     }
+    OPERATOR_READINESS_CASE_GROUPS = {
+        "supported_fact",
+        "temporal_update",
+        "cross_person_contamination",
+        "unsupported_premise",
+        "review_queue_behavior",
+    }
     BENCHMARK_SETS = {
         "internal_golden_set": {"supported_fact", "duplicate_merge"},
         "adversarial_false_premise_set": {"unsupported_premise", "partial_support"},
         "temporal_set": {"temporal_update"},
         "cross_person_contamination_set": {"cross_person_contamination"},
+        "operator_readiness_set": OPERATOR_READINESS_CASE_GROUPS,
     }
 
     BEHAVIOR_CHECKS = (
@@ -457,9 +465,9 @@ class EvalService:
         retrieval_service: RetrievalService | None = None,
         refusal_service: RefusalService | None = None,
     ) -> None:
-        self.retrieval_service = retrieval_service or RetrievalService()
-        self.refusal_service = refusal_service or RefusalService()
         self.llm_usage_tracker = LLMUsageTracker()
+        self.retrieval_service = retrieval_service or RetrievalService(usage_tracker=self.llm_usage_tracker)
+        self.refusal_service = refusal_service or RefusalService(usage_tracker=self.llm_usage_tracker)
 
     def _person(self, conn, *, fact_repo: FactRepository, slug: str, display_name: str) -> dict:
         return fact_repo.upsert_person(
@@ -1251,7 +1259,7 @@ class EvalService:
             behavior_checks = self._behavior_checks(conn)
         return results, behavior_checks
 
-    def _build_common_metrics(self, *, results: list[dict]) -> dict:
+    def _build_common_metrics(self, *, results: list[dict], start_event_index: int = 0) -> dict:
         total = len(results)
         passed = sum(1 for item in results if item["passed"])
         latencies = [int(item["latency_ms"]) for item in results]
@@ -1290,7 +1298,7 @@ class EvalService:
                 "missing_evidence_cases": [item["name"] for item in hit_cases if item["evidence_count"] == 0],
             },
             "retrieval_latency_ms": self._latency_summary(latencies),
-            "token_accounting": self.llm_usage_tracker.summary(),
+            "token_accounting": self.llm_usage_tracker.summary(start_index=start_event_index),
             "groups": groups,
         }
 
@@ -1316,18 +1324,32 @@ class EvalService:
             "providers": sorted(set(before.get("providers", [])) | set(after.get("providers", []))),
         }
 
-    def _token_accounting_by_stage(self, *, before: dict, after: dict) -> dict[str, dict]:
-        llm_usage = self._usage_delta(before["llm_usage"], after["llm_usage"])
-        deterministic_usage = self._usage_delta(before["deterministic_usage"], after["deterministic_usage"])
+    def _token_accounting_by_stage(self, *, start_event_index: int) -> dict[str, dict]:
+        stage_events = self.llm_usage_tracker.events[start_event_index:]
+
+        def aggregate(stage: str) -> dict[str, object]:
+            selected = [event for event in stage_events if event.metadata.get("stage") == stage]
+            deterministic = [event for event in selected if event.deterministic]
+            llm = [event for event in selected if not event.deterministic]
+            if llm:
+                status = "measured_llm"
+            elif deterministic:
+                status = "deterministic"
+            else:
+                status = "not_applicable"
+            return {
+                "status": status,
+                "operation_count": len(selected),
+                "input_tokens": sum(event.input_tokens for event in selected),
+                "output_tokens": sum(event.output_tokens for event in selected),
+                "providers": sorted({event.provider for event in selected}),
+            }
+
         return {
-            "extraction": {
-                "status": "measured_delta",
-                "input_tokens": deterministic_usage["input_tokens"] + llm_usage["input_tokens"],
-                "output_tokens": deterministic_usage["output_tokens"] + llm_usage["output_tokens"],
-            },
-            "planner": {"status": "not_instrumented", "input_tokens": 0, "output_tokens": 0},
-            "retrieval": {"status": "not_instrumented", "input_tokens": 0, "output_tokens": 0},
-            "answer": {"status": "not_instrumented", "input_tokens": 0, "output_tokens": 0},
+            "extraction": aggregate("extraction"),
+            "planner": aggregate("planner"),
+            "retrieval": aggregate("retrieval"),
+            "answer": aggregate("answer"),
         }
 
     def _benchmark_domain_reports(self, *, results: list[dict]) -> dict[str, dict]:
@@ -1355,8 +1377,9 @@ class EvalService:
         return reports
 
     def _run_acceptance_cases(self, project_root: Path) -> dict:
+        start_event_index = len(self.llm_usage_tracker.events)
         results, behavior_checks = self._execute_cases(project_root, cases=self.CASES, route_name="eval")
-        metrics = self._build_common_metrics(results=results)
+        metrics = self._build_common_metrics(results=results, start_event_index=start_event_index)
         return {
             "artifact_type": "eval_acceptance_artifact",
             "release_scope": "private-single-user",
@@ -1372,12 +1395,18 @@ class EvalService:
 
     def run_benchmark(self, project_root: Path) -> dict:
         benchmark_cases = tuple(case for case in self.CASES if case.group in self.BENCHMARK_CASE_GROUPS)
-        before = self.llm_usage_tracker.summary()
+        operator_readiness_cases = tuple(case for case in self.CASES if case.group in self.OPERATOR_READINESS_CASE_GROUPS)
+        start_event_index = len(self.llm_usage_tracker.events)
         results, _behavior_checks = self._execute_cases(project_root, cases=benchmark_cases, route_name="benchmark")
-        metrics = self._build_common_metrics(results=results)
+        operator_results, _operator_behavior_checks = self._execute_cases(
+            project_root,
+            cases=operator_readiness_cases,
+            route_name="operator_readiness",
+        )
+        metrics = self._build_common_metrics(results=results, start_event_index=start_event_index)
         benchmark_sets = self._benchmark_set_reports(results=results)
-        after = self.llm_usage_tracker.summary()
-        token_accounting_by_stage = self._token_accounting_by_stage(before=before, after=after)
+        operator_readiness_passed = sum(1 for item in operator_results if item["passed"])
+        token_accounting_by_stage = self._token_accounting_by_stage(start_event_index=start_event_index)
         unsupported_premise_supported_count = sum(
             1
             for item in results
@@ -1393,6 +1422,7 @@ class EvalService:
             "release_scope": "benchmark-only",
             "benchmark_scope": "internal-approximation",
             "benchmark_disclaimer": "synthetic benchmark; not paper-equivalent",
+            "operator_readiness_scope": "hand-authored-small-set",
             "benchmark_metrics": {
                 "core_memory_accuracy": benchmark_sets["internal_golden_set"]["pass_rate"],
                 "adversarial_robustness": benchmark_sets["adversarial_false_premise_set"]["pass_rate"],
@@ -1406,6 +1436,14 @@ class EvalService:
                 "token_accounting_by_stage": token_accounting_by_stage,
                 "extra_prompt_tokens": token_accounting_by_stage["extraction"]["input_tokens"],
             },
+            "operator_readiness_metrics": {
+                "pass_rate": round(operator_readiness_passed / len(operator_results), 4)
+                if operator_results
+                else 0.0,
+                "total": len(operator_results),
+                "passed": operator_readiness_passed,
+                "groups": sorted(self.OPERATOR_READINESS_CASE_GROUPS),
+            },
             "benchmark_thresholds": {
                 "core_memory_accuracy_min": 0.9,
                 "adversarial_robustness_min": 0.95,
@@ -1415,6 +1453,7 @@ class EvalService:
             },
             "benchmark_cases": results,
             "benchmark_sets": benchmark_sets,
+            "operator_readiness_cases": operator_results,
             "domain_reports": self._benchmark_domain_reports(results=results),
         }
 

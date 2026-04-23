@@ -10,7 +10,7 @@ import pytest
 from memco.config import Settings
 from memco.config import load_settings
 from memco.db import get_connection
-from memco.llm import MockLLMProvider, OpenAICompatibleLLMProvider, build_llm_provider
+from memco.llm import MockLLMProvider, OpenAICompatibleLLMProvider, build_llm_provider, llm_runtime_policy
 from memco.repositories.fact_repository import FactRepository
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.extraction_service import ExtractionService
@@ -327,6 +327,36 @@ def test_extraction_service_from_settings_defaults_to_openai_compatible_runtime(
     assert service.llm_provider.name == "openai-compatible"
 
 
+def test_llm_runtime_policy_requires_credentials_for_openai_compatible_provider():
+    settings = Settings(root=Path("/tmp/memco-test-runtime-policy-missing-key"))
+
+    policy = llm_runtime_policy(settings)
+
+    assert policy["provider"] == "openai-compatible"
+    assert policy["runtime_profile"] == "repo-local"
+    assert policy["base_url_present"] is True
+    assert policy["credentials_present"] is False
+    assert policy["provider_configured"] is False
+    assert policy["fixture_only"] is False
+    assert policy["release_eligible"] is False
+    assert "api_key" in policy["reason"]
+
+
+def test_llm_runtime_policy_marks_callable_openai_compatible_runtime_release_eligible():
+    settings = Settings(root=Path("/tmp/memco-test-runtime-policy-live"))
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = "secret"
+
+    policy = llm_runtime_policy(settings)
+
+    assert policy["provider"] == "openai-compatible"
+    assert policy["base_url_present"] is True
+    assert policy["credentials_present"] is True
+    assert policy["provider_configured"] is True
+    assert policy["fixture_only"] is False
+    assert policy["release_eligible"] is True
+
+
 def test_extraction_service_rejects_mock_config_without_explicit_opt_in(tmp_path):
     root = tmp_path / "project"
     (root / "var" / "config").mkdir(parents=True, exist_ok=True)
@@ -453,6 +483,35 @@ def test_extraction_service_rejects_malformed_provider_candidates():
         assert "candidate is missing required keys" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected malformed provider candidate to be rejected")
+
+
+def test_extraction_service_normalizes_string_evidence_from_provider():
+    provider = MockLLMProvider(
+        model="fixture-x",
+        json_handler=lambda **kwargs: {
+            "items": [
+                {
+                    "domain": "biography",
+                    "category": "residence",
+                    "subcategory": "",
+                    "canonical_key": "alice:biography:residence:lisbon",
+                    "payload": {"city": "Lisbon"},
+                    "summary": "Alice lives in Lisbon.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": "I moved to Lisbon.",
+                }
+            ]
+        },
+    )
+
+    service = ExtractionService(llm_provider=provider)
+    candidates = service.extract_candidates(source_text="I moved to Lisbon.", person_hint="Alice")
+
+    assert candidates[0]["payload"]["city"] == "Lisbon"
+    assert candidates[0]["evidence"][0]["quote"] == "I moved to Lisbon."
+    assert candidates[0]["evidence"][0]["chunk_kind"] == "conversation"
 
 
 def test_extraction_service_openai_compatible_live_http_path():

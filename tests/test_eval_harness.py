@@ -129,13 +129,17 @@ def test_eval_harness_emits_separate_benchmark_artifact(settings):
     assert result["benchmark_scope"] == "internal-approximation"
     assert result["release_scope"] == "benchmark-only"
     assert result["benchmark_disclaimer"] == "synthetic benchmark; not paper-equivalent"
+    assert result["operator_readiness_scope"] == "hand-authored-small-set"
     assert "benchmark_metrics" in result
+    assert "operator_readiness_metrics" in result
     assert "benchmark_cases" in result
+    assert "operator_readiness_cases" in result
     assert "benchmark_sets" in result
     assert "internal_golden_set" in result["benchmark_sets"]
     assert "adversarial_false_premise_set" in result["benchmark_sets"]
     assert "temporal_set" in result["benchmark_sets"]
     assert "cross_person_contamination_set" in result["benchmark_sets"]
+    assert "operator_readiness_set" in result["benchmark_sets"]
     assert "domain_reports" in result
     assert "biography" in result["domain_reports"]
     assert "core_memory_accuracy" in result["benchmark_metrics"]
@@ -148,7 +152,18 @@ def test_eval_harness_emits_separate_benchmark_artifact(settings):
     assert "p50" in result["benchmark_metrics"]["retrieval_latency_ms"]
     assert "token_accounting_by_stage" in result["benchmark_metrics"]
     assert "extra_prompt_tokens" in result["benchmark_metrics"]
-    assert result["benchmark_metrics"]["token_accounting_by_stage"]["planner"]["status"] == "not_instrumented"
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["extraction"]["status"] == "not_applicable"
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["planner"]["status"] == "deterministic"
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["retrieval"]["status"] == "deterministic"
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["answer"]["status"] == "deterministic"
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["planner"]["input_tokens"] > 0
+    assert result["benchmark_metrics"]["token_accounting_by_stage"]["answer"]["output_tokens"] > 0
+    assert result["operator_readiness_metrics"]["pass_rate"] == 1.0
+    assert result["operator_readiness_metrics"]["passed"] == result["operator_readiness_metrics"]["total"]
+    assert "supported_fact" in result["operator_readiness_metrics"]["groups"]
+    assert "review_queue_behavior" in result["operator_readiness_metrics"]["groups"]
+    assert all(case["group"] in result["operator_readiness_metrics"]["groups"] for case in result["operator_readiness_cases"])
+    assert any(case["group"] == "review_queue_behavior" for case in result["operator_readiness_cases"])
     assert result["benchmark_thresholds"]["core_memory_accuracy_min"] == 0.9
     assert result["benchmark_thresholds"]["adversarial_robustness_min"] == 0.95
     assert result["benchmark_thresholds"]["person_isolation_min"] == 0.99

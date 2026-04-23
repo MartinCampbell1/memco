@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import time
 
+from memco.llm_usage import LLMUsageEvent, LLMUsageTracker, estimate_token_count
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
 from memco.models.retrieval import DetailPolicy, RetrievalHit, RetrievalPlan, RetrievalRequest, RetrievalResult
 from memco.repositories.fact_repository import FactRepository
@@ -36,11 +38,39 @@ class RetrievalService:
         fact_repository: FactRepository | None = None,
         retrieval_log_repository: RetrievalLogRepository | None = None,
         planner_service: PlannerService | None = None,
+        usage_tracker: LLMUsageTracker | None = None,
     ) -> None:
         self.retrieval_repository = retrieval_repository or RetrievalRepository()
         self.fact_repository = fact_repository or FactRepository()
         self.retrieval_log_repository = retrieval_log_repository or RetrievalLogRepository()
-        self.planner_service = planner_service or PlannerService()
+        self.usage_tracker = usage_tracker
+        self.planner_service = planner_service or PlannerService(usage_tracker=usage_tracker)
+
+    def _record_usage(self, *, query: str, result: RetrievalResult) -> None:
+        if self.usage_tracker is None:
+            return
+        output = json.dumps(
+            {
+                "support_level": result.support_level,
+                "hit_count": len(result.hits),
+                "fallback_hit_count": len(result.fallback_hits),
+                "unsupported_claims": result.unsupported_claims,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        self.usage_tracker.record(
+            LLMUsageEvent(
+                provider="deterministic",
+                model="rule-based-retrieval",
+                operation="retrieve",
+                input_tokens=estimate_token_count(query),
+                output_tokens=estimate_token_count(output),
+                estimated_cost_usd=0.0,
+                deterministic=True,
+                metadata={"stage": "retrieval"},
+            )
+        )
 
     def _hash_query(self, *, query: str, salt: str) -> str:
         return hashlib.sha256(f"{salt}:{query}".encode("utf-8")).hexdigest()
@@ -191,6 +221,7 @@ class RetrievalService:
                 latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
                 settings=settings,
             )
+            self._record_usage(query=payload.query, result=result)
             return result
         if person_id is None:
             try:
@@ -218,6 +249,7 @@ class RetrievalService:
                     latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
                     settings=settings,
                 )
+                self._record_usage(query=payload.query, result=result)
                 return result
         person = self.fact_repository.get_person(
             conn,
@@ -241,6 +273,7 @@ class RetrievalService:
                 latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
                 settings=settings,
             )
+            self._record_usage(query=payload.query, result=result)
             return result
         if actor is not None and actor.allowed_person_ids and person_id not in actor.allowed_person_ids:
             result = self._empty_result(
@@ -258,6 +291,7 @@ class RetrievalService:
                 latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
                 settings=settings,
             )
+            self._record_usage(query=payload.query, result=result)
             return result
         domain_queries = planner.domain_queries
         if actor is not None and actor.allowed_domains:
@@ -288,6 +322,7 @@ class RetrievalService:
                     latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
                     settings=settings,
                 )
+                self._record_usage(query=payload.query, result=result)
                 return result
         raw_hits: list[dict] = []
         for domain_query in domain_queries:
@@ -368,6 +403,7 @@ class RetrievalService:
             latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
             settings=settings,
         )
+        self._record_usage(query=payload.query, result=result)
         return result
 
     def _hit_haystacks(self, *, hits: list[dict]) -> list[str]:

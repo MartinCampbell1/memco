@@ -75,6 +75,14 @@ uv run memco release-check --output /absolute/path/to/release-check.json
 # Optional no-Docker Postgres verification inside the same gate:
 uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
 
+# Optional live operator smoke folded into the same gate:
+MEMCO_RUN_LIVE_SMOKE=1 \
+MEMCO_API_TOKEN='replace-with-local-token' \
+MEMCO_LLM_API_KEY='replace-with-provider-key' \
+uv run memco release-check \
+  --project-root /Users/martin/memco \
+  --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
+
 # Equivalent expanded commands:
 uv run pytest -q \
   tests/test_ingest_service.py \
@@ -107,10 +115,10 @@ uv run memco local-artifacts-refresh --project-root /Users/martin/memco
 Most recent recorded evidence:
 
 - contract-facing regression stack:
-  - `46 passed`
+  - `74 passed in 4.45s`
 - active repo-local release-check pytest gate: `47 passed`
 - expanded eval artifact on clean root: `total=24`, `passed=24`, `pass_rate=1.0`, `token_accounting.status=tracked`
-- full local test suite: `266 passed`
+- full local test suite: `321 passed in 9.57s`
 - no-Docker Postgres live proof:
   - `uv run memco-api` with `MEMCO_STORAGE_ENGINE=postgres`
   - `/health` returned `storage_engine=postgres`
@@ -131,7 +139,7 @@ Most recent recorded evidence:
   - passed locally against the quick repo-local gate
   - latest local artifact:
     - `pytest_gate`: `47 passed`
-    - `acceptance_artifact`: `24/24 passed`
+    - `acceptance_artifact`: `27/27 passed`
     - saved artifact:
       - `var/reports/release-check-current.json`
   - implementation note:
@@ -148,6 +156,7 @@ Most recent recorded evidence:
     - passed locally and produced a single artifact with `pytest_gate`, `acceptance_artifact` on Postgres, and `postgres_smoke`
     - latest saved artifact:
       - `var/reports/release-check-postgres-current.json`
+      - `var/reports/live-operator-smoke-current.json`
   - strict benchmark-backed quality variant:
     - `uv run memco strict-release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
     - this is the gate to use for the full quality claim once benchmark thresholds matter
@@ -217,5 +226,6 @@ Historical Docker recovery notes remain here for reference:
 - `.github/workflows/ci.yml` now enforces the full pytest suite plus an eval-only gate step using the same `run_release_check` helper logic, avoiding duplicated pytest-subset work in CI.
 - `memco release-check` is the local executable entrypoint for the active repo-local release gate.
 - `memco release-check --postgres-database-url ...` is the optional local executable path for folding no-Docker Postgres smoke into the same release artifact.
+- `MEMCO_RUN_LIVE_SMOKE=1 memco release-check --postgres-database-url ...` adds the API-first live operator smoke and writes `var/reports/live-operator-smoke-current.json`.
 - `memco release-check --project-root ...` makes the repo-local tree assumption explicit instead of relying on the package file location.
 - `memco release-check --output ...` makes the release artifact reproducibly storable without shell redirection.

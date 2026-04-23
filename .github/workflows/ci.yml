@@ -30,7 +30,13 @@ jobs:
         run: uv run pytest -q
 
       - name: Run acceptance eval gate
+        env:
+          MEMCO_LLM_API_KEY: ci-placeholder-key
+          MEMCO_API_TOKEN: ci-placeholder-token
+          MEMCO_BACKUP_PATH: ${{ github.workspace }}/var/backups/memco-postgres.dump
         run: |
+          mkdir -p "$(dirname "$MEMCO_BACKUP_PATH")"
+          : > "$MEMCO_BACKUP_PATH"
           uv run python - <<'PY'
           import json
           from pathlib import Path

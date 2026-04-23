@@ -191,7 +191,18 @@ If you want the canonical Postgres gate instead of the quick local fallback path
 uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
 ```
 
-That variant runs pytest plus the acceptance artifact on Postgres and then requires the no-Docker API bootstrap smoke. It returns one combined JSON artifact for the canonical Postgres path.
+That variant runs runtime policy, storage contract, operator safety, pytest, the acceptance artifact on Postgres, and the no-Docker API bootstrap smoke. It returns one combined JSON artifact for the canonical Postgres path.
+
+To fold the live operator smoke into the same gate:
+
+```bash
+MEMCO_RUN_LIVE_SMOKE=1 \
+MEMCO_API_TOKEN='replace-with-local-token' \
+MEMCO_LLM_API_KEY='replace-with-provider-key' \
+uv run memco release-check \
+  --project-root /Users/martin/memco \
+  --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
+```
 
 If you want the full benchmark-backed quality claim instead of an acceptance-only gate:
 
@@ -207,6 +218,7 @@ In this checkout, the latest persisted repo-local gate artifacts are typically k
 - `var/reports/release-check-postgres-current.json`
 - `var/reports/strict-release-check-current.json`
 - `var/reports/benchmark-current.json`
+- `var/reports/live-operator-smoke-current.json`
 - `var/reports/repo-local-status-current.json`
 - `var/reports/change-groups-current.json`
 - `var/reports/local-artifacts-refresh-current.json`

@@ -51,7 +51,8 @@ class StorageSettings(BaseModel):
     engine: str = PRIMARY_STORAGE_ENGINE
     contract_engine: str = PRIMARY_STORAGE_ENGINE
     db_path: str = "var/db/memco.db"
-    database_url: str = "postgresql://memco:memco@127.0.0.1:5432/memco"
+    database_url: str = "postgresql://martin@127.0.0.1:5432/memco_local"
+    backup_path: str = "var/backups/memco-postgres.dump"
 
     @field_validator("engine", "contract_engine")
     @classmethod
@@ -112,6 +113,10 @@ class Settings(BaseModel):
         return "primary" if self.storage.engine == self.storage.contract_engine else "fallback"
 
     @property
+    def backup_path(self) -> Path:
+        return self.root / self.storage.backup_path
+
+    @property
     def config_path(self) -> Path:
         return self.root / "var" / "config" / "settings.yaml"
 
@@ -166,6 +171,7 @@ def load_settings(root: str | Path | None = None) -> Settings:
     env_llm_allow_mock_provider = os.environ.get("MEMCO_LLM_ALLOW_MOCK_PROVIDER")
     env_storage_engine = os.environ.get("MEMCO_STORAGE_ENGINE")
     env_database_url = os.environ.get("MEMCO_DATABASE_URL")
+    env_backup_path = os.environ.get("MEMCO_BACKUP_PATH")
     env_enable_retrieval_logs = os.environ.get("MEMCO_ENABLE_RETRIEVAL_LOGS")
     env_query_hash_salt = os.environ.get("MEMCO_QUERY_HASH_SALT")
     env_runtime_profile = os.environ.get("MEMCO_RUNTIME_PROFILE")
@@ -205,6 +211,9 @@ def load_settings(root: str | Path | None = None) -> Settings:
     if env_database_url is not None:
         storage = raw_data.setdefault("storage", {})
         storage["database_url"] = env_database_url
+    if env_backup_path is not None:
+        storage = raw_data.setdefault("storage", {})
+        storage["backup_path"] = env_backup_path
     if env_enable_retrieval_logs is not None:
         logging = raw_data.setdefault("logging", {})
         logging["enable_retrieval_logs"] = env_enable_retrieval_logs.strip().lower() in {"1", "true", "yes", "on"}

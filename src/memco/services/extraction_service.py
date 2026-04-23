@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from memco.config import Settings
 from memco.extractors import ExtractionOrchestrator
@@ -130,6 +131,7 @@ class ExtractionService:
             estimated_cost_usd=usage.estimated_cost_usd,
             deterministic=self.llm_provider.name == "mock",
             metadata={
+                "stage": "extraction",
                 "schema_name": metadata.get("schema_name"),
                 "message_id": metadata.get("message_id"),
                 "workspace_id": metadata.get("workspace_id"),
@@ -141,6 +143,214 @@ class ExtractionService:
         self.usage_tracker.record(event)
         if self.usage_file_logger is not None:
             self.usage_file_logger.record(event)
+
+    def _default_evidence_item(
+        self,
+        *,
+        quote: str,
+        message_id: int | None,
+        source_segment_id: int | None,
+        session_id: int | None,
+    ) -> dict[str, Any]:
+        return {
+            "quote": quote.strip(),
+            "message_ids": [str(message_id)] if message_id is not None else [],
+            "source_segment_ids": [int(source_segment_id)] if source_segment_id is not None else [],
+            "session_ids": [int(session_id)] if session_id is not None else [],
+            "chunk_kind": "conversation",
+        }
+
+    def _normalize_provider_evidence(
+        self,
+        *,
+        evidence: Any,
+        fallback_quote: str,
+        message_id: int | None,
+        source_segment_id: int | None,
+        session_id: int | None,
+    ) -> list[dict[str, Any]]:
+        default_item = self._default_evidence_item(
+            quote=fallback_quote,
+            message_id=message_id,
+            source_segment_id=source_segment_id,
+            session_id=session_id,
+        )
+        if evidence is None:
+            return []
+        if isinstance(evidence, str) and evidence.strip():
+            return [
+                self._default_evidence_item(
+                    quote=evidence,
+                    message_id=message_id,
+                    source_segment_id=source_segment_id,
+                    session_id=session_id,
+                )
+            ]
+        if isinstance(evidence, list):
+            if not evidence:
+                return []
+            normalized: list[dict[str, Any]] = []
+            for item in evidence:
+                if isinstance(item, str) and item.strip():
+                    normalized.append(
+                        self._default_evidence_item(
+                            quote=item,
+                            message_id=message_id,
+                            source_segment_id=source_segment_id,
+                            session_id=session_id,
+                        )
+                    )
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                quote = item.get("quote")
+                if not isinstance(quote, str) or not quote.strip():
+                    quote = fallback_quote
+                normalized.append(
+                    {
+                        "quote": quote.strip(),
+                        "message_ids": item.get("message_ids")
+                        if isinstance(item.get("message_ids"), list)
+                        else list(default_item["message_ids"]),
+                        "source_segment_ids": item.get("source_segment_ids")
+                        if isinstance(item.get("source_segment_ids"), list)
+                        else list(default_item["source_segment_ids"]),
+                        "session_ids": item.get("session_ids")
+                        if isinstance(item.get("session_ids"), list)
+                        else list(default_item["session_ids"]),
+                        "chunk_kind": item.get("chunk_kind")
+                        if isinstance(item.get("chunk_kind"), str) and item.get("chunk_kind", "").strip()
+                        else default_item["chunk_kind"],
+                    }
+                )
+            if normalized:
+                return normalized
+        return []
+
+    def _normalize_provider_candidate(
+        self,
+        *,
+        candidate: dict[str, Any],
+        text: str,
+        subject_display: str,
+        person_id: int | None,
+        message_id: int | None,
+        source_segment_id: int | None,
+        session_id: int | None,
+    ) -> dict[str, Any]:
+        normalized = dict(candidate)
+        domain = str(normalized.get("domain") or "")
+        payload = normalized.get("payload")
+        if not isinstance(payload, dict):
+            payload = {}
+            normalized["payload"] = payload
+        category = str(normalized.get("category") or "")
+        optional_blank_string_fields = {
+            ("preferences", "preference"): {"strength", "reason"},
+            ("social_circle", "relationship_event"): {"context"},
+            ("work", "employment"): set(),
+            ("work", "role"): set(),
+            ("work", "org"): set(),
+            ("work", "project"): set(),
+            ("work", "skill"): set(),
+            ("work", "tool"): set(),
+            ("experiences", "event"): {"summary", "temporal_anchor", "outcome", "valence"},
+        }
+        removable_fields = optional_blank_string_fields.get((domain, category), set())
+        for key in list(payload.keys()):
+            value = payload.get(key)
+            if key in removable_fields and (not isinstance(value, str) or not value.strip()):
+                payload.pop(key, None)
+        lowered_text = text.lower()
+        residence_markers = (" live in ", " moved to ", " based in ", " is my base")
+        residence_value = None
+        for key in ("city", "place", "value"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                residence_value = value.strip()
+                break
+        if domain == "biography" and residence_value and any(marker in f" {lowered_text} " for marker in residence_markers):
+            normalized["category"] = "residence"
+            normalized["subcategory"] = "city"
+            normalized["payload"] = {"city": residence_value}
+            payload = normalized["payload"]
+        if domain == "biography" and category == "city" and isinstance(payload.get("city"), str):
+            normalized["category"] = "residence"
+            normalized["subcategory"] = "city"
+        if domain == "social_circle" and category == "relationship" and isinstance(payload.get("relation"), str):
+            normalized["category"] = str(payload["relation"]).strip().lower()
+        normalized["summary"] = self._normalize_provider_summary(
+            subject_display=subject_display,
+            domain=domain,
+            category=str(normalized.get("category") or ""),
+            payload=payload,
+            summary=str(normalized.get("summary") or ""),
+        )
+        normalized["evidence"] = self._normalize_provider_evidence(
+            evidence=candidate.get("evidence"),
+            fallback_quote=text,
+            message_id=message_id,
+            source_segment_id=source_segment_id,
+            session_id=session_id,
+        )
+        review_reason_codes = {"speaker_unresolved", "relation_target_unresolved"}
+        review_reasons: list[str] = []
+        existing_reason = normalized.get("reason")
+        if isinstance(existing_reason, str):
+            review_reasons.extend(
+                part.strip()
+                for part in existing_reason.split(",")
+                if part.strip() in review_reason_codes
+            )
+        if person_id is None and "speaker_unresolved" not in review_reasons:
+            review_reasons.append("speaker_unresolved")
+        if (
+            domain == "social_circle"
+            and isinstance(payload.get("target_label"), str)
+            and payload.get("target_label", "").strip()
+            and payload.get("target_person_id") is None
+            and "relation_target_unresolved" not in review_reasons
+        ):
+            review_reasons.append("relation_target_unresolved")
+        normalized["needs_review"] = bool(review_reasons)
+        if review_reasons:
+            normalized["reason"] = ",".join(review_reasons)
+        return normalized
+
+    def _normalize_provider_summary(
+        self,
+        *,
+        subject_display: str,
+        domain: str,
+        category: str,
+        payload: dict[str, Any],
+        summary: str,
+    ) -> str:
+        if domain == "biography" and category == "residence" and isinstance(payload.get("city"), str):
+            return f"{subject_display} lives in {payload['city'].strip()}."
+        if domain == "biography" and category == "origin" and isinstance(payload.get("place"), str):
+            return f"{subject_display} is from {payload['place'].strip()}."
+        if domain == "preferences" and category == "preference" and isinstance(payload.get("value"), str):
+            value = payload["value"].strip()
+            polarity = str(payload.get("polarity") or "").strip().lower()
+            if polarity == "dislike":
+                return f"{subject_display} dislikes {value}."
+            return f"{subject_display} likes {value}."
+        if domain == "social_circle" and isinstance(payload.get("target_label"), str):
+            target = payload["target_label"].strip()
+            relation = str(payload.get("relation") or category).strip()
+            if category == "relationship_event" and isinstance(payload.get("event"), str):
+                return f"{subject_display} {payload['event'].strip()} {target}."
+            return f"{subject_display} says {target} is their {relation}."
+        if domain == "work" and category == "employment" and isinstance(payload.get("title"), str):
+            return f"{subject_display} works as {payload['title'].strip()}."
+        if domain == "work" and category == "role" and isinstance(payload.get("role"), str):
+            return f"{subject_display} works as {payload['role'].strip()}."
+        if domain == "work" and category == "org" and isinstance(payload.get("org"), str):
+            return f"{subject_display} works at {payload['org'].strip()}."
+        if domain == "experiences" and category == "event" and isinstance(payload.get("event"), str):
+            return f"{subject_display} experienced {payload['event'].strip()}."
+        return summary
 
     def _extract_candidates_via_provider(
         self,
@@ -205,7 +415,20 @@ class ExtractionService:
             content = content["items"]
         if not isinstance(content, list):
             raise ValueError("LLM provider returned non-list candidate payload")
-        return [validate_candidate(candidate) for candidate in content]
+        return [
+            validate_candidate(
+                self._normalize_provider_candidate(
+                    candidate=candidate,
+                    text=text,
+                    subject_display=subject_display,
+                    person_id=person_id,
+                    message_id=message_id,
+                    source_segment_id=source_segment_id,
+                    session_id=session_id,
+                )
+            )
+            for candidate in content
+        ]
 
     def extract_candidates(self, *, source_text: str, person_hint: str | None = None) -> list[dict]:
         text = source_text.strip()

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from memco.llm_usage import LLMUsageEvent, LLMUsageTracker, estimate_token_count
 from memco.models.retrieval import DetailPolicy
 
 
 class AnswerService:
     NON_FACTUAL_DOMAINS = {"style", "psychometrics"}
+
+    def __init__(self, usage_tracker: LLMUsageTracker | None = None) -> None:
+        self.usage_tracker = usage_tracker
 
     def _temporal_value(self, hit) -> tuple[str, str]:
         event_at = str(getattr(hit, "event_at", "") or "").strip()
@@ -51,6 +55,31 @@ class AnswerService:
             "evidence_ids": evidence_ids,
         }
 
+    def _record_usage(self, *, query: str, retrieval_result, answer_payload: dict) -> None:
+        if self.usage_tracker is None:
+            return
+        factual_hits = self._factual_hits(retrieval_result)
+        input_text = " ".join(
+            [
+                query,
+                " ".join(hit.summary for hit in factual_hits),
+                " ".join(retrieval_result.unsupported_claims),
+            ]
+        )
+        output_text = answer_payload["answer"]
+        self.usage_tracker.record(
+            LLMUsageEvent(
+                provider="deterministic",
+                model="rule-based-answer",
+                operation="answer",
+                input_tokens=estimate_token_count(input_text),
+                output_tokens=estimate_token_count(output_text),
+                estimated_cost_usd=0.0,
+                deterministic=True,
+                metadata={"stage": "answer"},
+            )
+        )
+
     def _factual_hits(self, retrieval_result):
         return [hit for hit in retrieval_result.hits if getattr(hit, "domain", "") not in self.NON_FACTUAL_DOMAINS]
 
@@ -86,34 +115,42 @@ class AnswerService:
         is_when_query = query.strip().lower().startswith("when") or query.strip().lower().startswith("когда")
         if retrieval_result.hits and not factual_hits:
             sanitized = retrieval_result.model_copy(update={"hits": []})
-            return self._payload(
+            payload = self._payload(
                 answer="I don't have confirmed memory evidence for that.",
                 refused=True,
                 retrieval_result=sanitized,
                 detail_policy=policy,
             )
+            self._record_usage(query=query, retrieval_result=sanitized, answer_payload=payload)
+            return payload
         if is_when_query and factual_hits:
             conflict_answer = self._temporal_conflict_answer(factual_hits)
             if conflict_answer:
-                return self._payload(
+                payload = self._payload(
                     answer=conflict_answer,
                     refused=True,
                     retrieval_result=retrieval_result,
                     detail_policy=policy,
                 )
+                self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+                return payload
         if retrieval_result.support_level in {"unsupported", "ambiguous"}:
-            return self._payload(
+            payload = self._payload(
                 answer="I don't have confirmed memory evidence for that.",
                 refused=True,
                 retrieval_result=retrieval_result,
                 detail_policy=policy,
             )
+            self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+            return payload
         if retrieval_result.support_level == "contradicted":
             supported = " ".join(hit.summary for hit in factual_hits).strip()
             answer = "Confirmed memory conflicts with that claim."
             if supported:
                 answer = f"{answer} {supported}".strip()
-            return self._payload(answer=answer, refused=True, retrieval_result=retrieval_result, detail_policy=policy)
+            payload = self._payload(answer=answer, refused=True, retrieval_result=retrieval_result, detail_policy=policy)
+            self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+            return payload
         if retrieval_result.support_level == "partial":
             supported = " ".join(hit.summary for hit in factual_hits).strip()
             unsupported = " ".join(retrieval_result.unsupported_claims).strip()
@@ -121,19 +158,25 @@ class AnswerService:
                 answer = f"{supported} However, {unsupported}"
             else:
                 answer = supported or unsupported or "I only have partial memory evidence for that."
-            return self._payload(answer=answer, refused=False, retrieval_result=retrieval_result, detail_policy=policy)
+            payload = self._payload(answer=answer, refused=False, retrieval_result=retrieval_result, detail_policy=policy)
+            self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+            return payload
         if is_when_query and factual_hits:
             first_hit = self._select_temporal_hit(factual_hits)
             if first_hit is not None:
-                return self._payload(
+                payload = self._payload(
                     answer=self._format_when_answer(first_hit),
                     refused=False,
                     retrieval_result=retrieval_result,
                     detail_policy=policy,
                 )
-        return self._payload(
+                self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+                return payload
+        payload = self._payload(
             answer=" ".join(hit.summary for hit in factual_hits),
             refused=False,
             retrieval_result=retrieval_result,
             detail_policy=policy,
         )
+        self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+        return payload

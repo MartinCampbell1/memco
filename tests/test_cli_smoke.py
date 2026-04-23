@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from click.testing import CliRunner
 from typer.main import get_command
@@ -13,6 +14,13 @@ from memco.repositories.review_repository import ReviewRepository
 from memco.repositories.source_repository import SourceRepository
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.ingest_service import IngestService
+
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
 
 
 def test_cli_init_and_person_upsert(settings):
@@ -726,128 +734,149 @@ def test_cli_flow_commands_advertise_next_steps(settings):
 
     result = runner.invoke(command, ["import", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "conversation-import SOURCE_ID" in result.output
+    import_help = _plain(result.output)
+    assert "conversation-import SOURCE_ID" in import_help
 
     result = runner.invoke(command, ["conversation-import", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-extract" in result.output
-    assert "CONVERSATION_ID" in result.output
-    assert "--latest-source" in result.output
+    conversation_help = _plain(result.output)
+    assert "candidate-extract" in conversation_help
+    assert "CONVERSATION_ID" in conversation_help
+    assert "--latest-source" in conversation_help
 
     result = runner.invoke(command, ["candidate-extract", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-publish" in result.output
-    assert "review-list" in result.output
-    assert "--latest-conversation" in result.output
+    extract_help = _plain(result.output)
+    assert "candidate-publish" in extract_help
+    assert "review-list" in extract_help
+    assert "--latest-conversation" in extract_help
 
     result = runner.invoke(command, ["candidate-publish", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "retrieve" in result.output
-    assert "fact-operations" in result.output
-    assert "--latest-candidate" in result.output
-    assert "--person-slug" in result.output
-    assert "--domain" in result.output
+    publish_help = _plain(result.output)
+    assert "retrieve" in publish_help
+    assert "fact-operations" in publish_help
+    assert "--latest-candidate" in publish_help
+    assert "--person-slug" in publish_help
+    assert "--domain" in publish_help
 
     result = runner.invoke(command, ["candidate-reject", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "--latest-candidate" in result.output
-    assert "--person-slug" in result.output
-    assert "--domain" in result.output
+    reject_help = _plain(result.output)
+    assert "--latest-candidate" in reject_help
+    assert "--person-slug" in reject_help
+    assert "--domain" in reject_help
 
     result = runner.invoke(command, ["fact-rollback", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-list" in result.output
-    assert "retrieve" in result.output
-    assert "--latest-operation" in result.output
+    rollback_help = _plain(result.output)
+    assert "fact-list" in rollback_help
+    assert "retrieve" in rollback_help
+    assert "--latest-operation" in rollback_help
 
     result = runner.invoke(command, ["conversation-speakers", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "conversation-speaker-resolve" in result.output
-    assert "candidate-extract" in result.output
-    assert "--latest-conversation" in result.output
+    speakers_help = _plain(result.output)
+    assert "conversation-speaker-resolve" in speakers_help
+    assert "candidate-extract" in speakers_help
+    assert "--latest-conversation" in speakers_help
 
     result = runner.invoke(command, ["conversation-speaker-resolve", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-extract" in result.output
-    assert "CONVERSATION_ID" in result.output
-    assert "--latest-conversation" in result.output
+    speaker_resolve_help = _plain(result.output)
+    assert "candidate-extract" in speaker_resolve_help
+    assert "CONVERSATION_ID" in speaker_resolve_help
+    assert "--latest-conversation" in speaker_resolve_help
 
     result = runner.invoke(command, ["candidate-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-publish" in result.output
-    assert "review-resolve" in result.output
-    assert "--person-slug" in result.output
+    candidate_list_help = _plain(result.output)
+    assert "candidate-publish" in candidate_list_help
+    assert "review-resolve" in candidate_list_help
+    assert "--person-slug" in candidate_list_help
 
     result = runner.invoke(command, ["review-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "review-resolve" in result.output
-    assert "candidate-list" in result.output
-    assert "--person-slug" in result.output
+    review_list_help = _plain(result.output)
+    assert "review-resolve" in review_list_help
+    assert "candidate-list" in review_list_help
+    assert "--person-slug" in review_list_help
 
     result = runner.invoke(command, ["fact-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-publish" in result.output
-    assert "fact-rollback" in result.output
-    assert "--person-slug" in result.output
+    fact_list_help = _plain(result.output)
+    assert "candidate-publish" in fact_list_help
+    assert "fact-rollback" in fact_list_help
+    assert "--person-slug" in fact_list_help
 
     result = runner.invoke(command, ["fact-operations", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-rollback" in result.output
-    assert "--latest-target-fact" in result.output
-    assert "--person-slug" in result.output
+    fact_ops_help = _plain(result.output)
+    assert "fact-rollback" in fact_ops_help
+    assert "--latest-target-fact" in fact_ops_help
+    assert "--person-slug" in fact_ops_help
 
     result = runner.invoke(command, ["fact-delete", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-restore" in result.output
-    assert "retrieve" in result.output
-    assert "--latest-fact" in result.output
-    assert "--person-slug" in result.output
+    fact_delete_help = _plain(result.output)
+    assert "fact-restore" in fact_delete_help
+    assert "retrieve" in fact_delete_help
+    assert "--latest-fact" in fact_delete_help
+    assert "--person-slug" in fact_delete_help
 
     result = runner.invoke(command, ["fact-restore", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-list" in result.output
-    assert "retrieve" in result.output
-    assert "--latest-fact" in result.output
-    assert "--person-slug" in result.output
+    fact_restore_help = _plain(result.output)
+    assert "fact-list" in fact_restore_help
+    assert "retrieve" in fact_restore_help
+    assert "--latest-fact" in fact_restore_help
+    assert "--person-slug" in fact_restore_help
 
     result = runner.invoke(command, ["person-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "person-alias-upsert" in result.output
-    assert "person-merge" in result.output
+    person_list_help = _plain(result.output)
+    assert "person-alias-upsert" in person_list_help
+    assert "person-merge" in person_list_help
 
     result = runner.invoke(command, ["person-alias-upsert", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "conversation-speaker-resolve" in result.output
-    assert "candidate-extract" in result.output
+    alias_help = _plain(result.output)
+    assert "conversation-speaker-resolve" in alias_help
+    assert "candidate-extract" in alias_help
 
     result = runner.invoke(command, ["person-merge", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "person-list" in result.output
-    assert "retrieve" in result.output
+    merge_help = _plain(result.output)
+    assert "person-list" in merge_help
+    assert "retrieve" in merge_help
 
     result = runner.invoke(command, ["fact-add", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "retrieve" in result.output
-    assert "fact-operations" in result.output
-    assert "--latest-source" in result.output
+    fact_add_help = _plain(result.output)
+    assert "retrieve" in fact_add_help
+    assert "fact-operations" in fact_add_help
+    assert "--latest-source" in fact_add_help
 
     result = runner.invoke(command, ["retrieval-log-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "retrieve" in result.output
-    assert "chat" in result.output
-    assert "--person-slug" in result.output
+    retrieval_log_help = _plain(result.output)
+    assert "retrieve" in retrieval_log_help
+    assert "chat" in retrieval_log_help
+    assert "--person-slug" in retrieval_log_help
 
     result = runner.invoke(command, ["eval-run", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "release-check" in result.output
+    eval_help = _plain(result.output)
+    assert "release-check" in eval_help
 
     result = runner.invoke(command, ["review-resolve", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "--latest-review" in result.output
-    assert "Resolved person slug" in result.output
-    assert "Resolved target" in result.output
-    assert "--publish" in result.output
-    assert "--person-slug" in result.output
+    review_resolve_help = _plain(result.output)
+    assert "--latest-review" in review_resolve_help
+    assert "Resolved person slug" in review_resolve_help
+    assert "Resolved target" in review_resolve_help
+    assert "--publish" in review_resolve_help
+    assert "--person-slug" in review_resolve_help
 
 
 def test_cli_operator_flow_supports_latest_shortcuts(settings, tmp_path):

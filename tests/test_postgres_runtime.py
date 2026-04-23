@@ -80,6 +80,11 @@ def test_health_reports_postgres_target(monkeypatch, tmp_path):
     settings = Settings(root=Path(tmp_path / "project"))
     settings.storage.engine = "postgres"
     settings.storage.database_url = "postgresql://memco:memco@db:5432/memco"
+    settings.api.auth_token = "memco-token"
+    settings.backup_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.backup_path.write_text("backup", encoding="utf-8")
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = "secret"
     fake_conn = _FakePostgresConn()
 
     monkeypatch.setattr("memco.api.routes.health.get_settings", lambda: settings)
@@ -96,8 +101,13 @@ def test_health_reports_postgres_target(monkeypatch, tmp_path):
     assert payload["storage_role"] == "primary"
     assert payload["db"] == "postgresql://memco:memco@db:5432/memco"
     assert payload["database_target"] == "postgresql://memco:memco@db:5432/memco"
+    assert payload["api_token_configured"] is True
+    assert payload["backup_path_exists"] is True
     assert payload["llm_runtime"]["provider"] == "openai-compatible"
     assert payload["llm_runtime"]["runtime_profile"] == "repo-local"
+    assert payload["llm_runtime"]["credentials_present"] is True
+    assert payload["llm_runtime"]["base_url_present"] is True
+    assert payload["llm_runtime"]["provider_configured"] is True
     assert payload["llm_runtime"]["release_eligible"] is True
 
 

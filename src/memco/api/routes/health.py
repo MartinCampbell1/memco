@@ -17,6 +17,8 @@ def health():
         source_row = conn.execute("SELECT COUNT(*) AS count FROM sources").fetchone()
         person_row = conn.execute("SELECT COUNT(*) AS count FROM persons").fetchone()
         fact_row = conn.execute("SELECT COUNT(*) AS count FROM memory_facts").fetchone()
+    api_token_configured = bool((settings.api.auth_token or "").strip())
+    backup_path = settings.backup_path
     return {
         "ok": True,
         "root": str(settings.root),
@@ -26,6 +28,9 @@ def health():
         "storage_contract": settings.storage_contract,
         "storage_role": settings.storage_role,
         "database_target": settings.database_target,
+        "api_token_configured": api_token_configured,
+        "backup_path": str(backup_path),
+        "backup_path_exists": backup_path.exists(),
         "llm_runtime": llm_runtime_policy(settings),
         "counts": {
             "workspaces": int(workspace_row["count"]),

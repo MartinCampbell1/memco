@@ -235,9 +235,9 @@ def build_extraction_system_prompt(*, include_style: bool, include_psychometrics
         "You are the Memco extraction runtime. "
         "The live runtime path is LLM-first structured extraction. "
         "Rule-based extraction is fallback-only for fixture/test or emergency use. "
-        "Return strict JSON only. "
+        "Return strict json only. "
         "Use the contract below exactly. "
-        "Never return prose outside JSON. "
+        "Never return prose outside json. "
         f"include_style={str(include_style).lower()} "
         f"include_psychometrics={str(include_psychometrics).lower()}.\n"
         f"{json.dumps(contract_payload, ensure_ascii=False, sort_keys=True)}"
@@ -305,6 +305,7 @@ def build_prompt_payload(
     return {
         "contract_version": EXTRACTION_CONTRACT_VERSION,
         "extraction_mode": "llm_first_structured_extraction",
+        "json_output_required": True,
         "text": context.text,
         "subject_key": context.subject_key,
         "subject_display": context.subject_display,

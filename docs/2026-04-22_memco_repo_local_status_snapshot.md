@@ -20,23 +20,26 @@ Separate reference-track status:
 
 Full suite:
 
-- `uv run pytest -q` -> `266 passed`
+- `uv run pytest -q` -> `321 passed in 9.57s`
 
 Repo-local release gate:
 
 - `uv run memco release-check --project-root /Users/martin/memco` -> `ok: true`
 - pytest gate inside release-check -> `47 passed`
-- acceptance artifact -> `24/24 passed`
+- acceptance artifact -> `27/27 passed`
 - temporary acceptance root intentionally uses SQLite fallback when no local runtime config exists there
 
 Contract-facing regression stack:
 
-- `uv run pytest -q tests/test_docs_contract.py tests/test_release_check.py tests/test_cli_release_check.py tests/test_config.py tests/test_llm_provider.py` -> `46 passed`
+- `uv run pytest -q tests/test_docs_contract.py tests/test_release_check.py tests/test_cli_release_check.py tests/test_config.py tests/test_llm_provider.py` -> `74 passed in 4.45s`
 
 Optional no-Docker Postgres variant:
 
 - `uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'` -> `ok: true`
 - postgres smoke -> `ok: true`
+- `MEMCO_RUN_LIVE_SMOKE=1 ... uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'` -> `ok: true`
+- operator safety gate -> `ok: true`
+- live operator smoke -> `ok: true`
 
 ## Persisted Artifacts
 
@@ -44,6 +47,8 @@ Optional no-Docker Postgres variant:
   - `var/reports/release-check-current.json`
 - repo-local gate + Postgres smoke artifact:
   - `var/reports/release-check-postgres-current.json`
+- live operator smoke artifact:
+  - `var/reports/live-operator-smoke-current.json`
 - machine-readable local status snapshot:
   - `var/reports/repo-local-status-current.json`
   - mirrors the current branch, remote, contract split, and latest validation counts
@@ -90,6 +95,9 @@ Optional no-Docker Postgres variant:
 - positive agent-facing answers return:
   - `fact_ids`
   - `evidence_ids`
+- operator safety now requires:
+  - non-empty API token
+  - backup path present
 - RU/EN mixed-language regressions are present
 - pending-review exclusion is enforced as a hard eval gate
 - detail policy exists with:
