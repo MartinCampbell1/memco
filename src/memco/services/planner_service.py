@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import re
 
+from memco.llm_usage import LLMUsageEvent, LLMUsageTracker, estimate_token_count
 from memco.models.retrieval import RetrievalClaimCheck, RetrievalDomainPlan, RetrievalPlan, RetrievalRequest
 
 
@@ -83,10 +85,30 @@ BEFORE_TARGET_RE = re.compile(r"\bbefore\s+([A-Z][A-Za-z0-9&.\-]+)\b", re.IGNORE
 
 
 class PlannerService:
+    def __init__(self, usage_tracker: LLMUsageTracker | None = None) -> None:
+        self.usage_tracker = usage_tracker
+
+    def _record_usage(self, *, query: str, plan: RetrievalPlan) -> None:
+        if self.usage_tracker is None:
+            return
+        payload = json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        self.usage_tracker.record(
+            LLMUsageEvent(
+                provider="deterministic",
+                model="rule-based-planner",
+                operation="plan",
+                input_tokens=estimate_token_count(query),
+                output_tokens=estimate_token_count(payload),
+                estimated_cost_usd=0.0,
+                deterministic=True,
+                metadata={"stage": "planner"},
+            )
+        )
+
     def plan(self, payload: RetrievalRequest) -> RetrievalPlan:
         temporal_mode = self._resolve_temporal_mode(payload.query, payload.temporal_mode)
         if payload.domain or payload.category:
-            return RetrievalPlan(
+            plan = RetrievalPlan(
                 plan_version="v2",
                 question_type=self._question_type(payload.query, temporal_mode=temporal_mode),
                 domain_queries=[
@@ -104,6 +126,8 @@ class PlannerService:
                 claim_checks=self._claim_checks(payload.query, person_slug=payload.person_slug),
                 support_expectation=self._support_expectation(payload.query, 1),
             )
+            self._record_usage(query=payload.query, plan=plan)
+            return plan
 
         domain_queries: list[RetrievalDomainPlan] = []
         seen: set[tuple[str, str | None]] = set()
@@ -133,7 +157,7 @@ class PlannerService:
                 )
             )
 
-        return RetrievalPlan(
+        plan = RetrievalPlan(
             plan_version="v2",
             question_type=self._question_type(payload.query, temporal_mode=temporal_mode),
             domain_queries=domain_queries,
@@ -145,6 +169,8 @@ class PlannerService:
             claim_checks=self._claim_checks(payload.query, person_slug=payload.person_slug),
             support_expectation=self._support_expectation(payload.query, len({item.domain for item in domain_queries})),
         )
+        self._record_usage(query=payload.query, plan=plan)
+        return plan
 
     def _resolve_temporal_mode(self, query: str, requested_mode: str) -> str:
         temporal_mode = requested_mode

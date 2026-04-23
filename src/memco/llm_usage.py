@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,16 @@ class LLMUsageEvent:
     created_at: str = field(default_factory=isoformat_z)
 
 
+def estimate_token_count(*texts: str) -> int:
+    total = 0
+    for text in texts:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            continue
+        total += max(1, math.ceil(len(cleaned) / 4))
+    return total
+
+
 class LLMUsageTracker:
     def __init__(self) -> None:
         self._events: list[LLMUsageEvent] = []
@@ -35,13 +46,14 @@ class LLMUsageTracker:
     def record(self, event: LLMUsageEvent) -> None:
         self._events.append(event)
 
-    def summary(self) -> dict:
-        deterministic = [event for event in self._events if event.deterministic]
-        llm = [event for event in self._events if not event.deterministic]
+    def summary(self, *, start_index: int = 0) -> dict:
+        events = self._events[start_index:]
+        deterministic = [event for event in events if event.deterministic]
+        llm = [event for event in events if not event.deterministic]
         return {
             "implemented": True,
             "status": "tracked",
-            "events_logged": len(self._events),
+            "events_logged": len(events),
             "llm_usage": self._aggregate(llm),
             "deterministic_usage": self._aggregate(deterministic),
         }

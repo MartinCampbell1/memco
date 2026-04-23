@@ -31,6 +31,9 @@ class LLMTextResponse:
     model: str
 
 
+OPENAI_COMPATIBLE_PROVIDER_NAMES = {"openai", "openai-compatible", "openai_compatible"}
+
+
 class LLMProvider(Protocol):
     name: str
     model: str
@@ -228,23 +231,54 @@ class OpenAICompatibleLLMProvider:
         )
 
 
+def _normalize_provider_name(provider: str) -> str:
+    normalized = provider.strip().lower()
+    if normalized in OPENAI_COMPATIBLE_PROVIDER_NAMES:
+        return "openai-compatible"
+    return normalized
+
+
+def _nonempty_setting(value: str | None) -> bool:
+    return bool(value and value.strip())
+
+
 def llm_runtime_policy(settings) -> dict[str, Any]:
-    provider = settings.llm.provider.strip().lower()
+    provider = _normalize_provider_name(settings.llm.provider)
     runtime_profile = getattr(settings, "runtime_profile", "repo-local")
     provider_is_mock = provider == "mock"
-    fixture_only = provider_is_mock
-    release_eligible = runtime_profile == "repo-local" and not fixture_only
-    if provider_is_mock and runtime_profile == "fixture":
-        reason = "mock provider enabled for explicit fixture/test runtime"
+    base_url_present = False
+    credentials_present = False
+    provider_configured = False
+    fixture_only = provider_is_mock or runtime_profile == "fixture"
+
+    if provider == "openai-compatible":
+        base_url_present = _nonempty_setting(getattr(settings.llm, "base_url", ""))
+        credentials_present = _nonempty_setting(getattr(settings.llm, "api_key", ""))
+        provider_configured = base_url_present and credentials_present
+
+    release_eligible = runtime_profile == "repo-local" and not provider_is_mock and provider_configured
+    if runtime_profile == "fixture":
+        reason = "fixture runtime is not release-eligible"
     elif provider_is_mock:
         reason = "mock provider is fixture-only and does not satisfy the live runtime contract"
+    elif provider != "openai-compatible":
+        reason = f"unsupported provider '{provider}'"
+    elif not base_url_present and not credentials_present:
+        reason = "openai-compatible provider is missing base_url and api_key"
+    elif not base_url_present:
+        reason = "openai-compatible provider is missing base_url"
+    elif not credentials_present:
+        reason = "openai-compatible provider is missing api_key"
     else:
-        reason = "provider is eligible for live runtime extraction"
+        reason = "provider is configured for live runtime extraction"
     return {
         "provider": provider,
         "model": settings.llm.model,
         "runtime_profile": runtime_profile,
         "allow_mock_provider": bool(getattr(settings.llm, "allow_mock_provider", False)),
+        "credentials_present": credentials_present,
+        "base_url_present": base_url_present,
+        "provider_configured": provider_configured,
         "fixture_only": fixture_only,
         "release_eligible": release_eligible,
         "reason": reason,
@@ -257,7 +291,7 @@ def build_llm_provider(
     json_handler: Callable[..., Any] | None = None,
     text_handler: Callable[..., str] | None = None,
 ) -> LLMProvider:
-    provider = settings.llm.provider.strip().lower()
+    provider = _normalize_provider_name(settings.llm.provider)
     if provider == "mock":
         if not getattr(settings.llm, "allow_mock_provider", False):
             raise ValueError("Mock LLM provider is fixture/test-only. Set llm.allow_mock_provider=true to opt in.")
@@ -266,7 +300,7 @@ def build_llm_provider(
             json_handler=json_handler,
             text_handler=text_handler,
         )
-    if provider in {"openai", "openai-compatible", "openai_compatible"}:
+    if provider == "openai-compatible":
         return OpenAICompatibleLLMProvider(
             model=settings.llm.model,
             base_url=settings.llm.base_url,

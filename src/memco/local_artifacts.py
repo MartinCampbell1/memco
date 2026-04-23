@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 from memco.release_check import run_release_check, run_strict_release_check
@@ -54,6 +56,16 @@ def _step_by_name(artifact: dict, name: str) -> dict:
         if step.get("name") == name:
             return step
     raise KeyError(f"release artifact is missing required step: {name}")
+
+
+@contextmanager
+def _without_live_smoke_env():
+    previous = os.environ.pop("MEMCO_RUN_LIVE_SMOKE", None)
+    try:
+        yield
+    finally:
+        if previous is not None:
+            os.environ["MEMCO_RUN_LIVE_SMOKE"] = previous
 
 
 def build_change_group_snapshot(*, project_root: Path) -> dict:
@@ -119,6 +131,7 @@ def build_repo_local_status_snapshot(
     release_postgres_artifact: dict | None,
     strict_release_artifact: dict | None,
     benchmark_artifact: dict | None,
+    live_operator_smoke_artifact: dict | None,
     contract_stack_summary: str,
     full_suite_summary: str,
     change_groups_path: Path,
@@ -187,6 +200,19 @@ def build_repo_local_status_snapshot(
             "adversarial_robustness": benchmark_artifact["benchmark_metrics"]["adversarial_robustness"],
             "person_isolation": benchmark_artifact["benchmark_metrics"]["person_isolation"],
         }
+    if live_operator_smoke_artifact is not None:
+        payload["validation"]["live_operator_smoke"] = {
+            "artifact_path": live_operator_smoke_artifact["artifact_path"],
+            "ok": live_operator_smoke_artifact["ok"],
+            "published_total": next(
+                (step.get("published_total") for step in live_operator_smoke_artifact.get("steps", []) if step.get("name") == "ingest_pipeline"),
+                None,
+            ),
+            "api_queries_ok": next(
+                (step.get("ok") for step in live_operator_smoke_artifact.get("steps", []) if step.get("name") == "api_queries"),
+                None,
+            ),
+        }
     return payload
 
 
@@ -194,7 +220,8 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
     reports_dir = project_root / "var" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    release_artifact = run_release_check(project_root=project_root, include_eval=True)
+    with _without_live_smoke_env():
+        release_artifact = run_release_check(project_root=project_root, include_eval=True)
     release_path = reports_dir / "release-check-current.json"
     release_artifact["artifact_path"] = str(release_path)
     release_path.write_text(json.dumps(release_artifact, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -202,22 +229,25 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
     release_postgres_artifact = None
     strict_release_artifact = None
     benchmark_artifact = None
+    live_operator_smoke_artifact = None
     if postgres_database_url:
-        release_postgres_artifact = run_release_check(
-            project_root=project_root,
-            include_eval=True,
-            postgres_database_url=postgres_database_url,
-        )
+        with _without_live_smoke_env():
+            release_postgres_artifact = run_release_check(
+                project_root=project_root,
+                include_eval=True,
+                postgres_database_url=postgres_database_url,
+            )
         release_pg_path = reports_dir / "release-check-postgres-current.json"
         release_postgres_artifact["artifact_path"] = str(release_pg_path)
         release_pg_path.write_text(
             json.dumps(release_postgres_artifact, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        strict_release_artifact = run_strict_release_check(
-            project_root=project_root,
-            postgres_database_url=postgres_database_url,
-        )
+        with _without_live_smoke_env():
+            strict_release_artifact = run_strict_release_check(
+                project_root=project_root,
+                postgres_database_url=postgres_database_url,
+            )
         strict_release_path = reports_dir / "strict-release-check-current.json"
         strict_release_artifact["artifact_path"] = str(strict_release_path)
         strict_release_path.write_text(
@@ -232,6 +262,9 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
             json.dumps(benchmark_artifact, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+        live_smoke_path = reports_dir / "live-operator-smoke-current.json"
+        if live_smoke_path.exists():
+            live_operator_smoke_artifact = json.loads(live_smoke_path.read_text(encoding="utf-8"))
 
     change_groups = build_change_group_snapshot(project_root=project_root)
     change_groups_path = reports_dir / "change-groups-current.json"
@@ -248,6 +281,7 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
         release_postgres_artifact=release_postgres_artifact,
         strict_release_artifact=strict_release_artifact,
         benchmark_artifact=benchmark_artifact,
+        live_operator_smoke_artifact=live_operator_smoke_artifact,
         contract_stack_summary=contract_stack_summary,
         full_suite_summary=full_suite_summary,
         change_groups_path=change_groups_path,
@@ -263,6 +297,7 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
             "release_check_postgres": str(reports_dir / "release-check-postgres-current.json") if postgres_database_url else None,
             "strict_release_check": str(reports_dir / "strict-release-check-current.json") if postgres_database_url else None,
             "benchmark": str(reports_dir / "benchmark-current.json") if postgres_database_url else None,
+            "live_operator_smoke": str(reports_dir / "live-operator-smoke-current.json") if live_operator_smoke_artifact is not None else None,
             "repo_local_status": str(status_path),
             "change_groups": str(change_groups_path),
         },
@@ -286,6 +321,9 @@ def refresh_local_artifacts(*, project_root: Path, postgres_database_url: str | 
             ),
             "benchmark_core_memory_accuracy": (
                 benchmark_artifact["benchmark_metrics"]["core_memory_accuracy"] if benchmark_artifact is not None else None
+            ),
+            "live_operator_smoke_ok": (
+                live_operator_smoke_artifact["ok"] if live_operator_smoke_artifact is not None else None
             ),
         },
     }

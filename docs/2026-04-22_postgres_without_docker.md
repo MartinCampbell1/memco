@@ -29,6 +29,8 @@ Set:
 ```bash
 export MEMCO_STORAGE_ENGINE=postgres
 export MEMCO_DATABASE_URL='postgresql://USER:PASSWORD@HOST:5432/DBNAME'
+export MEMCO_BACKUP_PATH='/absolute/path/to/memco-postgres.dump'
+export MEMCO_API_TOKEN='replace-with-local-token'
 ```
 
 Optional:
@@ -70,6 +72,8 @@ Expected health fields:
 
 - `"storage_engine": "postgres"`
 - `"database_target": "postgresql://..."`
+- `"api_token_configured": true`
+- `"backup_path_exists": true`
 
 ## Reproducible Smoke
 
@@ -138,3 +142,7 @@ Validated in this session:
   - `uv run memco strict-release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres' --output /Users/martin/memco/var/reports/strict-release-check-current.json`
   - benchmark artifact:
     - `/Users/martin/memco/var/reports/benchmark-current.json`
+- live operator smoke can be folded into the same canonical gate:
+  - `MEMCO_RUN_LIVE_SMOKE=1 MEMCO_API_TOKEN='replace-with-local-token' MEMCO_LLM_API_KEY='replace-with-provider-key' uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'`
+  - live smoke artifact:
+    - `/Users/martin/memco/var/reports/live-operator-smoke-current.json`

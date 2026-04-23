@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from memco.config import load_settings, write_settings
+from memco.live_smoke import run_live_operator_smoke
 from memco.llm import llm_runtime_policy
 from memco.postgres_smoke import run_postgres_smoke
 from memco.runtime import ensure_runtime
@@ -26,6 +28,8 @@ BENCHMARK_THRESHOLDS = {
     "unsupported_premise_supported_count": 0,
     "positive_answers_missing_evidence_ids": 0,
 }
+
+OPERATOR_READINESS_MIN_PASS_RATE = 1.0
 
 
 def resolve_repo_project_root(start: Path) -> Path:
@@ -76,6 +80,67 @@ def _run_runtime_policy_gate(*, project_root: Path) -> dict:
         "root": str(project_root),
         "config_path": str(settings.config_path),
         **policy,
+    }
+
+
+def _run_storage_contract_gate(*, project_root: Path) -> dict:
+    settings = load_settings(project_root)
+    runtime_profile = settings.runtime_profile
+    storage_role = settings.storage_role
+    storage_engine = settings.storage.engine
+    expected_engine = settings.storage.contract_engine
+    operator_profile = runtime_profile == "repo-local"
+    ok = not operator_profile or storage_role == "primary"
+    if ok and operator_profile:
+        reason = "repo-local runtime is using the primary storage contract"
+    elif ok:
+        reason = "fixture runtime may use fallback storage"
+    else:
+        reason = (
+            "repo-local runtime is using fallback storage; "
+            f"expected primary {expected_engine}, got {storage_engine}"
+        )
+    return {
+        "name": "storage_contract",
+        "ok": ok,
+        "root": str(project_root),
+        "config_path": str(settings.config_path),
+        "runtime_profile": runtime_profile,
+        "storage_engine": storage_engine,
+        "storage_contract_engine": expected_engine,
+        "storage_role": storage_role,
+        "reason": reason,
+    }
+
+
+def _run_operator_safety_gate(*, project_root: Path) -> dict:
+    settings = load_settings(project_root)
+    api_token_configured = bool((settings.api.auth_token or "").strip())
+    backup_path = settings.backup_path
+    backup_path_exists = backup_path.exists()
+    runtime_profile = settings.runtime_profile
+    operator_profile = runtime_profile == "repo-local"
+    ok = (not operator_profile) or (api_token_configured and backup_path_exists)
+    if ok and operator_profile:
+        reason = "repo-local runtime has API token configured and backup path present"
+    elif ok:
+        reason = "fixture runtime skips operator-safety enforcement"
+    elif not api_token_configured and not backup_path_exists:
+        reason = "repo-local runtime is missing API token and backup path"
+    elif not api_token_configured:
+        reason = "repo-local runtime is missing API token"
+    else:
+        reason = "repo-local runtime is missing backup path"
+    return {
+        "name": "operator_safety",
+        "ok": ok,
+        "root": str(project_root),
+        "config_path": str(settings.config_path),
+        "runtime_profile": runtime_profile,
+        "api_token_configured": api_token_configured,
+        "backup_path": str(backup_path),
+        "backup_path_exists": backup_path_exists,
+        "reason": reason,
     }
 
 
@@ -149,8 +214,43 @@ def _run_postgres_gate(
     }
 
 
+def _live_smoke_requested() -> bool:
+    return os.environ.get("MEMCO_RUN_LIVE_SMOKE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _run_live_smoke_gate(
+    *,
+    project_root: Path,
+    database_url: str,
+    live_smoke_root: Path,
+    output_path: Path | None = None,
+) -> dict:
+    result = run_live_operator_smoke(
+        maintenance_database_url=database_url,
+        root=live_smoke_root,
+        project_root=project_root,
+        output_path=output_path,
+    )
+    return {
+        "name": "live_operator_smoke",
+        "ok": result["ok"],
+        "root": result["root"],
+        "storage_engine": result["storage_engine"],
+        "storage_role": result["storage_role"],
+        "provider": result["provider"],
+        "model": result["model"],
+        "artifact_path": result.get("artifact_path"),
+        "artifact_summary": {
+            "artifact_type": result["artifact_type"],
+            "failures": result["failures"],
+            "steps": result["steps"],
+        },
+    }
+
+
 def _benchmark_policy(artifact: dict) -> dict:
     metrics = artifact["benchmark_metrics"]
+    operator_metrics = artifact.get("operator_readiness_metrics") or {}
     checks = {
         "core_memory_accuracy": {
             "value": float(metrics["core_memory_accuracy"]),
@@ -177,11 +277,19 @@ def _benchmark_policy(artifact: dict) -> dict:
             "threshold": BENCHMARK_THRESHOLDS["positive_answers_missing_evidence_ids"],
             "ok": int(metrics["positive_answers_missing_evidence_ids"]) <= BENCHMARK_THRESHOLDS["positive_answers_missing_evidence_ids"],
         },
+        "operator_readiness_pass_rate": {
+            "value": float(operator_metrics.get("pass_rate", 0.0)),
+            "threshold": OPERATOR_READINESS_MIN_PASS_RATE,
+            "ok": float(operator_metrics.get("pass_rate", 0.0)) >= OPERATOR_READINESS_MIN_PASS_RATE,
+        },
     }
     return {
         "ok": all(item["ok"] for item in checks.values()),
         "checks": checks,
-        "thresholds": dict(BENCHMARK_THRESHOLDS),
+        "thresholds": {
+            **dict(BENCHMARK_THRESHOLDS),
+            "operator_readiness_pass_rate_min": OPERATOR_READINESS_MIN_PASS_RATE,
+        },
     }
 
 
@@ -238,6 +346,12 @@ def run_release_check(
     runtime_step = _run_runtime_policy_gate(project_root=project_root)
     steps.append(runtime_step)
     ok = runtime_step["ok"]
+    storage_step = _run_storage_contract_gate(project_root=project_root)
+    steps.append(storage_step)
+    ok = ok and storage_step["ok"]
+    safety_step = _run_operator_safety_gate(project_root=project_root)
+    steps.append(safety_step)
+    ok = ok and safety_step["ok"]
     pytest_step: dict | None = None
 
     if include_pytest:
@@ -298,6 +412,26 @@ def run_release_check(
             }
         steps.append(postgres_step)
         ok = ok and postgres_step["ok"]
+
+        if _live_smoke_requested():
+            output_path = project_root / "var" / "reports" / "live-operator-smoke-current.json"
+            if ok:
+                with TemporaryDirectory(prefix="memco-live-operator-smoke-") as tmpdir:
+                    live_smoke_step = _run_live_smoke_gate(
+                        project_root=project_root,
+                        database_url=postgres_database_url,
+                        live_smoke_root=Path(tmpdir),
+                        output_path=output_path,
+                    )
+            else:
+                live_smoke_step = {
+                    "name": "live_operator_smoke",
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "prior_gate_failed",
+                }
+            steps.append(live_smoke_step)
+            ok = ok and live_smoke_step["ok"]
 
     return {
         "artifact_type": "canonical_postgres_release_check" if postgres_database_url else "repo_local_release_check",

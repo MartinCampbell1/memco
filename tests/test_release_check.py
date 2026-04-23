@@ -8,17 +8,31 @@ from memco.release_check import (
     ACTIVE_GATE_TEST_FILES,
     _run_benchmark_gate,
     _run_eval_gate,
+    _run_operator_safety_gate,
     _run_runtime_policy_gate,
+    _run_storage_contract_gate,
     resolve_repo_project_root,
     run_release_check,
     run_strict_release_check,
 )
 
 
+def _write_live_runtime_settings(project_root: Path) -> None:
+    settings = Settings(root=project_root)
+    settings.storage.engine = "postgres"
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = "secret"
+    settings.api.auth_token = "memco-token"
+    settings.backup_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.backup_path.write_text("backup", encoding="utf-8")
+    write_settings(settings)
+
+
 def test_run_release_check_runs_pytest_gate_and_acceptance(monkeypatch, tmp_path):
     project_root = tmp_path / "repo"
     eval_root = tmp_path / "eval-runtime"
     project_root.mkdir()
+    _write_live_runtime_settings(project_root)
     monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
 
     monkeypatch.setattr(
@@ -64,16 +78,20 @@ def test_run_release_check_runs_pytest_gate_and_acceptance(monkeypatch, tmp_path
     assert result["ok"] is True
     assert result["gate_type"] == "quick-repo-local"
     assert result["include_pytest"] is True
-    assert [step["name"] for step in result["steps"]] == ["runtime_policy", "pytest_gate", "acceptance_artifact"]
+    assert [step["name"] for step in result["steps"]] == ["runtime_policy", "storage_contract", "operator_safety", "pytest_gate", "acceptance_artifact"]
     assert result["steps"][0]["ok"] is True
-    assert result["steps"][1]["command"][-len(ACTIVE_GATE_TEST_FILES) :] == list(ACTIVE_GATE_TEST_FILES)
-    assert result["steps"][2]["artifact_summary"]["failed"] == 0
+    assert result["steps"][1]["ok"] is True
+    assert result["steps"][1]["storage_role"] == "primary"
+    assert result["steps"][2]["ok"] is True
+    assert result["steps"][3]["command"][-len(ACTIVE_GATE_TEST_FILES) :] == list(ACTIVE_GATE_TEST_FILES)
+    assert result["steps"][4]["artifact_summary"]["failed"] == 0
     assert seen_roots == [eval_root, eval_root]
 
 
 def test_run_release_check_skips_eval_when_pytest_gate_fails(monkeypatch, tmp_path):
     project_root = tmp_path / "repo"
     project_root.mkdir()
+    _write_live_runtime_settings(project_root)
 
     monkeypatch.setattr(
         "memco.release_check.subprocess.run",
@@ -97,15 +115,16 @@ def test_run_release_check_skips_eval_when_pytest_gate_fails(monkeypatch, tmp_pa
     result = run_release_check(project_root=project_root, include_eval=True)
 
     assert result["ok"] is False
-    assert result["steps"][1]["ok"] is False
-    assert result["steps"][2]["skipped"] is True
-    assert result["steps"][2]["reason"] == "pytest_gate_failed"
+    assert result["steps"][3]["ok"] is False
+    assert result["steps"][4]["skipped"] is True
+    assert result["steps"][4]["reason"] == "pytest_gate_failed"
 
 
 def test_run_release_check_can_run_acceptance_without_pytest(monkeypatch, tmp_path):
     project_root = tmp_path / "repo"
     eval_root = tmp_path / "eval-runtime"
     project_root.mkdir()
+    _write_live_runtime_settings(project_root)
     seen_roots: list[Path] = []
     monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
 
@@ -148,7 +167,7 @@ def test_run_release_check_can_run_acceptance_without_pytest(monkeypatch, tmp_pa
     assert result["ok"] is True
     assert result["include_pytest"] is False
     assert result["include_eval"] is True
-    assert [step["name"] for step in result["steps"]] == ["runtime_policy", "acceptance_artifact"]
+    assert [step["name"] for step in result["steps"]] == ["runtime_policy", "storage_contract", "operator_safety", "acceptance_artifact"]
     assert seen_roots == [eval_root, eval_root]
 
 
@@ -169,6 +188,7 @@ def test_run_release_check_can_run_optional_postgres_smoke(monkeypatch, tmp_path
     eval_root = tmp_path / "eval-runtime"
     postgres_root = tmp_path / "postgres-runtime"
     project_root.mkdir()
+    _write_live_runtime_settings(project_root)
     seen_roots: list[Path] = []
     monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
 
@@ -231,12 +251,105 @@ def test_run_release_check_can_run_optional_postgres_smoke(monkeypatch, tmp_path
     assert result["artifact_type"] == "canonical_postgres_release_check"
     assert result["gate_type"] == "canonical-postgres"
     assert result["include_postgres_smoke"] is True
-    assert [step["name"] for step in result["steps"]] == ["runtime_policy", "pytest_gate", "acceptance_artifact", "postgres_smoke"]
-    assert result["steps"][2]["storage_engine"] == "postgres"
-    assert result["steps"][2]["storage_role"] == "primary"
-    assert result["steps"][3]["schema_migrations"] == 1
-    assert result["steps"][3]["health"]["storage_engine"] == "postgres"
+    assert [step["name"] for step in result["steps"]] == ["runtime_policy", "storage_contract", "operator_safety", "pytest_gate", "acceptance_artifact", "postgres_smoke"]
+    assert result["steps"][1]["storage_role"] == "primary"
+    assert result["steps"][2]["ok"] is True
+    assert result["steps"][4]["storage_engine"] == "postgres"
+    assert result["steps"][4]["storage_role"] == "primary"
+    assert result["steps"][5]["schema_migrations"] == 1
+    assert result["steps"][5]["health"]["storage_engine"] == "postgres"
     assert seen_roots == [eval_root, eval_root]
+
+
+def test_run_release_check_can_run_optional_live_smoke(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    eval_root = tmp_path / "eval-runtime"
+    postgres_root = tmp_path / "postgres-runtime"
+    project_root.mkdir()
+    _write_live_runtime_settings(project_root)
+    monkeypatch.setenv("MEMCO_RUN_LIVE_SMOKE", "1")
+    monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
+    monkeypatch.setattr(
+        "memco.release_check.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=kwargs.get("args", args[0] if args else []),
+            returncode=0,
+            stdout="5 passed\n",
+            stderr="",
+        ),
+    )
+
+    class _FakeEvalService:
+        def seed_fixture_data(self, root: Path) -> None:
+            return None
+
+        def run_acceptance(self, root: Path) -> dict:
+            return {
+                "artifact_type": "eval_acceptance_artifact",
+                "release_scope": "private-single-user",
+                "total": 20,
+                "passed": 20,
+                "failed": 0,
+                "pass_rate": 1.0,
+                "accuracy": 1.0,
+                "refusal_correctness": {"total_cases": 3, "passed_cases": 3, "rate": 1.0},
+                "evidence_coverage": {"cases_with_hits": 10, "cases_with_evidence": 10, "rate": 1.0},
+                "retrieval_latency_ms": {"min": 1, "max": 2, "avg": 1, "p95": 2},
+                "token_accounting": {"status": "tracked"},
+                "behavior_checks_total": 2,
+                "behavior_checks_passed": 2,
+                "groups": [{"name": "supported_fact", "total": 2, "passed": 2, "pass_rate": 1.0}],
+            }
+
+    monkeypatch.setattr("memco.release_check.EvalService", _FakeEvalService)
+    monkeypatch.setattr(
+        "memco.release_check.run_postgres_smoke",
+        lambda **kwargs: {
+            "health": {"ok": True, "storage_engine": "postgres", "database_target": kwargs["database_url"]},
+            "schema_migrations": 1,
+            "database_url": kwargs["database_url"],
+            "root": str(kwargs["root"]),
+            "port": kwargs["port"] or 8788,
+        },
+    )
+    monkeypatch.setattr(
+        "memco.release_check.run_live_operator_smoke",
+        lambda **kwargs: {
+            "artifact_type": "live_operator_smoke",
+            "ok": True,
+            "provider": "openai-compatible",
+            "model": "gpt-5.4-mini",
+            "storage_engine": "postgres",
+            "storage_role": "primary",
+            "root": str(kwargs["root"]),
+            "artifact_path": str(kwargs["output_path"]),
+            "failures": [],
+            "steps": [{"name": "api_queries", "ok": True}],
+        },
+    )
+
+    result = run_release_check(
+        project_root=project_root,
+        eval_root=eval_root,
+        include_pytest=True,
+        include_eval=True,
+        postgres_database_url="postgresql://example/postgres",
+        postgres_root=postgres_root,
+    )
+
+    assert result["ok"] is True
+    assert [step["name"] for step in result["steps"]] == [
+        "runtime_policy",
+        "storage_contract",
+        "operator_safety",
+        "pytest_gate",
+        "acceptance_artifact",
+        "postgres_smoke",
+        "live_operator_smoke",
+    ]
+    assert result["steps"][6]["ok"] is True
+    assert result["steps"][6]["artifact_summary"]["artifact_type"] == "live_operator_smoke"
+    assert result["steps"][6]["artifact_path"].endswith("live-operator-smoke-current.json")
 
 
 def test_run_release_check_rejects_canonical_postgres_gate_without_eval(tmp_path):
@@ -270,9 +383,122 @@ def test_run_runtime_policy_gate_rejects_live_mock_provider(tmp_path):
     assert result["ok"] is False
     assert result["provider"] == "mock"
     assert result["runtime_profile"] == "repo-local"
+    assert result["credentials_present"] is False
+    assert result["base_url_present"] is False
+    assert result["provider_configured"] is False
     assert result["fixture_only"] is True
     assert result["release_eligible"] is False
     assert "fixture-only" in result["reason"]
+
+
+def test_run_storage_contract_gate_rejects_repo_local_sqlite_fallback(tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.storage.engine = "sqlite"
+    write_settings(settings)
+
+    result = _run_storage_contract_gate(project_root=project_root)
+
+    assert result["name"] == "storage_contract"
+    assert result["ok"] is False
+    assert result["runtime_profile"] == "repo-local"
+    assert result["storage_engine"] == "sqlite"
+    assert result["storage_contract_engine"] == "postgres"
+    assert result["storage_role"] == "fallback"
+    assert "fallback storage" in result["reason"]
+
+
+def test_run_storage_contract_gate_accepts_fixture_sqlite_fallback(tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.runtime.profile = "fixture"
+    settings.storage.engine = "sqlite"
+    write_settings(settings)
+
+    result = _run_storage_contract_gate(project_root=project_root)
+
+    assert result["name"] == "storage_contract"
+    assert result["ok"] is True
+    assert result["runtime_profile"] == "fixture"
+    assert result["storage_engine"] == "sqlite"
+    assert result["storage_role"] == "fallback"
+    assert "fixture runtime" in result["reason"]
+
+
+def test_run_operator_safety_gate_rejects_repo_local_missing_token_and_backup(tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.storage.engine = "postgres"
+    settings.api.auth_token = ""
+    write_settings(settings)
+
+    result = _run_operator_safety_gate(project_root=project_root)
+
+    assert result["name"] == "operator_safety"
+    assert result["ok"] is False
+    assert result["runtime_profile"] == "repo-local"
+    assert result["api_token_configured"] is False
+    assert result["backup_path_exists"] is False
+
+
+def test_run_operator_safety_gate_accepts_repo_local_with_token_and_backup(tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.storage.engine = "postgres"
+    settings.api.auth_token = "memco-token"
+    backup_path = settings.backup_path
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path.write_text("backup", encoding="utf-8")
+    write_settings(settings)
+
+    result = _run_operator_safety_gate(project_root=project_root)
+
+    assert result["name"] == "operator_safety"
+    assert result["ok"] is True
+    assert result["api_token_configured"] is True
+    assert result["backup_path_exists"] is True
+
+
+def test_run_runtime_policy_gate_rejects_missing_openai_compatible_api_key(tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.llm.provider = "openai-compatible"
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = ""
+    write_settings(settings)
+
+    result = _run_runtime_policy_gate(project_root=project_root)
+
+    assert result["name"] == "runtime_policy"
+    assert result["ok"] is False
+    assert result["provider"] == "openai-compatible"
+    assert result["runtime_profile"] == "repo-local"
+    assert result["base_url_present"] is True
+    assert result["credentials_present"] is False
+    assert result["provider_configured"] is False
+    assert result["release_eligible"] is False
+    assert "api_key" in result["reason"]
+
+
+def test_run_runtime_policy_gate_rejects_missing_openai_compatible_base_url(tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.llm.provider = "openai-compatible"
+    settings.llm.base_url = "   "
+    settings.llm.api_key = "secret"
+    write_settings(settings)
+
+    result = _run_runtime_policy_gate(project_root=project_root)
+
+    assert result["name"] == "runtime_policy"
+    assert result["ok"] is False
+    assert result["provider"] == "openai-compatible"
+    assert result["runtime_profile"] == "repo-local"
+    assert result["base_url_present"] is False
+    assert result["credentials_present"] is True
+    assert result["provider_configured"] is False
+    assert result["release_eligible"] is False
+    assert "base_url" in result["reason"]
 
 
 def test_run_release_check_stays_fail_closed_when_live_runtime_uses_mock(monkeypatch, tmp_path):
@@ -324,7 +550,63 @@ def test_run_release_check_stays_fail_closed_when_live_runtime_uses_mock(monkeyp
     assert result["ok"] is False
     assert result["steps"][0]["name"] == "runtime_policy"
     assert result["steps"][0]["ok"] is False
-    assert result["steps"][2]["ok"] is True
+    assert result["steps"][1]["ok"] is True
+    assert result["steps"][2]["ok"] is False
+    assert result["steps"][4]["ok"] is True
+
+
+def test_run_release_check_stays_fail_closed_when_repo_local_runtime_uses_sqlite_fallback(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    eval_root = tmp_path / "eval-runtime"
+    settings = Settings(root=project_root)
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = "secret"
+    settings.storage.engine = "sqlite"
+    write_settings(settings)
+    monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
+
+    monkeypatch.setattr(
+        "memco.release_check.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=kwargs.get("args", args[0] if args else []),
+            returncode=0,
+            stdout="5 passed\n",
+            stderr="",
+        ),
+    )
+
+    class _FakeEvalService:
+        def seed_fixture_data(self, root: Path) -> None:
+            return None
+
+        def run_acceptance(self, root: Path) -> dict:
+            return {
+                "artifact_type": "eval_acceptance_artifact",
+                "release_scope": "private-single-user",
+                "total": 20,
+                "passed": 20,
+                "failed": 0,
+                "pass_rate": 1.0,
+                "accuracy": 1.0,
+                "refusal_correctness": {"total_cases": 3, "passed_cases": 3, "rate": 1.0},
+                "evidence_coverage": {"cases_with_hits": 10, "cases_with_evidence": 10, "rate": 1.0},
+                "retrieval_latency_ms": {"min": 1, "max": 2, "avg": 1, "p95": 2},
+                "token_accounting": {"status": "tracked"},
+                "behavior_checks_total": 2,
+                "behavior_checks_passed": 2,
+                "groups": [{"name": "supported_fact", "total": 2, "passed": 2, "pass_rate": 1.0}],
+            }
+
+    monkeypatch.setattr("memco.release_check.EvalService", _FakeEvalService)
+
+    result = run_release_check(project_root=project_root, eval_root=eval_root, include_eval=True)
+
+    assert result["ok"] is False
+    assert result["steps"][0]["ok"] is True
+    assert result["steps"][1]["name"] == "storage_contract"
+    assert result["steps"][1]["ok"] is False
+    assert result["steps"][1]["storage_role"] == "fallback"
+    assert result["steps"][4]["ok"] is True
 
 
 def test_resolve_repo_project_root_finds_parent_checkout(tmp_path):
@@ -544,8 +826,15 @@ def test_run_benchmark_gate_emits_threshold_checks(monkeypatch, tmp_path):
                     "unsupported_premise_supported_count_max": 0,
                     "positive_answers_missing_evidence_ids_max": 0,
                 },
+                "operator_readiness_metrics": {
+                    "pass_rate": 1.0,
+                    "total": 5,
+                    "passed": 5,
+                    "groups": ["supported_fact"],
+                },
                 "benchmark_sets": {},
                 "benchmark_cases": [],
+                "operator_readiness_cases": [],
                 "domain_reports": {},
             }
 
@@ -558,6 +847,8 @@ def test_run_benchmark_gate_emits_threshold_checks(monkeypatch, tmp_path):
     assert result["policy_checks"]["core_memory_accuracy"]["ok"] is True
     assert result["policy_checks"]["person_isolation"]["ok"] is True
     assert result["policy_checks"]["unsupported_premise_supported_count"]["value"] == 0
+    assert result["policy_checks"]["operator_readiness_pass_rate"]["ok"] is True
+    assert result["thresholds"]["operator_readiness_pass_rate_min"] == 1.0
 
 
 def test_run_strict_release_check_requires_benchmark_success(monkeypatch, tmp_path):
@@ -573,6 +864,8 @@ def test_run_strict_release_check_requires_benchmark_success(monkeypatch, tmp_pa
             "gate_type": "canonical-postgres",
             "steps": [
                 {"name": "runtime_policy", "ok": True},
+                {"name": "storage_contract", "ok": True, "storage_role": "primary"},
+                {"name": "operator_safety", "ok": True, "api_token_configured": True, "backup_path_exists": True},
                 {"name": "pytest_gate", "ok": True, "stdout": "5 passed\n"},
                 {"name": "acceptance_artifact", "ok": True, "artifact_summary": {"passed": 24, "total": 24}},
                 {"name": "postgres_smoke", "ok": True},
@@ -607,6 +900,8 @@ def test_run_strict_release_check_requires_benchmark_success(monkeypatch, tmp_pa
     assert result["ok"] is False
     assert [step["name"] for step in result["steps"]] == [
         "runtime_policy",
+        "storage_contract",
+        "operator_safety",
         "pytest_gate",
         "acceptance_artifact",
         "postgres_smoke",

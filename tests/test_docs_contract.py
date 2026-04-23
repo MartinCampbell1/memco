@@ -27,12 +27,14 @@ def test_readme_uses_current_contract_language():
     assert "uv run memco strict-release-check" in readme
     assert "var/reports/strict-release-check-current.json" in readme
     assert "var/reports/benchmark-current.json" in readme
+    assert "var/reports/live-operator-smoke-current.json" in readme
     assert "var/reports/repo-local-status-current.json" in readme
     assert "var/reports/change-groups-current.json" in readme
     assert "var/reports/local-artifacts-refresh-current.json" in readme
     assert "var/reports/local-artifacts-refresh-postgres-current.json" in readme
     assert "uv run memco local-artifacts-refresh --project-root /Users/martin/memco" in readme
     assert "--output /absolute/path/to/local-artifacts-refresh.json" in readme
+    assert "MEMCO_RUN_LIVE_SMOKE=1" in readme
     assert "uv run memco ingest-pipeline /absolute/path/to/conversation.json" in readme
     assert "/v1/ingest/pipeline" in readme
     assert "conversation-import --latest-source" in readme
@@ -82,12 +84,14 @@ def test_release_gate_is_active_repo_local_gate_with_reference_pointer():
     assert "uv run memco strict-release-check" in gate
     assert "var/reports/strict-release-check-current.json" in gate
     assert "var/reports/benchmark-current.json" in gate
+    assert "var/reports/live-operator-smoke-current.json" in gate
     assert "Quick contract-facing regression stack:" in gate
     assert "tests/test_release_check.py" in gate
     assert "tests/test_llm_provider.py" in gate
     assert "uv run memco local-artifacts-refresh --project-root /Users/martin/memco" in gate
     assert "var/reports/local-artifacts-refresh-current.json" in gate
     assert "var/reports/local-artifacts-refresh-postgres-current.json" in gate
+    assert "MEMCO_RUN_LIVE_SMOKE=1" in gate
     assert "## Strict Original Brief Reference Track" in gate
     assert "## Strict Original Execution-Brief Readiness" not in gate
 
@@ -116,6 +120,8 @@ def test_postgres_without_docker_guide_mentions_integrated_release_check():
     assert "strict-release-check --project-root /Users/martin/memco --postgres-database-url" in guide
     assert "var/reports/strict-release-check-current.json" in guide
     assert "var/reports/benchmark-current.json" in guide
+    assert "var/reports/live-operator-smoke-current.json" in guide
+    assert "MEMCO_BACKUP_PATH" in guide
 
 
 def test_local_operator_artifacts_are_gitignored_but_tracked_status_snapshot_is_not():
@@ -184,9 +190,10 @@ def test_repo_local_status_snapshot_tracks_current_contract_split():
     assert "Active repo-local contract status: `GO`" in snapshot
     assert "strict original brief: `NO-GO`" in snapshot
     assert "Contract-facing regression stack:" in snapshot
-    assert "46 passed" in snapshot
+    assert "74 passed" in snapshot
     assert "var/reports/release-check-current.json" in snapshot
     assert "var/reports/release-check-postgres-current.json" in snapshot
+    assert "var/reports/live-operator-smoke-current.json" in snapshot
     assert "var/reports/repo-local-status-current.json" in snapshot
     assert "mirrors the current branch, remote, contract split, and latest validation counts" in snapshot
     assert "var/reports/change-groups-current.json" in snapshot
@@ -217,3 +224,4 @@ def test_repo_local_status_snapshot_captures_handoff_grade_context():
     assert "var/reports/release-check-postgres-current.json" in snapshot
     assert "fact_ids" in snapshot
     assert "evidence_ids" in snapshot
+    assert "operator safety now requires" in snapshot

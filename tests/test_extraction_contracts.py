@@ -65,6 +65,7 @@ def test_prompt_payload_embeds_output_contract():
 
     assert payload["contract_version"]
     assert payload["extraction_mode"] == "llm_first_structured_extraction"
+    assert payload["json_output_required"] is True
     assert payload["output_contract"]["top_level_output"]["required_keys"] == ["items"]
     domains = {item["domain"] for item in payload["output_contract"]["domains"]}
     assert {"biography", "preferences", "social_circle", "work", "experiences", "psychometrics"} <= domains
