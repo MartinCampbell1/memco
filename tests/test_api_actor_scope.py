@@ -3,10 +3,12 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from memco.api.app import app
+from memco.config import load_settings
 from memco.db import get_connection
 from memco.models.memory_fact import MemoryFactInput
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.source_repository import SourceRepository
+from memco.runtime import ensure_runtime
 from memco.services.consolidation_service import ConsolidationService
 
 
@@ -113,6 +115,44 @@ def test_actor_required_on_public_retrieve_and_chat_even_without_env_toggle(monk
     assert "Actor context is required" in retrieve.json()["detail"]
     assert chat.status_code == 422
     assert "Actor context is required" in chat.json()["detail"]
+
+
+def test_actor_payload_from_prior_settings_load_survives_route_reload(monkeypatch, tmp_path):
+    root = tmp_path / "existing-runtime"
+    config_path = root / "var" / "config" / "settings.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "\n".join(
+            [
+                "api:",
+                "  auth_token: api-token",
+                "llm:",
+                "  provider: mock",
+                "  model: fixture",
+                "  allow_mock_provider: true",
+                "storage:",
+                "  engine: sqlite",
+                "runtime:",
+                "  profile: fixture",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    first = load_settings(root)
+    ensure_runtime(first)
+    actor = _actor(first, actor_id="dev-owner")
+    monkeypatch.setenv("MEMCO_ROOT", str(root))
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/retrieve",
+        headers={"x-memco-token": "api-token"},
+        json={"workspace": "default", "person_slug": "alice", "query": "Where does Alice live?", "actor": actor},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["support_level"] == "unsupported"
 
 
 def test_actor_allowed_person_ids_filter_retrieve(monkeypatch, settings):

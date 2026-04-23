@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import os
 import secrets
 from pathlib import Path
@@ -151,30 +152,79 @@ def _settings_payload(settings: Settings) -> dict:
     }
 
 
-def load_settings(root: str | Path | None = None) -> Settings:
+def _has_actor_policies(raw_data: dict) -> bool:
+    api = raw_data.get("api")
+    if not isinstance(api, dict):
+        return False
+    actor_policies = api.get("actor_policies")
+    return isinstance(actor_policies, dict) and bool(actor_policies)
+
+
+def _actor_policies_payload(settings: Settings) -> dict:
+    return {actor_id: policy.model_dump() for actor_id, policy in settings.api.actor_policies.items()}
+
+
+def _secure_config_path(config_path: Path) -> None:
+    if os.name != "posix":
+        return
+    try:
+        if config_path.parent.exists():
+            config_path.parent.chmod(0o700)
+        if config_path.exists():
+            config_path.chmod(0o600)
+    except OSError:
+        return
+
+
+def _ensure_config_parent(config_path: Path) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    _secure_config_path(config_path)
+
+
+def _write_config_payload(config_path: Path, payload: dict) -> None:
+    _ensure_config_parent(config_path)
+    with config_path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(payload, handle, allow_unicode=True, sort_keys=False)
+    _secure_config_path(config_path)
+
+
+def _backfill_actor_policies(config_path: Path, raw_file_data: dict, settings: Settings) -> None:
+    if _has_actor_policies(raw_file_data):
+        return
+    updated = deepcopy(raw_file_data)
+    api = updated.get("api")
+    if not isinstance(api, dict):
+        api = {}
+        updated["api"] = api
+    api["actor_policies"] = _actor_policies_payload(settings)
+    _write_config_payload(config_path, updated)
+
+
+def load_settings(root: str | Path | None = None, *, apply_env: bool = True) -> Settings:
     resolved_root = discover_root(root)
     config_path = resolved_root / "var" / "config" / "settings.yaml"
-    raw_data: dict = {}
+    raw_file_data: dict = {}
     if config_path.exists():
         with config_path.open("r", encoding="utf-8") as handle:
-            raw_data = yaml.safe_load(handle) or {}
+            raw_file_data = yaml.safe_load(handle) or {}
+    raw_data: dict = deepcopy(raw_file_data)
 
-    env_timezone = os.environ.get("MEMCO_TIMEZONE")
-    env_api_host = os.environ.get("MEMCO_API_HOST")
-    env_api_port = os.environ.get("MEMCO_API_PORT")
-    env_api_token = os.environ.get("MEMCO_API_TOKEN")
-    env_require_actor_scope = os.environ.get("MEMCO_REQUIRE_ACTOR_SCOPE")
-    env_llm_provider = os.environ.get("MEMCO_LLM_PROVIDER")
-    env_llm_model = os.environ.get("MEMCO_LLM_MODEL")
-    env_llm_base_url = os.environ.get("MEMCO_LLM_BASE_URL")
-    env_llm_api_key = os.environ.get("MEMCO_LLM_API_KEY")
-    env_llm_allow_mock_provider = os.environ.get("MEMCO_LLM_ALLOW_MOCK_PROVIDER")
-    env_storage_engine = os.environ.get("MEMCO_STORAGE_ENGINE")
-    env_database_url = os.environ.get("MEMCO_DATABASE_URL")
-    env_backup_path = os.environ.get("MEMCO_BACKUP_PATH")
-    env_enable_retrieval_logs = os.environ.get("MEMCO_ENABLE_RETRIEVAL_LOGS")
-    env_query_hash_salt = os.environ.get("MEMCO_QUERY_HASH_SALT")
-    env_runtime_profile = os.environ.get("MEMCO_RUNTIME_PROFILE")
+    env_timezone = os.environ.get("MEMCO_TIMEZONE") if apply_env else None
+    env_api_host = os.environ.get("MEMCO_API_HOST") if apply_env else None
+    env_api_port = os.environ.get("MEMCO_API_PORT") if apply_env else None
+    env_api_token = os.environ.get("MEMCO_API_TOKEN") if apply_env else None
+    env_require_actor_scope = os.environ.get("MEMCO_REQUIRE_ACTOR_SCOPE") if apply_env else None
+    env_llm_provider = os.environ.get("MEMCO_LLM_PROVIDER") if apply_env else None
+    env_llm_model = os.environ.get("MEMCO_LLM_MODEL") if apply_env else None
+    env_llm_base_url = os.environ.get("MEMCO_LLM_BASE_URL") if apply_env else None
+    env_llm_api_key = os.environ.get("MEMCO_LLM_API_KEY") if apply_env else None
+    env_llm_allow_mock_provider = os.environ.get("MEMCO_LLM_ALLOW_MOCK_PROVIDER") if apply_env else None
+    env_storage_engine = os.environ.get("MEMCO_STORAGE_ENGINE") if apply_env else None
+    env_database_url = os.environ.get("MEMCO_DATABASE_URL") if apply_env else None
+    env_backup_path = os.environ.get("MEMCO_BACKUP_PATH") if apply_env else None
+    env_enable_retrieval_logs = os.environ.get("MEMCO_ENABLE_RETRIEVAL_LOGS") if apply_env else None
+    env_query_hash_salt = os.environ.get("MEMCO_QUERY_HASH_SALT") if apply_env else None
+    env_runtime_profile = os.environ.get("MEMCO_RUNTIME_PROFILE") if apply_env else None
 
     if env_timezone:
         raw_data["timezone"] = env_timezone
@@ -228,18 +278,19 @@ def load_settings(root: str | Path | None = None) -> Settings:
     settings = Settings.model_validate(raw_data)
     if not settings.logging.query_hash_salt:
         settings.logging.query_hash_salt = secrets.token_hex(16)
+    if config_path.exists():
+        _backfill_actor_policies(config_path, raw_file_data, settings)
+        _secure_config_path(config_path)
     return settings
 
 
 def write_default_config(settings: Settings) -> None:
-    settings.config_path.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_config_parent(settings.config_path)
     if settings.config_path.exists():
+        _secure_config_path(settings.config_path)
         return
-    with settings.config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(_settings_payload(settings), handle, allow_unicode=True, sort_keys=False)
+    _write_config_payload(settings.config_path, _settings_payload(settings))
 
 
 def write_settings(settings: Settings) -> None:
-    settings.config_path.parent.mkdir(parents=True, exist_ok=True)
-    with settings.config_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(_settings_payload(settings), handle, allow_unicode=True, sort_keys=False)
+    _write_config_payload(settings.config_path, _settings_payload(settings))

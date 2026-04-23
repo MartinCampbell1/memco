@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
+
+from memco.config import load_settings
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,14 @@ class LLMTextResponse:
 
 
 OPENAI_COMPATIBLE_PROVIDER_NAMES = {"openai", "openai-compatible", "openai_compatible"}
+LLM_RUNTIME_ENV_KEYS = (
+    "MEMCO_LLM_PROVIDER",
+    "MEMCO_LLM_MODEL",
+    "MEMCO_LLM_BASE_URL",
+    "MEMCO_LLM_API_KEY",
+    "MEMCO_LLM_ALLOW_MOCK_PROVIDER",
+    "MEMCO_RUNTIME_PROFILE",
+)
 
 
 class LLMProvider(Protocol):
@@ -141,10 +152,11 @@ class MockLLMProvider:
 class OpenAICompatibleLLMProvider:
     name = "openai-compatible"
 
-    def __init__(self, *, model: str, base_url: str, api_key: str) -> None:
+    def __init__(self, *, model: str, base_url: str, api_key: str, request_timeout_seconds: int = 60) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        self.request_timeout_seconds = request_timeout_seconds
 
     def count_tokens(self, *, text: str) -> int:
         cleaned = text.strip()
@@ -168,7 +180,7 @@ class OpenAICompatibleLLMProvider:
             },
             method="POST",
         )
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=self.request_timeout_seconds) as response:
             return json.loads(response.read().decode("utf-8"))
 
     def _usage_from_response(self, *, response: dict[str, Any], prompt_text: str, output_text: str) -> LLMUsage:
@@ -282,6 +294,29 @@ def llm_runtime_policy(settings) -> dict[str, Any]:
         "fixture_only": fixture_only,
         "release_eligible": release_eligible,
         "reason": reason,
+    }
+
+
+def llm_runtime_status(settings) -> dict[str, Any]:
+    checkout_settings = load_settings(settings.root, apply_env=False)
+    checkout_status = llm_runtime_policy(checkout_settings)
+    operator_runtime_status = llm_runtime_policy(settings)
+    present_keys = [key for key in LLM_RUNTIME_ENV_KEYS if os.environ.get(key) is not None]
+    live_credential_keys = [key for key in ("MEMCO_LLM_API_KEY",) if (os.environ.get(key) or "").strip()]
+    config_only_red_operator_green = (
+        not checkout_status["release_eligible"] and operator_runtime_status["release_eligible"]
+    )
+    return {
+        "checkout_status": checkout_status,
+        "operator_runtime_status": operator_runtime_status,
+        "env_overrides": {
+            "used": bool(present_keys),
+            "present_keys": present_keys,
+            "live_credentials_present": bool(live_credential_keys),
+            "live_credential_keys": live_credential_keys,
+        },
+        "config_only_red_operator_green": config_only_red_operator_green,
+        "status_source": "env-injected" if config_only_red_operator_green else "config-only",
     }
 
 

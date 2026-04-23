@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from memco.services.eval_service import EvalService
 from memco.release_check import BENCHMARK_THRESHOLDS
+from memco.services.refusal_service import RefusalService
 
 
 def _stable_projection(result: dict) -> dict:
@@ -160,10 +161,24 @@ def test_eval_harness_emits_separate_benchmark_artifact(settings):
     assert result["benchmark_metrics"]["token_accounting_by_stage"]["answer"]["output_tokens"] > 0
     assert result["operator_readiness_metrics"]["pass_rate"] == 1.0
     assert result["operator_readiness_metrics"]["passed"] == result["operator_readiness_metrics"]["total"]
+    assert result["operator_readiness_metrics"]["failures"] == []
     assert "supported_fact" in result["operator_readiness_metrics"]["groups"]
+    assert "contradicted_premise" in result["operator_readiness_metrics"]["groups"]
     assert "review_queue_behavior" in result["operator_readiness_metrics"]["groups"]
+    assert "supported_residence_current" in result["operator_readiness_metrics"]["case_names"]
+    assert "supported_experience_when" in result["operator_readiness_metrics"]["case_names"]
+    assert "contradicted_residence_claim" in result["operator_readiness_metrics"]["case_names"]
+    assert "unsupported_false_premise_sister" in result["operator_readiness_metrics"]["case_names"]
+    assert "review_queue_blocks_social_answer" in result["operator_readiness_metrics"]["case_names"]
     assert all(case["group"] in result["operator_readiness_metrics"]["groups"] for case in result["operator_readiness_cases"])
     assert any(case["group"] == "review_queue_behavior" for case in result["operator_readiness_cases"])
+    assert any(case["group"] == "contradicted_premise" for case in result["operator_readiness_cases"])
+    assert any(case["group"] == "cross_person_contamination" for case in result["operator_readiness_cases"])
+    assert all(
+        case["evidence_count"] > 0
+        for case in result["operator_readiness_cases"]
+        if not case["refused"] and case["support_level"] in {"supported", "partial"}
+    )
     assert result["benchmark_thresholds"]["core_memory_accuracy_min"] == 0.9
     assert result["benchmark_thresholds"]["adversarial_robustness_min"] == 0.95
     assert result["benchmark_thresholds"]["person_isolation_min"] == 0.99
@@ -185,3 +200,26 @@ def test_benchmark_thresholds_match_strict_release_gate_policy(settings):
         "unsupported_premise_supported_count_max": BENCHMARK_THRESHOLDS["unsupported_premise_supported_count"],
         "positive_answers_missing_evidence_ids_max": BENCHMARK_THRESHOLDS["positive_answers_missing_evidence_ids"],
     }
+
+
+def test_operator_readiness_fails_when_answer_evidence_ids_are_missing(settings):
+    class _NoAnswerEvidenceRefusalService:
+        def __init__(self) -> None:
+            self.inner = RefusalService()
+
+        def build_answer(self, *, query, retrieval_result):
+            answer = dict(self.inner.build_answer(query=query, retrieval_result=retrieval_result))
+            answer["evidence_ids"] = []
+            return answer
+
+    service = EvalService(refusal_service=_NoAnswerEvidenceRefusalService())
+    service.seed_fixture_data(settings.root)
+
+    result = service.run_benchmark(settings.root)
+
+    assert result["operator_readiness_metrics"]["pass_rate"] < 1.0
+    assert result["operator_readiness_metrics"]["failures"]
+    assert any(
+        "answer_evidence_ids_missing" in failure["failures"]
+        for failure in result["operator_readiness_metrics"]["failures"]
+    )

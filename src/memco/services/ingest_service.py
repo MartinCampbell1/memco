@@ -35,9 +35,33 @@ SOURCE_TYPE_PARSERS = {
 }
 
 
+def _normalize_source_type(source_type: str | None) -> str:
+    normalized = (source_type or "").strip().lower()
+    if not normalized:
+        raise ValueError("source_type is required")
+    return normalized
+
+
+def _supported_source_types(settings) -> set[str]:
+    configured = {str(item).strip().lower() for item in getattr(settings.ingest, "source_types", []) if str(item).strip()}
+    return configured & set(SOURCE_TYPE_PARSERS)
+
+
+def validate_source_type(source_type: str | None, *, supported_types: set[str] | None = None) -> str:
+    normalized = _normalize_source_type(source_type)
+    allowed = supported_types if supported_types is not None else set(SOURCE_TYPE_PARSERS)
+    if normalized not in allowed:
+        supported = ", ".join(sorted(allowed))
+        raise ValueError(f"unsupported source_type '{normalized}'; supported source_types: {supported}")
+    return normalized
+
+
 def parse_document(path: Path, *, source_type: str | None = None) -> ParsedDocument:
-    normalized_type = (source_type or "").strip().lower()
-    parser = SOURCE_TYPE_PARSERS.get(normalized_type) or DEFAULT_PARSERS.get(path.suffix.lower(), TextParser())
+    if source_type is not None:
+        normalized_type = validate_source_type(source_type)
+        parser = SOURCE_TYPE_PARSERS[normalized_type]
+    else:
+        parser = DEFAULT_PARSERS.get(path.suffix.lower(), TextParser())
     return parser.parse(path)
 
 
@@ -53,6 +77,7 @@ class IngestService:
         self.source_repository = source_repository or SourceRepository()
 
     def import_file(self, settings, conn, *, workspace_slug: str, path: Path, source_type: str) -> ImportResult:
+        source_type = validate_source_type(source_type, supported_types=_supported_source_types(settings))
         path = path.expanduser().resolve()
         raw_dir = settings.root / "var" / "raw" / source_type
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +117,7 @@ class IngestService:
         )
 
     def import_text(self, settings, conn, *, workspace_slug: str, text: str, title: str, source_type: str) -> ImportResult:
+        source_type = validate_source_type(source_type, supported_types=_supported_source_types(settings))
         safe_title = title.strip() or "inline-source"
         raw_dir = settings.root / "var" / "raw" / source_type
         raw_dir.mkdir(parents=True, exist_ok=True)

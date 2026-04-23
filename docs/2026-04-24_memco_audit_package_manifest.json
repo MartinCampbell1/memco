@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-04-24",
+  "project_root": "/Users/martin/memco",
+  "status": "historical pre-remediation audit baseline, not current release verdict",
+  "current_release_closure": "docs/2026-04-24_memco_release_closure.md",
+  "current_private_verdict": "GO",
+  "audit_scope": "pre-remediation dirty checkout",
+  "verdict": {
+    "summary": "historical pre-remediation NO-GO baseline",
+    "core_private_loop": "materially implemented and locally testable with caution",
+    "single_user_scope": "public SaaS registration, billing, public profiles, and org/team UX are not required",
+    "strict_original_brief": "NO-GO/reference-track until Docker Compose wording is explicitly waived or superseded, and current notes-path drift is fixed"
+  },
+  "entrypoints": {
+    "read_first": "docs/2026-04-24_memco_release_closure.md",
+    "pre_remediation_audit_index": "docs/2026-04-24_memco_audit_package_index.md",
+    "owner_summary_ru": "docs/2026-04-24_memco_final_release_audit_ru.md",
+    "compliance_matrix": "docs/2026-04-24_memco_contract_compliance_matrix.md",
+    "full_audit": "docs/2026-04-24_memco_final_release_audit.md",
+    "evidence_appendix": "docs/2026-04-24_memco_audit_evidence_appendix.md",
+    "remediation_plan": "docs/2026-04-24_memco_release_remediation_plan.md",
+    "ticket_pack": "docs/2026-04-24_memco_blocker_ticket_pack.md",
+    "docs_status_map": "docs/2026-04-24_memco_docs_status_map.md",
+    "integrity_check": "docs/2026-04-24_memco_audit_package_integrity.md",
+    "privacy_secret_scan": "docs/2026-04-24_memco_privacy_secret_scan.md"
+  },
+  "current_p0_blockers": [
+    {
+      "id": "P0-implementation-notes-path",
+      "summary": "Root IMPLEMENTATION_NOTES.md is deleted while docs/tests still require it",
+      "evidence": "uv run pytest -q -> 2 failed, 345 passed",
+      "ticket": "Ticket 1"
+    },
+    {
+      "id": "P0-release-readiness-red",
+      "summary": "release-readiness-check is red for the current shell/checkout",
+      "evidence": "ok=false; runtime_policy missing api_key; pytest_gate false; live smoke skipped",
+      "ticket": "Ticket 5"
+    },
+    {
+      "id": "P0-live-provider-env-missing",
+      "summary": "Live provider credentials are absent in the current shell",
+      "evidence": "runtime_policy.reason=openai-compatible provider is missing api_key",
+      "ticket": "Ticket 5"
+    },
+    {
+      "id": "P0-stale-green-artifacts",
+      "summary": "Existing green var/reports artifacts are stale relative to the current dirty checkout",
+      "evidence": "evaluate_artifact_freshness -> current_for_checkout_config=false",
+      "ticket": "Ticket 0"
+    },
+    {
+      "id": "P0-api-actor-credential-instability",
+      "summary": "API actor policies are generated with random tokens when raw config lacks persisted api.actor_policies",
+      "evidence": "tokens_stable_between_loads all false; prior-load actor returns 403",
+      "ticket": "Ticket 2"
+    }
+  ],
+  "current_p1_blockers": [
+    {
+      "id": "P1-http-docs-omit-actor",
+      "summary": "README HTTP ingest examples omit required actor payload",
+      "ticket": "Ticket 3"
+    },
+    {
+      "id": "P1-stale-docs-can-mislead",
+      "summary": "Historical plans and status snapshots can be misread as current GO proof",
+      "ticket": "Ticket 4"
+    }
+  ],
+  "accepted_non_blockers_for_private_use": [
+    "public registration",
+    "public profile management",
+    "billing",
+    "org/team management",
+    "public SaaS onboarding",
+    "broad multi-user UX",
+    "WhatsApp/Telegram parsers unless explicitly pulled into current scope",
+    "Docker Compose day-to-day workflow under the accepted no-Docker local contract"
+  ],
+  "minimum_go_criteria": [
+    "uv run pytest -q is green",
+    "root/docs IMPLEMENTATION_NOTES.md canonical path mismatch is resolved",
+    "API actor credentials are stable across settings loads/processes",
+    "HTTP examples include required actor payloads",
+    "historical/stale docs are clearly marked or refreshed",
+    "operator-preflight is green with live provider env",
+    "release-readiness-check returns ok=true with live smoke",
+    "artifact freshness reports current_for_checkout_config=true"
+  ],
+  "do_not_claim_go_from": [
+    "focused green core subset alone",
+    "fixture eval 27/27 alone",
+    "old var/reports/*current* artifacts without freshness validation",
+    "quick release-check without release-readiness-check live smoke",
+    "historical GO wording in dated docs"
+  ],
+  "audit_files": [
+    "docs/2026-04-24_memco_audit_package_manifest.json",
+    "docs/2026-04-24_memco_audit_package_integrity.md",
+    "docs/2026-04-24_memco_audit_package_index.md",
+    "docs/2026-04-24_memco_privacy_secret_scan.md",
+    "docs/2026-04-24_memco_final_release_audit_ru.md",
+    "docs/2026-04-24_memco_contract_compliance_matrix.md",
+    "docs/2026-04-24_memco_final_release_audit.md",
+    "docs/2026-04-24_memco_audit_evidence_appendix.md",
+    "docs/2026-04-24_memco_release_remediation_plan.md",
+    "docs/2026-04-24_memco_blocker_ticket_pack.md",
+    "docs/2026-04-24_memco_docs_status_map.md"
+  ]
+}

@@ -1,11 +1,17 @@
 # Memco Repo-Local Status Snapshot
 
-Date: 2026-04-22
+Date: 2026-04-23
+Last refreshed on `main`: `17e1a7d` (`Merge pull request #5 from MartinCampbell1/codex/memco-node24-native-actions`)
 Status: repo-local status snapshot
+Status note: historical repo-local status snapshot, not current release verdict.
+Current verdict lives in docs/2026-04-24_memco_release_closure.md and the active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
+This snapshot records a prior operator environment; do not use its green claims as fresh proof without artifact freshness validation.
 
 ## Active Contract
 
 Active repo-local contract status: `GO`
+
+Scope: local/private/operator-controlled/review-gated persona memory. This snapshot must not be used as a universal memory substrate, fully autonomous production memory, or public SaaS readiness claim.
 
 Controlling contract:
 
@@ -20,26 +26,35 @@ Separate reference-track status:
 
 Full suite:
 
-- `uv run pytest -q` -> `321 passed in 9.57s`
+- `uv run pytest -q` -> `347 passed`
 
 Repo-local release gate:
 
-- `uv run memco release-check --project-root /Users/martin/memco` -> `ok: true`
-- pytest gate inside release-check -> `47 passed`
-- acceptance artifact -> `27/27 passed`
-- temporary acceptance root intentionally uses SQLite fallback when no local runtime config exists there
+- plain checkout shell without injected live provider creds:
+  - `uv run memco release-check --project-root /Users/martin/memco` -> `ok: false`
+  - `runtime_policy.reason` -> `openai-compatible provider is missing api_key`
+- green operator path with live creds injected into the local shell:
+  - saved artifact `var/reports/release-check-current.json` -> `ok: true`
+  - pytest gate inside release-check -> `52 passed`
+  - acceptance artifact -> `27/27 passed`
+  - temporary acceptance root intentionally uses SQLite fallback when no local runtime config exists there
+- release-grade claim:
+  - `MEMCO_RUN_LIVE_SMOKE=1 ... uv run memco release-readiness-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'` -> `ok: true`
+  - requires canonical Postgres, strict benchmark thresholds, operator-readiness pass rate, and live operator smoke
 
 Contract-facing regression stack:
 
-- `uv run pytest -q tests/test_docs_contract.py tests/test_release_check.py tests/test_cli_release_check.py tests/test_config.py tests/test_llm_provider.py` -> `74 passed in 4.45s`
+- `uv run pytest -q tests/test_docs_contract.py tests/test_release_check.py tests/test_cli_release_check.py tests/test_config.py tests/test_llm_provider.py` -> `87 passed`
 
 Optional no-Docker Postgres variant:
 
-- `uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'` -> `ok: true`
+- env-injected live operator path against local `codex-lb` (`http://127.0.0.1:2455/v1`):
+  - `uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'` -> `ok: true`
 - postgres smoke -> `ok: true`
 - `MEMCO_RUN_LIVE_SMOKE=1 ... uv run memco release-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'` -> `ok: true`
 - operator safety gate -> `ok: true`
 - live operator smoke -> `ok: true`
+- current tracked CI baseline on `main` uses Node 24-native GitHub Actions versions
 
 ## Persisted Artifacts
 
@@ -49,6 +64,9 @@ Optional no-Docker Postgres variant:
   - `var/reports/release-check-postgres-current.json`
 - live operator smoke artifact:
   - `var/reports/live-operator-smoke-current.json`
+- artifact semantics:
+  - release artifacts include generation timestamp, runtime mode, config source, env override state, live-smoke state, and checkout/config freshness context
+  - historical artifacts without this context should be treated as legacy/unknown, not current release proof
 - machine-readable local status snapshot:
   - `var/reports/repo-local-status-current.json`
   - mirrors the current branch, remote, contract split, and latest validation counts
@@ -123,5 +141,8 @@ Local-only operator artifact:
 cd /Users/martin/memco
 uv run pytest -q
 uv run memco release-check --project-root /Users/martin/memco
+MEMCO_RUN_LIVE_SMOKE=1 uv run memco release-readiness-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://martin@127.0.0.1:5432/postgres'
 uv run memco local-artifacts-refresh --project-root /Users/martin/memco
 ```
+
+Inject live provider env before expecting `release-check` to return `ok: true`.

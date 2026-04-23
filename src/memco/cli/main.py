@@ -37,7 +37,8 @@ from memco.repositories.retrieval_log_repository import RetrievalLogRepository
 from memco.postgres_smoke import run_postgres_smoke
 from memco.postgres_admin import ensure_postgres_database
 from memco.local_artifacts import refresh_local_artifacts
-from memco.release_check import resolve_repo_project_root, run_release_check, run_strict_release_check
+from memco.operator_preflight import run_operator_preflight
+from memco.release_check import resolve_repo_project_root, run_release_check, run_release_readiness_check, run_strict_release_check
 from memco.services.pipeline_service import IngestPipelineService
 
 app = typer.Typer(help="Memco structured persona-memory CLI.")
@@ -1295,6 +1296,61 @@ def strict_release_check_command(
         postgres_database_url=postgres_database_url,
         postgres_root=postgres_root,
         postgres_port=postgres_port,
+    )
+    _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command(
+    "release-readiness-check",
+    help="Run the release-grade gate. This requires canonical Postgres, strict benchmark thresholds, and live operator smoke.",
+)
+def release_readiness_check_command(
+    root: str | None = typer.Option(None, help="Temporary runtime root for the eval fixture run."),
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    postgres_database_url: str | None = typer.Option(
+        None,
+        help="Required Postgres maintenance URL for the release-grade gate.",
+    ),
+    postgres_port: int | None = typer.Option(None, help="Optional port for the temporary Postgres smoke API run."),
+    output: str | None = typer.Option(None, help="Optional file path to save the release-grade artifact JSON."),
+) -> None:
+    if not postgres_database_url:
+        raise typer.BadParameter("--postgres-database-url is required for release-readiness-check")
+    eval_root = Path(root).expanduser().resolve() if root else None
+    resolved_project_root = _project_root(project_root)
+    postgres_root = None
+    if eval_root is not None:
+        postgres_root = eval_root.parent / f"{eval_root.name}-postgres-smoke"
+    result = run_release_readiness_check(
+        project_root=resolved_project_root,
+        eval_root=eval_root,
+        postgres_database_url=postgres_database_url,
+        postgres_root=postgres_root,
+        postgres_port=postgres_port,
+    )
+    _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command(
+    "operator-preflight",
+    help="Check the operator-configured runtime before release-grade validation.",
+)
+def operator_preflight_command(
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    postgres_database_url: str | None = typer.Option(
+        None,
+        help="Optional Postgres URL to check instead of the configured runtime database URL.",
+    ),
+    output: str | None = typer.Option(None, help="Optional file path to save the preflight artifact JSON."),
+) -> None:
+    resolved_project_root = _project_root(project_root)
+    result = run_operator_preflight(
+        project_root=resolved_project_root,
+        postgres_database_url=postgres_database_url,
     )
     _emit_json_artifact(result, output=output)
     if not result["ok"]:

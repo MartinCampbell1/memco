@@ -1,12 +1,12 @@
 # Memco
 
-Memco is currently a local-first persona-memory system with evidence-first retrieval, a strong private single-user path, and a verified no-Docker Postgres runtime path on this machine.
+Memco is currently a local, private, operator-controlled, review-gated persona-memory system with evidence-first retrieval and a verified no-Docker Postgres runtime path on this machine.
 
 ## Current Product Contract
 
 This repository should be read as:
 
-- a local-first persona-memory system with a fully working private/operator path
+- a local-first persona-memory system with a working private, operator-controlled, review-gated path
 - a real memory loop that can import conversation-like sources, extract candidates, publish facts, retrieve supported facts, refuse unsupported claims, and roll back fact lifecycle operations
 
 This repository should not be read as:
@@ -18,9 +18,12 @@ This repository should not be read as:
 
 The current honest status is:
 
-- usable for a technical private owner/operator
+- usable as a local private operator-controlled memory lifecycle for a technical owner/operator once local live-provider credentials are supplied
 - has a verified no-Docker Postgres operating path on this machine
-- should still be treated as `private release = GO` and `strict original-brief readiness = not yet a clean yes` while the original brief still names Docker Compose explicitly
+- private release claim requires a fresh `release-readiness-check` artifact with live smoke
+- strict original-brief readiness is still not a clean yes while the original brief still names Docker Compose explicitly
+
+No release claim in this repository should be read as a universal memory substrate or fully autonomous production memory. The supported scope is local/private/operator-controlled/review-gated unless a future contract explicitly says otherwise.
 
 Current repo-local ingestion scope:
 
@@ -54,6 +57,7 @@ Read that file together with [docs/synthius_mem_execution_brief.md](docs/synthiu
 The explicit contract decision for current repo-local work lives in [docs/2026-04-22_memco_contract_decision.md](docs/2026-04-22_memco_contract_decision.md).
 The original execution brief is kept as a reference/backlog-only track for current repo-local release management, documented in [docs/2026-04-22_memco_original_brief_track_decision.md](docs/2026-04-22_memco_original_brief_track_decision.md).
 The fastest repo-local status summary now lives in [docs/2026-04-22_memco_repo_local_status_snapshot.md](docs/2026-04-22_memco_repo_local_status_snapshot.md).
+The current private release closure lives in [docs/2026-04-24_memco_release_closure.md](docs/2026-04-24_memco_release_closure.md).
 
 ## Single-User Setup And Use
 
@@ -122,16 +126,25 @@ That one command:
 
 There is now a matching HTTP path for the same one-shot load:
 
+HTTP API routes require both the shared API token and an `actor` payload. Read the real local values from the ignored `var/config/settings.yaml` runtime config: `api.auth_token` for `X-Memco-Token`, and `api.actor_policies.dev-owner.auth_token` for the owner actor block. Do not commit those local token values.
+
 ```bash
 curl -sS http://127.0.0.1:8788/v1/ingest/pipeline \
   -H 'Content-Type: application/json' \
+  -H 'X-Memco-Token: replace-with-local-token' \
   -d '{
     "workspace": "default",
     "path": "/absolute/path/to/conversation.json",
     "source_type": "json",
     "person_display_name": "Alice",
     "person_slug": "alice",
-    "aliases": ["Alice"]
+    "aliases": ["Alice"],
+    "actor": {
+      "actor_id": "dev-owner",
+      "actor_type": "owner",
+      "auth_token": "from local ignored var/config/settings.yaml actor_policies",
+      "can_view_sensitive": true
+    }
   }'
 ```
 
@@ -140,15 +153,22 @@ If you prefer inline text instead of a file path:
 ```bash
 curl -sS http://127.0.0.1:8788/v1/ingest/pipeline \
   -H 'Content-Type: application/json' \
+  -H 'X-Memco-Token: replace-with-local-token' \
   -d '{
     "workspace": "default",
     "text": "Alice: I moved to Lisbon.",
     "source_type": "text",
-    "title": "inline-seed"
+    "title": "inline-seed",
+    "actor": {
+      "actor_id": "dev-owner",
+      "actor_type": "owner",
+      "auth_token": "from local ignored var/config/settings.yaml actor_policies",
+      "can_view_sensitive": true
+    }
   }'
 ```
 
-For `chat` and `retrieve`, the API still requires an `actor` block even in private mode.
+For `ingest/pipeline`, `chat`, and `retrieve`, the API still requires an `actor` block even in private mode.
 
 If you want narrower answer/retrieval surfaces for agents or operator tooling, `retrieve`, `chat`, and persona export now also accept a detail policy:
 
@@ -185,6 +205,10 @@ To persist the gate artifact directly to disk:
 uv run memco release-check --output /absolute/path/to/release-check.json
 ```
 
+Both `release-check` entrypoints are intentionally fail-closed on incomplete live-provider config.
+If `MEMCO_LLM_API_KEY` or the provider base URL is missing, expect `runtime_policy.ok = false` instead of a misleading green result.
+The green repo-local artifacts under `var/reports/` come from the same commands run with live provider credentials injected into the local operator shell.
+
 If you want the canonical Postgres gate instead of the quick local fallback path:
 
 ```bash
@@ -211,6 +235,19 @@ uv run memco strict-release-check --postgres-database-url 'postgresql://USER@127
 ```
 
 That strict variant keeps the canonical Postgres gate and adds the benchmark artifact with enforced quality thresholds.
+
+For the release-grade claim, use the gate that requires canonical Postgres, benchmark thresholds, operator-readiness, and live operator smoke in one path:
+
+```bash
+MEMCO_RUN_LIVE_SMOKE=1 \
+MEMCO_API_TOKEN='replace-with-local-token' \
+MEMCO_LLM_API_KEY='replace-with-provider-key' \
+uv run memco release-readiness-check \
+  --project-root /Users/martin/memco \
+  --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
+```
+
+`release-check` and `strict-release-check` remain useful development/quality gates. They are not by themselves a final local private operator-controlled release claim when live smoke is skipped.
 
 In this checkout, the latest persisted repo-local gate artifacts are typically kept under `var/reports/`, for example:
 

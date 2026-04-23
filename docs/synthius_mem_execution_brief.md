@@ -28,7 +28,7 @@ The original brief remains the architecture/reference document and the source of
 
 Memco currently follows a two-stage repo-local contract:
 
-1. Stage A: honest private single-user release
+1. Stage A: honest local private operator-controlled review-gated single-user release
 2. Stage B: convergence toward broad brief alignment without forcing Docker into the accepted local workflow on this machine
 
 This means:
@@ -55,7 +55,7 @@ Important:
 
 ## Stage A Scope
 
-Stage A is the honest private release.
+Stage A is the honest local private operator-controlled review-gated release.
 
 Stage A requires:
 
@@ -69,6 +69,7 @@ Stage A requires:
 - rollback correctness
 - regression coverage
 - documentation honesty
+- release-grade proof through canonical Postgres, operator-readiness, and live operator smoke before final release claims
 
 Stage A ingestion scope:
 
@@ -102,7 +103,7 @@ Stage B does not require Docker as part of the accepted day-to-day workflow on t
 
 As of this brief:
 
-- Stage A private release: green
+- Stage A local private operator-controlled release: green
 - no-Docker Postgres operational path: green
 - strict original-brief completion: still a separate question, documented as `NO-GO` in the release gate until the original Docker wording is explicitly superseded or accepted as waived
 
@@ -111,7 +112,7 @@ As of this brief:
 If the question is:
 
 - `Is Memco usable today by a private owner/operator?`
-  - answer: `yes`
+  - answer: `yes, within the local/private/operator-controlled/review-gated scope`
 
 - `Can Memco run on Postgres today on this machine without Docker?`
   - answer: `yes`

@@ -427,6 +427,7 @@ class EvalService:
         "temporal_update",
         "cross_person_contamination",
         "unsupported_premise",
+        "contradicted_premise",
         "review_queue_behavior",
     }
     BENCHMARK_SETS = {
@@ -1205,6 +1206,7 @@ class EvalService:
                 answer = self.refusal_service.build_answer(query=case.query, retrieval_result=retrieval)
                 combined_text = self._combined_case_text(answer=answer, retrieval=retrieval)
                 evidence_count = sum(len(hit.evidence) for hit in retrieval.hits)
+                answer_evidence_ids = list(answer.get("evidence_ids", []))
                 failures: list[str] = []
                 if answer["refused"] != case.expect_refused:
                     failures.append("refusal_mismatch")
@@ -1214,6 +1216,13 @@ class EvalService:
                     failures.append("hit_count_mismatch")
                 if case.expected_evidence_count_min is not None and evidence_count < case.expected_evidence_count_min:
                     failures.append("evidence_count_too_low")
+                if (
+                    case.group in self.OPERATOR_READINESS_CASE_GROUPS
+                    and not case.expect_refused
+                    and case.expected_support_level in {"supported", "partial"}
+                    and not answer_evidence_ids
+                ):
+                    failures.append("answer_evidence_ids_missing")
                 if (
                     case.expected_pending_review_count_min is not None
                     and pending_review_count < case.expected_pending_review_count_min
@@ -1251,7 +1260,7 @@ class EvalService:
                         "pending_review_count": pending_review_count,
                         "answer": answer["answer"],
                         "answer_fact_ids": list(answer.get("fact_ids", [])),
-                        "answer_evidence_ids": list(answer.get("evidence_ids", [])),
+                        "answer_evidence_ids": answer_evidence_ids,
                         }
                 )
 
@@ -1406,6 +1415,15 @@ class EvalService:
         metrics = self._build_common_metrics(results=results, start_event_index=start_event_index)
         benchmark_sets = self._benchmark_set_reports(results=results)
         operator_readiness_passed = sum(1 for item in operator_results if item["passed"])
+        operator_readiness_failures = [
+            {
+                "name": item["name"],
+                "group": item["group"],
+                "failures": item["failures"],
+            }
+            for item in operator_results
+            if not item["passed"]
+        ]
         token_accounting_by_stage = self._token_accounting_by_stage(start_event_index=start_event_index)
         unsupported_premise_supported_count = sum(
             1
@@ -1443,6 +1461,8 @@ class EvalService:
                 "total": len(operator_results),
                 "passed": operator_readiness_passed,
                 "groups": sorted(self.OPERATOR_READINESS_CASE_GROUPS),
+                "case_names": [item["name"] for item in operator_results],
+                "failures": operator_readiness_failures,
             },
             "benchmark_thresholds": {
                 "core_memory_accuracy_min": 0.9,

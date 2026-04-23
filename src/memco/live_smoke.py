@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from memco.api.deps import build_internal_actor
-from memco.config import Settings, write_settings
+from memco.config import Settings, load_settings, write_settings
 from memco.postgres_admin import drop_postgres_database, ensure_postgres_database
 from memco.runtime import ensure_runtime
 
@@ -135,11 +135,12 @@ def run_live_operator_smoke(
     port: int | None = None,
     output_path: Path | None = None,
 ) -> dict[str, Any]:
-    provider = os.environ.get("MEMCO_LLM_PROVIDER", "").strip() or "openai-compatible"
-    model = os.environ.get("MEMCO_LLM_MODEL", "").strip() or "gpt-4o-mini"
-    base_url = os.environ.get("MEMCO_LLM_BASE_URL", "").strip()
-    api_key = os.environ.get("MEMCO_LLM_API_KEY", "").strip()
-    api_token = os.environ.get("MEMCO_API_TOKEN", "").strip() or "memco-live-smoke-token"
+    project_settings = load_settings(project_root)
+    provider = os.environ.get("MEMCO_LLM_PROVIDER", "").strip() or project_settings.llm.provider or "openai-compatible"
+    model = os.environ.get("MEMCO_LLM_MODEL", "").strip() or project_settings.llm.model or "gpt-4o-mini"
+    base_url = os.environ.get("MEMCO_LLM_BASE_URL", "").strip() or project_settings.llm.base_url.strip()
+    api_key = os.environ.get("MEMCO_LLM_API_KEY", "").strip() or project_settings.llm.api_key.strip()
+    api_token = os.environ.get("MEMCO_API_TOKEN", "").strip() or project_settings.api.auth_token.strip() or "memco-live-smoke-token"
     if not base_url:
         raise ValueError("MEMCO_LLM_BASE_URL is required for live smoke")
     if not api_key:

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from memco.artifact_semantics import attach_artifact_context
 from memco.config import load_settings, write_settings
 from memco.live_smoke import run_live_operator_smoke
-from memco.llm import llm_runtime_policy
+from memco.llm import llm_runtime_status
 from memco.postgres_smoke import run_postgres_smoke
 from memco.runtime import ensure_runtime
 from memco.services.eval_service import EvalService
@@ -73,12 +75,14 @@ def _run_pytest_gate(*, project_root: Path) -> dict:
 
 def _run_runtime_policy_gate(*, project_root: Path) -> dict:
     settings = load_settings(project_root)
-    policy = llm_runtime_policy(settings)
+    status = llm_runtime_status(settings)
+    policy = status["operator_runtime_status"]
     return {
         "name": "runtime_policy",
         "ok": policy["release_eligible"],
         "root": str(project_root),
         "config_path": str(settings.config_path),
+        **status,
         **policy,
     }
 
@@ -224,6 +228,7 @@ def _run_live_smoke_gate(
     database_url: str,
     live_smoke_root: Path,
     output_path: Path | None = None,
+    live_smoke_required: bool = False,
 ) -> dict:
     result = run_live_operator_smoke(
         maintenance_database_url=database_url,
@@ -231,6 +236,16 @@ def _run_live_smoke_gate(
         project_root=project_root,
         output_path=output_path,
     )
+    attach_artifact_context(
+        result,
+        project_root=project_root,
+        steps=[{"name": "live_operator_smoke", "ok": result["ok"], "artifact_path": result.get("artifact_path")}],
+        live_smoke_requested=True,
+        live_smoke_required=live_smoke_required,
+    )
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "name": "live_operator_smoke",
         "ok": result["ok"],
@@ -242,6 +257,8 @@ def _run_live_smoke_gate(
         "artifact_path": result.get("artifact_path"),
         "artifact_summary": {
             "artifact_type": result["artifact_type"],
+            "generated_at": result["generated_at"],
+            "artifact_context": result["artifact_context"],
             "failures": result["failures"],
             "steps": result["steps"],
         },
@@ -336,6 +353,7 @@ def run_release_check(
     postgres_database_url: str | None = None,
     postgres_root: Path | None = None,
     postgres_port: int | None = None,
+    include_live_smoke: bool | None = None,
 ) -> dict:
     if not include_pytest and not include_eval and not postgres_database_url:
         raise ValueError("run_release_check requires at least one enabled step")
@@ -343,6 +361,7 @@ def run_release_check(
         raise ValueError("canonical postgres release-check requires both pytest and eval steps")
 
     steps: list[dict] = []
+    live_smoke_requested = False
     runtime_step = _run_runtime_policy_gate(project_root=project_root)
     steps.append(runtime_step)
     ok = runtime_step["ok"]
@@ -413,7 +432,8 @@ def run_release_check(
         steps.append(postgres_step)
         ok = ok and postgres_step["ok"]
 
-        if _live_smoke_requested():
+        live_smoke_requested = _live_smoke_requested() if include_live_smoke is None else include_live_smoke
+        if live_smoke_requested:
             output_path = project_root / "var" / "reports" / "live-operator-smoke-current.json"
             if ok:
                 with TemporaryDirectory(prefix="memco-live-operator-smoke-") as tmpdir:
@@ -422,6 +442,7 @@ def run_release_check(
                         database_url=postgres_database_url,
                         live_smoke_root=Path(tmpdir),
                         output_path=output_path,
+                        live_smoke_required=False,
                     )
             else:
                 live_smoke_step = {
@@ -433,7 +454,7 @@ def run_release_check(
             steps.append(live_smoke_step)
             ok = ok and live_smoke_step["ok"]
 
-    return {
+    payload = {
         "artifact_type": "canonical_postgres_release_check" if postgres_database_url else "repo_local_release_check",
         "ok": ok,
         "gate_type": "canonical-postgres" if postgres_database_url else "quick-repo-local",
@@ -443,6 +464,13 @@ def run_release_check(
         "project_root": str(project_root),
         "steps": steps,
     }
+    return attach_artifact_context(
+        payload,
+        project_root=project_root,
+        steps=steps,
+        live_smoke_requested=live_smoke_requested,
+        live_smoke_required=False,
+    )
 
 
 def run_strict_release_check(
@@ -452,6 +480,7 @@ def run_strict_release_check(
     postgres_database_url: str,
     postgres_root: Path | None = None,
     postgres_port: int | None = None,
+    include_live_smoke: bool | None = None,
 ) -> dict:
     if not postgres_database_url:
         raise ValueError("strict release-check requires postgres_database_url")
@@ -463,6 +492,7 @@ def run_strict_release_check(
                 postgres_database_url=postgres_database_url,
                 postgres_root=postgres_root,
                 postgres_port=postgres_port,
+                include_live_smoke=include_live_smoke,
             )
 
     eval_root.mkdir(parents=True, exist_ok=True)
@@ -474,6 +504,7 @@ def run_strict_release_check(
         postgres_database_url=postgres_database_url,
         postgres_root=postgres_root,
         postgres_port=postgres_port,
+        include_live_smoke=include_live_smoke,
     )
     steps = list(release_artifact["steps"])
     ok = release_artifact["ok"]
@@ -493,7 +524,8 @@ def run_strict_release_check(
         }
     steps.append(benchmark_step)
     ok = ok and benchmark_step["ok"]
-    return {
+    live_smoke_requested = bool((release_artifact.get("artifact_context") or {}).get("live_smoke", {}).get("requested"))
+    payload = {
         "artifact_type": "strict_quality_release_check",
         "ok": ok,
         "gate_type": "strict-quality",
@@ -503,3 +535,135 @@ def run_strict_release_check(
         "project_root": str(project_root),
         "steps": steps,
     }
+    return attach_artifact_context(
+        payload,
+        project_root=project_root,
+        steps=steps,
+        live_smoke_requested=live_smoke_requested,
+        live_smoke_required=False,
+    )
+
+
+def run_release_readiness_check(
+    *,
+    project_root: Path,
+    eval_root: Path | None = None,
+    postgres_database_url: str,
+    postgres_root: Path | None = None,
+    postgres_port: int | None = None,
+) -> dict:
+    if not postgres_database_url:
+        raise ValueError("release-readiness-check requires postgres_database_url")
+    if eval_root is None:
+        with TemporaryDirectory(prefix="memco-release-readiness-check-") as tmpdir:
+            return run_release_readiness_check(
+                project_root=project_root,
+                eval_root=Path(tmpdir),
+                postgres_database_url=postgres_database_url,
+                postgres_root=postgres_root,
+                postgres_port=postgres_port,
+            )
+
+    release_artifact = run_strict_release_check(
+        project_root=project_root,
+        eval_root=eval_root,
+        postgres_database_url=postgres_database_url,
+        postgres_root=postgres_root,
+        postgres_port=postgres_port,
+        include_live_smoke=False,
+    )
+    steps = list(release_artifact["steps"])
+    ok = release_artifact["ok"]
+    live_smoke_requested = _live_smoke_requested()
+    if not live_smoke_requested:
+        live_smoke_step = {
+            "name": "live_operator_smoke",
+            "ok": False,
+            "required": True,
+            "skipped": True,
+            "reason": "live_smoke_required_for_release_claim",
+        }
+    elif ok:
+        output_path = project_root / "var" / "reports" / "live-operator-smoke-current.json"
+        with TemporaryDirectory(prefix="memco-live-operator-smoke-") as tmpdir:
+            live_smoke_step = _run_live_smoke_gate(
+                project_root=project_root,
+                database_url=postgres_database_url,
+                live_smoke_root=Path(tmpdir),
+                output_path=output_path,
+                live_smoke_required=True,
+            )
+        live_smoke_step["required"] = True
+    else:
+        live_smoke_step = {
+            "name": "live_operator_smoke",
+            "ok": False,
+            "required": True,
+            "skipped": True,
+            "reason": "prior_gate_failed",
+        }
+    steps.append(live_smoke_step)
+    ok = ok and live_smoke_step["ok"]
+    payload = {
+        "artifact_type": "release_readiness_check",
+        "ok": ok,
+        "gate_type": "release-grade",
+        "base_gate_type": release_artifact["gate_type"],
+        "benchmark_required": True,
+        "include_postgres_smoke": True,
+        "live_smoke_required": True,
+        "live_smoke_requested": live_smoke_requested,
+        "project_root": str(project_root),
+        "steps": steps,
+    }
+    return attach_artifact_context(
+        payload,
+        project_root=project_root,
+        steps=steps,
+        live_smoke_requested=live_smoke_requested,
+        live_smoke_required=True,
+    )
+
+
+def _main() -> int:
+    project_root = resolve_repo_project_root(Path(os.environ.get("MEMCO_PROJECT_ROOT", Path.cwd())).expanduser().resolve())
+    postgres_database_url = os.environ.get("MEMCO_POSTGRES_DATABASE_URL", "").strip() or None
+    output_path = os.environ.get("MEMCO_RELEASE_CHECK_OUTPUT", "").strip()
+    strict_requested = os.environ.get("MEMCO_STRICT_RELEASE_CHECK", "").strip().lower() in {"1", "true", "yes", "on"}
+    readiness_requested = os.environ.get("MEMCO_RELEASE_READINESS_CHECK", "").strip().lower() in {"1", "true", "yes", "on"}
+
+    if readiness_requested:
+        if not postgres_database_url:
+            raise ValueError("MEMCO_POSTGRES_DATABASE_URL is required for MEMCO_RELEASE_READINESS_CHECK=1")
+        result = run_release_readiness_check(
+            project_root=project_root,
+            postgres_database_url=postgres_database_url,
+        )
+    elif strict_requested:
+        if not postgres_database_url:
+            raise ValueError("MEMCO_POSTGRES_DATABASE_URL is required for MEMCO_STRICT_RELEASE_CHECK=1")
+        result = run_strict_release_check(
+            project_root=project_root,
+            postgres_database_url=postgres_database_url,
+        )
+    else:
+        result = run_release_check(
+            project_root=project_root,
+            include_eval=True,
+            postgres_database_url=postgres_database_url,
+        )
+
+    text = json.dumps(result, ensure_ascii=False, indent=2)
+    if output_path:
+        path = Path(output_path).expanduser().resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text + "\n", encoding="utf-8")
+        result["artifact_path"] = str(path)
+        text = json.dumps(result, ensure_ascii=False, indent=2)
+        path.write_text(text + "\n", encoding="utf-8")
+    print(text)
+    return 0 if result.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

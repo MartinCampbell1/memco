@@ -265,3 +265,112 @@ def test_cli_strict_release_check_requires_postgres_url(tmp_path):
     plain = _plain(result.output)
     assert "--postgres-database-url" in plain
     assert "required for strict-release-check" in plain
+
+
+def test_cli_release_readiness_check_wraps_runner(monkeypatch, tmp_path):
+    command = get_command(app)
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    def fake_run_release_readiness_check(
+        *,
+        project_root: Path,
+        eval_root: Path | None,
+        postgres_database_url: str,
+        postgres_root: Path | None,
+        postgres_port: int | None,
+    ):
+        captured["project_root"] = project_root
+        captured["eval_root"] = eval_root
+        captured["postgres_database_url"] = postgres_database_url
+        captured["postgres_root"] = postgres_root
+        captured["postgres_port"] = postgres_port
+        return {
+            "artifact_type": "release_readiness_check",
+            "ok": False,
+            "gate_type": "release-grade",
+            "live_smoke_required": True,
+            "steps": [{"name": "live_operator_smoke", "ok": False}],
+        }
+
+    monkeypatch.setattr("memco.cli.main.run_release_readiness_check", fake_run_release_readiness_check)
+    runtime_root = tmp_path / "release-readiness-runtime"
+    result = runner.invoke(
+        command,
+        [
+            "release-readiness-check",
+            "--root",
+            str(runtime_root),
+            "--postgres-database-url",
+            "postgresql://example/postgres",
+            "--postgres-port",
+            "8791",
+        ],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "release_readiness_check"
+    assert payload["gate_type"] == "release-grade"
+    assert payload["live_smoke_required"] is True
+    assert captured["project_root"] == Path.cwd().resolve()
+    assert captured["eval_root"] == runtime_root.resolve()
+    assert captured["postgres_database_url"] == "postgresql://example/postgres"
+    assert captured["postgres_root"] == runtime_root.resolve().parent / f"{runtime_root.resolve().name}-postgres-smoke"
+    assert captured["postgres_port"] == 8791
+
+
+def test_cli_release_readiness_check_requires_postgres_url(tmp_path):
+    command = get_command(app)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        command,
+        ["release-readiness-check"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code != 0
+    plain = _plain(result.output)
+    assert "--postgres-database-url" in plain
+    assert "release-readiness-check" in plain
+
+
+def test_cli_operator_preflight_wraps_runner(monkeypatch, tmp_path):
+    command = get_command(app)
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    def fake_run_operator_preflight(*, project_root: Path, postgres_database_url: str | None):
+        captured["project_root"] = project_root
+        captured["postgres_database_url"] = postgres_database_url
+        return {
+            "artifact_type": "operator_preflight",
+            "ok": True,
+            "steps": [{"name": "provider_reachability", "ok": True}],
+        }
+
+    monkeypatch.setattr("memco.cli.main.run_operator_preflight", fake_run_operator_preflight)
+    repo_root = _seed_repo_root(tmp_path / "repo")
+    output_path = tmp_path / "operator-preflight.json"
+    result = runner.invoke(
+        command,
+        [
+            "operator-preflight",
+            "--project-root",
+            str(repo_root),
+            "--postgres-database-url",
+            "postgresql://example/postgres",
+            "--output",
+            str(output_path),
+        ],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "operator_preflight"
+    assert payload["artifact_path"] == str(output_path.resolve())
+    assert captured["project_root"] == repo_root.resolve()
+    assert captured["postgres_database_url"] == "postgresql://example/postgres"

@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import stat
+
+import yaml
+
 from memco.config import PRIMARY_STORAGE_ENGINE, Settings, SQLITE_FALLBACK_ENGINE, load_settings, write_settings
 
 
@@ -27,6 +31,20 @@ def test_load_settings_accepts_env_overrides(tmp_path, monkeypatch):
     assert settings.storage.engine == "postgres"
     assert settings.storage.database_url == "postgresql://memco:memco@db:5432/memco"
     assert settings.runtime.profile == "fixture"
+
+
+def test_load_settings_can_ignore_env_overrides(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    root.mkdir(parents=True)
+    monkeypatch.setenv("MEMCO_ROOT", str(root))
+    monkeypatch.setenv("MEMCO_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("MEMCO_STORAGE_ENGINE", "sqlite")
+
+    settings = load_settings(apply_env=False)
+
+    assert settings.root == root.resolve()
+    assert settings.llm.api_key == ""
+    assert settings.storage.engine == "postgres"
 
 
 def test_write_settings_roundtrip(tmp_path):
@@ -119,6 +137,70 @@ def test_load_settings_preserves_explicit_mock_opt_in_from_config(tmp_path):
     assert loaded.llm.provider == "mock"
     assert loaded.llm.allow_mock_provider is True
     assert loaded.runtime.profile == "fixture"
+
+
+def test_load_settings_backfills_missing_actor_policies_without_persisting_env_overrides(tmp_path, monkeypatch):
+    root = tmp_path / "project"
+    config_path = root / "var" / "config" / "settings.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        "\n".join(
+            [
+                "api:",
+                "  auth_token: file-token",
+                "llm:",
+                "  provider: openai-compatible",
+                "  api_key: ''",
+                "storage:",
+                "  engine: sqlite",
+                "runtime:",
+                "  profile: fixture",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MEMCO_API_TOKEN", "env-token")
+    monkeypatch.setenv("MEMCO_LLM_API_KEY", "env-llm-key")
+
+    first = load_settings(root)
+    second = load_settings(root)
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert first.api.auth_token == "env-token"
+    assert second.api.auth_token == "env-token"
+    assert raw["api"]["auth_token"] == "file-token"
+    assert raw["llm"]["api_key"] == ""
+    assert set(raw["api"]["actor_policies"]) == {"system", "dev-owner", "maintenance-admin", "eval-runner"}
+    assert {
+        actor_id: first.api.actor_policies[actor_id].auth_token == second.api.actor_policies[actor_id].auth_token
+        for actor_id in first.api.actor_policies
+    } == {
+        "system": True,
+        "dev-owner": True,
+        "maintenance-admin": True,
+        "eval-runner": True,
+    }
+
+
+def test_settings_file_is_private_when_loaded_or_written(tmp_path):
+    root = tmp_path / "project"
+    settings = Settings(root=root)
+    settings.llm.api_key = "local-secret"
+
+    write_settings(settings)
+    config_path = root / "var" / "config" / "settings.yaml"
+
+    assert stat.S_IMODE(config_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+
+    config_path.chmod(0o644)
+    config_path.parent.chmod(0o755)
+    loaded = load_settings(root, apply_env=False)
+
+    assert loaded.llm.api_key == "local-secret"
+    assert stat.S_IMODE(config_path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
 
 def test_ingest_source_types_match_current_repo_local_contract(tmp_path):

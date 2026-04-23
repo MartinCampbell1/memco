@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from memco.api.deps import get_settings
 from memco.db import get_connection
-from memco.llm import llm_runtime_policy
+from memco.llm import llm_runtime_policy, llm_runtime_status
 
 router = APIRouter()
 
@@ -19,6 +19,7 @@ def health():
         fact_row = conn.execute("SELECT COUNT(*) AS count FROM memory_facts").fetchone()
     api_token_configured = bool((settings.api.auth_token or "").strip())
     backup_path = settings.backup_path
+    runtime_status = llm_runtime_status(settings)
     return {
         "ok": True,
         "root": str(settings.root),
@@ -32,6 +33,7 @@ def health():
         "backup_path": str(backup_path),
         "backup_path_exists": backup_path.exists(),
         "llm_runtime": llm_runtime_policy(settings),
+        "llm_runtime_status": runtime_status,
         "counts": {
             "workspaces": int(workspace_row["count"]),
             "sources": int(source_row["count"]),

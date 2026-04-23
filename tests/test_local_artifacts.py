@@ -40,6 +40,11 @@ def test_refresh_local_artifacts_writes_expected_reports(monkeypatch, tmp_path):
                     "ok": True,
                     "provider": "openai-compatible",
                     "runtime_profile": "repo-local",
+                    "checkout_status": {"release_eligible": False, "credentials_present": False},
+                    "operator_runtime_status": {"release_eligible": True, "credentials_present": True},
+                    "env_overrides": {"used": True, "present_keys": ["MEMCO_LLM_API_KEY"], "live_credentials_present": True},
+                    "config_only_red_operator_green": True,
+                    "status_source": "env-injected",
                 },
                 {
                     "name": "pytest_gate",
@@ -127,19 +132,38 @@ def test_refresh_local_artifacts_writes_expected_reports(monkeypatch, tmp_path):
     assert result["summaries"]["strict_release_check_gate_type"] == "strict-quality"
     assert result["summaries"]["benchmark_core_memory_accuracy"] == 1.0
     assert result["summaries"]["live_operator_smoke_ok"] is True
+    assert result["summaries"]["live_operator_smoke_current"] is False
+    assert result["generated_at"]
+    assert result["artifact_context"]["runtime_mode"] == "repo-local"
     assert release["artifact_path"].endswith("release-check-current.json")
+    assert release["generated_at"]
+    assert release["artifact_context"]["runtime_mode"] == "repo-local"
+    assert release["artifact_context"]["status_source"] == "config-only"
     assert release_pg["artifact_path"].endswith("release-check-postgres-current.json")
+    assert release_pg["artifact_context"]["config_source"]["exists"] is False
     assert strict_release["artifact_path"].endswith("strict-release-check-current.json")
+    assert strict_release["artifact_context"]["live_smoke"]["requested"] is False
     assert benchmark["artifact_path"].endswith("benchmark-current.json")
+    assert benchmark["artifact_context"]["runtime_mode"] == "repo-local"
     assert status["validation"]["full_suite"] == "262 passed in 5.00s"
     assert status["validation"]["contract_stack"] == "46 passed in 0.50s"
     assert status["validation"]["release_check"]["gate_type"] == "quick-repo-local"
+    assert status["validation"]["release_check"]["checkout_release_eligible"] is False
+    assert status["validation"]["release_check"]["operator_release_eligible"] is True
+    assert status["validation"]["release_check"]["env_overrides_used"] is True
+    assert status["validation"]["release_check"]["status_source"] == "env-injected"
+    assert status["validation"]["release_check"]["artifact_freshness"]["current_for_checkout_config"] is True
     assert status["validation"]["release_check_postgres"]["gate_type"] == "canonical-postgres"
+    assert status["validation"]["release_check_postgres"]["artifact_freshness"]["current_for_checkout_config"] is True
     assert status["validation"]["strict_release_check"]["gate_type"] == "strict-quality"
+    assert status["validation"]["strict_release_check"]["artifact_freshness"]["current_for_checkout_config"] is True
     assert status["validation"]["benchmark"]["core_memory_accuracy"] == 1.0
+    assert status["validation"]["benchmark"]["artifact_freshness"]["current_for_checkout_config"] is True
     assert status["validation"]["live_operator_smoke"]["ok"] is True
     assert status["validation"]["live_operator_smoke"]["published_total"] == 10
+    assert status["validation"]["live_operator_smoke"]["artifact_freshness"]["status"] == "unknown_legacy_artifact"
     assert status["change_groups_artifact"].endswith("change-groups-current.json")
+    assert status["artifact_context"]["freshness"]["status"] == "current_at_generation"
     grouped_paths = {path for items in groups["groups"].values() for path in items}
     assert "README.md" in grouped_paths
     assert "src/memco/api/routes/export.py" in grouped_paths
@@ -227,3 +251,58 @@ def test_refresh_local_artifacts_clears_live_smoke_env(monkeypatch, tmp_path):
     )
 
     assert os.environ.get("MEMCO_RUN_LIVE_SMOKE") == "1"
+
+
+def test_refresh_local_artifacts_reports_strict_gate_without_benchmark_summary(monkeypatch, tmp_path):
+    project_root = tmp_path / "memco"
+    reports_dir = project_root / "var" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    def fake_run_release_check(*, project_root, include_eval, postgres_database_url=None):
+        artifact = {
+            "artifact_type": "canonical_postgres_release_check" if postgres_database_url else "repo_local_release_check",
+            "ok": True,
+            "gate_type": "canonical-postgres" if postgres_database_url else "quick-repo-local",
+            "steps": [
+                {"name": "runtime_policy", "ok": True, "provider": "openai-compatible", "runtime_profile": "repo-local"},
+                {"name": "storage_contract", "ok": True},
+                {"name": "operator_safety", "ok": True},
+                {"name": "pytest_gate", "stdout": "...\n41 passed in 1.00s\n"},
+                {"name": "acceptance_artifact", "artifact_summary": {"passed": 24, "total": 24}},
+            ],
+        }
+        if postgres_database_url:
+            artifact["steps"].append({"name": "postgres_smoke", "ok": True})
+        return artifact
+
+    def fake_run_strict_release_check(*, project_root, postgres_database_url):
+        return {
+            "artifact_type": "strict_quality_release_check",
+            "ok": False,
+            "gate_type": "strict-quality",
+            "steps": [
+                {"name": "runtime_policy", "ok": True},
+                {"name": "pytest_gate", "ok": False, "stdout": "F\n", "stderr": "failed\n"},
+                {"name": "benchmark_artifact", "ok": False, "skipped": True, "reason": "prior_gate_failed"},
+            ],
+        }
+
+    monkeypatch.setattr("memco.local_artifacts.run_release_check", fake_run_release_check)
+    monkeypatch.setattr("memco.local_artifacts.run_strict_release_check", fake_run_strict_release_check)
+
+    try:
+        refresh_local_artifacts(
+            project_root=project_root,
+            postgres_database_url="postgresql://example/postgres",
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected refresh_local_artifacts to fail when benchmark summary is missing")
+
+    assert "strict-quality did not produce benchmark_artifact" in message
+    assert "reason=prior_gate_failed" in message
+    assert "strict-release-check-current.json" in message
+    strict_release = json.loads((reports_dir / "strict-release-check-current.json").read_text(encoding="utf-8"))
+    assert strict_release["ok"] is False
+    assert strict_release["steps"][-1]["reason"] == "prior_gate_failed"

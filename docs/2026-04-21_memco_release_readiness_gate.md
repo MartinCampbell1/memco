@@ -1,15 +1,17 @@
 # Memco Release Readiness Gate
 
 Date: 2026-04-21
-Last refreshed: 2026-04-22
+Last refreshed: 2026-04-23
 Status: active current repo-local release gate
+Status note: active gate definition, not current checkout proof by itself.
+Current checkout proof requires a fresh `release-readiness-check` artifact with live smoke; see docs/2026-04-24_memco_release_closure.md for the current private release verdict.
 
 ## Current Verdict
 
 | Gate | Status | Meaning |
 |---|---|---|
 | Current target contract | GO | For current repo-local work, the accepted target contract is `docs/synthius_mem_execution_brief.md`. |
-| Private release readiness | GO | The current local single-user slice is ready for a technical private owner/operator. |
+| Private release readiness | GO | The current local private, operator-controlled, review-gated slice is ready for a technical private owner/operator when backed by a fresh release-grade artifact. |
 | No-Docker Postgres operational readiness | GO | The repo has a verified Postgres runtime path on this machine without Docker. |
 
 This document is the active current release gate for repo-local work, despite the original filename date.
@@ -36,7 +38,9 @@ Related contract decision:
 
 ## Private Release Readiness
 
-Current status: `GO`
+Current status: `GO` for the local/private/operator-controlled/review-gated release scope.
+
+This is not a universal memory substrate, a fully autonomous production memory claim, or a broad public SaaS readiness claim.
 
 This `GO` assumes the current Stage A actor exception:
 
@@ -75,11 +79,19 @@ uv run memco release-check --output /absolute/path/to/release-check.json
 # Optional no-Docker Postgres verification inside the same gate:
 uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
 
-# Optional live operator smoke folded into the same gate:
+# Development convenience: live operator smoke folded into the canonical gate:
 MEMCO_RUN_LIVE_SMOKE=1 \
 MEMCO_API_TOKEN='replace-with-local-token' \
 MEMCO_LLM_API_KEY='replace-with-provider-key' \
 uv run memco release-check \
+  --project-root /Users/martin/memco \
+  --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
+
+# Release-grade claim: canonical Postgres + strict benchmark + operator-readiness + live operator smoke:
+MEMCO_RUN_LIVE_SMOKE=1 \
+MEMCO_API_TOKEN='replace-with-local-token' \
+MEMCO_LLM_API_KEY='replace-with-provider-key' \
+uv run memco release-readiness-check \
   --project-root /Users/martin/memco \
   --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'
 
@@ -94,6 +106,9 @@ uv run pytest -q \
 tmpdir=$(mktemp -d)
 uv run memco eval-run --root "$tmpdir"
 ```
+
+The runtime policy is intentionally fail-closed.
+If live provider credentials are not injected into the local shell, `release-check` now returns `ok: false` with a `runtime_policy` reason instead of claiming green readiness.
 
 Quick contract-facing regression stack:
 
@@ -115,10 +130,10 @@ uv run memco local-artifacts-refresh --project-root /Users/martin/memco
 Most recent recorded evidence:
 
 - contract-facing regression stack:
-  - `74 passed in 4.45s`
-- active repo-local release-check pytest gate: `47 passed`
+  - `87 passed`
+- active repo-local release-check pytest gate: `52 passed`
 - expanded eval artifact on clean root: `total=24`, `passed=24`, `pass_rate=1.0`, `token_accounting.status=tracked`
-- full local test suite: `321 passed in 9.57s`
+- full local test suite: `347 passed`
 - no-Docker Postgres live proof:
   - `uv run memco-api` with `MEMCO_STORAGE_ENGINE=postgres`
   - `/health` returned `storage_engine=postgres`
@@ -136,9 +151,12 @@ Most recent recorded evidence:
   - the workflow eval-only gate step passed after sync via `run_release_check(include_pytest=False, include_eval=True)`
 - active local release-check entrypoint:
   - `uv run memco release-check`
-  - passed locally against the quick repo-local gate
+  - fails closed in a plain checkout-local shell when live provider creds are absent
+  - current expected reason in that case:
+    - `openai-compatible provider is missing api_key`
+  - the saved green artifact comes from the same command run with live provider env injected
   - latest local artifact:
-    - `pytest_gate`: `47 passed`
+    - `pytest_gate`: `52 passed`
     - `acceptance_artifact`: `27/27 passed`
     - saved artifact:
       - `var/reports/release-check-current.json`
@@ -152,7 +170,7 @@ Most recent recorded evidence:
     - `uv run memco release-check --output /absolute/path/to/release-check.json`
     - passed locally and wrote the combined gate artifact to disk
   - canonical no-Docker Postgres variant:
-    - `uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
+    - `MEMCO_LLM_PROVIDER='openai-compatible' MEMCO_LLM_BASE_URL='http://127.0.0.1:2455/v1' MEMCO_LLM_API_KEY='...' uv run memco release-check --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
     - passed locally and produced a single artifact with `pytest_gate`, `acceptance_artifact` on Postgres, and `postgres_smoke`
     - latest saved artifact:
       - `var/reports/release-check-postgres-current.json`
@@ -165,9 +183,13 @@ Most recent recorded evidence:
       - `var/reports/benchmark-current.json`
   - local artifact refresh:
     - `uv run memco local-artifacts-refresh --project-root /Users/martin/memco`
-    - latest saved artifacts:
+  - latest saved artifacts:
       - `var/reports/local-artifacts-refresh-current.json`
       - `var/reports/local-artifacts-refresh-postgres-current.json`
+- release-grade readiness entrypoint:
+  - `MEMCO_RUN_LIVE_SMOKE=1 uv run memco release-readiness-check --project-root /Users/martin/memco --postgres-database-url 'postgresql://USER@127.0.0.1:5432/postgres'`
+  - required before making a final local private operator-controlled release claim from the current checkout
+  - requires canonical Postgres, strict benchmark thresholds, operator-readiness pass rate, and live operator smoke
 
 ### Private Gate Checklist
 
@@ -175,7 +197,7 @@ This checklist is the current `Phase 8 Private Gate` checklist.
 
 | Private gate item | Status |
 |---|---|
-| Operator flow | green |
+| Local private operator-controlled review-gated flow | green |
 | Rollback correctness | green |
 | Refusal correctness | green |
 | Person isolation | green |
@@ -227,5 +249,7 @@ Historical Docker recovery notes remain here for reference:
 - `memco release-check` is the local executable entrypoint for the active repo-local release gate.
 - `memco release-check --postgres-database-url ...` is the optional local executable path for folding no-Docker Postgres smoke into the same release artifact.
 - `MEMCO_RUN_LIVE_SMOKE=1 memco release-check --postgres-database-url ...` adds the API-first live operator smoke and writes `var/reports/live-operator-smoke-current.json`.
+- `MEMCO_RUN_LIVE_SMOKE=1 memco release-readiness-check --postgres-database-url ...` is the release-grade path for the local private operator-controlled release claim.
+- green operator validation requires env-injected live provider credentials; missing creds now fail closed by design.
 - `memco release-check --project-root ...` makes the repo-local tree assumption explicit instead of relying on the package file location.
 - `memco release-check --output ...` makes the release artifact reproducibly storable without shell redirection.

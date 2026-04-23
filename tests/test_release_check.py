@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
+import memco.release_check as release_check_module
 from memco.config import Settings, write_settings
 from memco.release_check import (
     ACTIVE_GATE_TEST_FILES,
@@ -13,6 +15,7 @@ from memco.release_check import (
     _run_storage_contract_gate,
     resolve_repo_project_root,
     run_release_check,
+    run_release_readiness_check,
     run_strict_release_check,
 )
 
@@ -26,6 +29,42 @@ def _write_live_runtime_settings(project_root: Path) -> None:
     settings.backup_path.parent.mkdir(parents=True, exist_ok=True)
     settings.backup_path.write_text("backup", encoding="utf-8")
     write_settings(settings)
+
+
+def test_module_main_runs_quick_release_check(monkeypatch, tmp_path, capsys):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    output_path = tmp_path / "release-check.json"
+    captured: dict[str, object] = {}
+
+    def fake_run_release_check(*, project_root, include_eval, postgres_database_url=None):
+        captured["project_root"] = project_root
+        captured["include_eval"] = include_eval
+        captured["postgres_database_url"] = postgres_database_url
+        return {
+            "artifact_type": "repo_local_release_check",
+            "ok": True,
+            "gate_type": "quick-repo-local",
+            "steps": [],
+        }
+
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv("MEMCO_RELEASE_CHECK_OUTPUT", str(output_path))
+    monkeypatch.setattr("memco.release_check.resolve_repo_project_root", lambda root: root)
+    monkeypatch.setattr("memco.release_check.run_release_check", fake_run_release_check)
+
+    assert release_check_module._main() == 0
+    payload = json.loads(capsys.readouterr().out)
+    saved = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert payload["artifact_type"] == "repo_local_release_check"
+    assert payload["artifact_path"] == str(output_path.resolve())
+    assert saved == payload
+    assert captured == {
+        "project_root": project_root.resolve(),
+        "include_eval": True,
+        "postgres_database_url": None,
+    }
 
 
 def test_run_release_check_runs_pytest_gate_and_acceptance(monkeypatch, tmp_path):
@@ -77,6 +116,13 @@ def test_run_release_check_runs_pytest_gate_and_acceptance(monkeypatch, tmp_path
     assert result["artifact_type"] == "repo_local_release_check"
     assert result["ok"] is True
     assert result["gate_type"] == "quick-repo-local"
+    assert result["generated_at"]
+    assert result["artifact_context"]["runtime_mode"] == "repo-local"
+    assert result["artifact_context"]["config_source"]["exists"] is True
+    assert result["artifact_context"]["env_overrides"]["used"] is False
+    assert result["artifact_context"]["live_smoke"]["requested"] is False
+    assert result["artifact_context"]["live_smoke"]["ran"] is False
+    assert result["artifact_context"]["freshness"]["status"] == "current_at_generation"
     assert result["include_pytest"] is True
     assert [step["name"] for step in result["steps"]] == ["runtime_policy", "storage_contract", "operator_safety", "pytest_gate", "acceptance_artifact"]
     assert result["steps"][0]["ok"] is True
@@ -349,6 +395,8 @@ def test_run_release_check_can_run_optional_live_smoke(monkeypatch, tmp_path):
     ]
     assert result["steps"][6]["ok"] is True
     assert result["steps"][6]["artifact_summary"]["artifact_type"] == "live_operator_smoke"
+    assert result["steps"][6]["artifact_summary"]["artifact_context"]["live_smoke"]["requested"] is True
+    assert result["steps"][6]["artifact_summary"]["artifact_context"]["live_smoke"]["ran"] is True
     assert result["steps"][6]["artifact_path"].endswith("live-operator-smoke-current.json")
 
 
@@ -477,7 +525,76 @@ def test_run_runtime_policy_gate_rejects_missing_openai_compatible_api_key(tmp_p
     assert result["credentials_present"] is False
     assert result["provider_configured"] is False
     assert result["release_eligible"] is False
+    assert result["checkout_status"]["release_eligible"] is False
+    assert result["operator_runtime_status"]["release_eligible"] is False
+    assert result["env_overrides"]["used"] is False
+    assert result["config_only_red_operator_green"] is False
+    assert result["status_source"] == "config-only"
     assert "api_key" in result["reason"]
+
+
+def test_run_runtime_policy_gate_marks_env_injected_operator_green(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.llm.provider = "openai-compatible"
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = ""
+    write_settings(settings)
+    monkeypatch.setenv("MEMCO_LLM_API_KEY", "env-secret")
+
+    result = _run_runtime_policy_gate(project_root=project_root)
+
+    assert result["name"] == "runtime_policy"
+    assert result["ok"] is True
+    assert result["release_eligible"] is True
+    assert result["checkout_status"]["release_eligible"] is False
+    assert result["checkout_status"]["credentials_present"] is False
+    assert result["operator_runtime_status"]["release_eligible"] is True
+    assert result["operator_runtime_status"]["credentials_present"] is True
+    assert result["env_overrides"]["used"] is True
+    assert "MEMCO_LLM_API_KEY" in result["env_overrides"]["present_keys"]
+    assert result["env_overrides"]["live_credentials_present"] is True
+    assert result["config_only_red_operator_green"] is True
+    assert result["status_source"] == "env-injected"
+
+
+def test_run_runtime_policy_gate_does_not_count_base_url_as_live_credential(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.llm.provider = "openai-compatible"
+    settings.llm.base_url = ""
+    settings.llm.api_key = ""
+    write_settings(settings)
+    monkeypatch.setenv("MEMCO_LLM_BASE_URL", "https://router.example/v1")
+
+    result = _run_runtime_policy_gate(project_root=project_root)
+
+    assert result["ok"] is False
+    assert result["operator_runtime_status"]["base_url_present"] is True
+    assert result["operator_runtime_status"]["credentials_present"] is False
+    assert result["env_overrides"]["used"] is True
+    assert "MEMCO_LLM_BASE_URL" in result["env_overrides"]["present_keys"]
+    assert result["env_overrides"]["live_credentials_present"] is False
+    assert result["env_overrides"]["live_credential_keys"] == []
+
+
+def test_run_runtime_policy_gate_does_not_count_empty_env_key_as_live_credential(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    settings = Settings(root=project_root)
+    settings.llm.provider = "openai-compatible"
+    settings.llm.base_url = "https://router.example/v1"
+    settings.llm.api_key = ""
+    write_settings(settings)
+    monkeypatch.setenv("MEMCO_LLM_API_KEY", "")
+
+    result = _run_runtime_policy_gate(project_root=project_root)
+
+    assert result["ok"] is False
+    assert result["operator_runtime_status"]["credentials_present"] is False
+    assert result["env_overrides"]["used"] is True
+    assert "MEMCO_LLM_API_KEY" in result["env_overrides"]["present_keys"]
+    assert result["env_overrides"]["live_credentials_present"] is False
+    assert result["env_overrides"]["live_credential_keys"] == []
 
 
 def test_run_runtime_policy_gate_rejects_missing_openai_compatible_base_url(tmp_path):
@@ -851,6 +968,47 @@ def test_run_benchmark_gate_emits_threshold_checks(monkeypatch, tmp_path):
     assert result["thresholds"]["operator_readiness_pass_rate_min"] == 1.0
 
 
+def test_run_benchmark_gate_fails_when_operator_readiness_is_not_green(monkeypatch, tmp_path):
+    eval_root = tmp_path / "benchmark-runtime"
+    monkeypatch.setattr("memco.release_check.ensure_runtime", lambda settings: settings)
+
+    class _FakeEvalService:
+        def seed_fixture_data(self, root: Path) -> None:
+            assert root == eval_root
+
+        def run_benchmark(self, root: Path) -> dict:
+            assert root == eval_root
+            return {
+                "artifact_type": "eval_benchmark_artifact",
+                "release_scope": "benchmark-only",
+                "benchmark_metrics": {
+                    "core_memory_accuracy": 1.0,
+                    "adversarial_robustness": 1.0,
+                    "person_isolation": 1.0,
+                    "unsupported_premise_supported_count": 0,
+                    "positive_answers_missing_evidence_ids": 0,
+                },
+                "operator_readiness_metrics": {
+                    "pass_rate": 0.8,
+                    "total": 5,
+                    "passed": 4,
+                    "failures": [{"name": "pending-review", "failures": ["pending_review_leakage"]}],
+                },
+            }
+
+    monkeypatch.setattr("memco.release_check.EvalService", _FakeEvalService)
+
+    result = _run_benchmark_gate(eval_root=eval_root)
+
+    assert result["ok"] is False
+    assert result["policy_checks"]["operator_readiness_pass_rate"] == {
+        "value": 0.8,
+        "threshold": 1.0,
+        "ok": False,
+    }
+    assert result["artifact_summary"]["operator_readiness_metrics"]["failures"]
+
+
 def test_run_strict_release_check_requires_benchmark_success(monkeypatch, tmp_path):
     project_root = tmp_path / "repo"
     eval_root = tmp_path / "eval-runtime"
@@ -907,3 +1065,102 @@ def test_run_strict_release_check_requires_benchmark_success(monkeypatch, tmp_pa
         "postgres_smoke",
         "benchmark_artifact",
     ]
+
+
+def test_run_release_readiness_check_requires_live_smoke_request(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+
+    monkeypatch.setattr(
+        "memco.release_check.run_strict_release_check",
+        lambda **kwargs: {
+            "artifact_type": "strict_quality_release_check",
+            "ok": True,
+            "gate_type": "strict-quality",
+            "steps": [{"name": "benchmark_artifact", "ok": True}],
+        },
+    )
+
+    result = run_release_readiness_check(
+        project_root=project_root,
+        postgres_database_url="postgresql://example/postgres",
+    )
+
+    assert result["artifact_type"] == "release_readiness_check"
+    assert result["gate_type"] == "release-grade"
+    assert result["live_smoke_required"] is True
+    assert result["artifact_context"]["live_smoke"]["required"] is True
+    assert result["artifact_context"]["live_smoke"]["requested"] is False
+    assert result["artifact_context"]["live_smoke"]["ran"] is False
+    assert result["ok"] is False
+    assert result["steps"][-1]["name"] == "live_operator_smoke"
+    assert result["steps"][-1]["ok"] is False
+    assert result["steps"][-1]["skipped"] is True
+    assert result["steps"][-1]["reason"] == "live_smoke_required_for_release_claim"
+
+
+def test_run_release_readiness_check_stays_red_when_prior_gate_fails(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    monkeypatch.setenv("MEMCO_RUN_LIVE_SMOKE", "1")
+
+    monkeypatch.setattr(
+        "memco.release_check.run_strict_release_check",
+        lambda **kwargs: {
+            "artifact_type": "strict_quality_release_check",
+            "ok": False,
+            "gate_type": "strict-quality",
+            "steps": [{"name": "runtime_policy", "ok": False}],
+        },
+    )
+
+    result = run_release_readiness_check(
+        project_root=project_root,
+        postgres_database_url="postgresql://example/postgres",
+    )
+
+    assert result["ok"] is False
+    assert result["steps"][-1]["name"] == "live_operator_smoke"
+    assert result["steps"][-1]["ok"] is False
+    assert result["steps"][-1]["skipped"] is True
+    assert result["steps"][-1]["reason"] == "prior_gate_failed"
+
+
+def test_run_release_readiness_check_passes_only_with_live_smoke_success(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    monkeypatch.setenv("MEMCO_RUN_LIVE_SMOKE", "1")
+
+    monkeypatch.setattr(
+        "memco.release_check.run_strict_release_check",
+        lambda **kwargs: {
+            "artifact_type": "strict_quality_release_check",
+            "ok": True,
+            "gate_type": "strict-quality",
+            "steps": [{"name": "benchmark_artifact", "ok": True}],
+        },
+    )
+    monkeypatch.setattr(
+        "memco.release_check._run_live_smoke_gate",
+        lambda **kwargs: {
+            "name": "live_operator_smoke",
+            "ok": True,
+            "required": True,
+            "artifact_path": str(kwargs["output_path"]),
+            "artifact_summary": {"artifact_type": "live_operator_smoke", "steps": [], "failures": []},
+        },
+    )
+
+    result = run_release_readiness_check(
+        project_root=project_root,
+        postgres_database_url="postgresql://example/postgres",
+    )
+
+    assert result["ok"] is True
+    assert result["steps"][-1]["name"] == "live_operator_smoke"
+    assert result["steps"][-1]["ok"] is True
+    assert result["steps"][-1]["required"] is True
+    assert result["artifact_context"]["live_smoke"]["required"] is True
+    assert result["artifact_context"]["live_smoke"]["requested"] is True
+    assert result["artifact_context"]["live_smoke"]["ran"] is True
+    assert result["steps"][-1]["artifact_path"].endswith("live-operator-smoke-current.json")

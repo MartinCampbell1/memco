@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from memco.db import get_connection
-from memco.services.ingest_service import IngestService
+from memco.services.ingest_service import IngestService, parse_document
 
 
 def test_simple_file_import_writes_raw_and_db(settings, tmp_path):
@@ -29,6 +29,67 @@ def test_simple_file_import_writes_raw_and_db(settings, tmp_path):
         assert row is not None
         assert row["source_type"] == "note"
         assert "Memco remembers" in row["parsed_text"]
+
+
+def test_parse_document_rejects_explicit_unsupported_source_type(tmp_path):
+    source = tmp_path / "note.txt"
+    source.write_text("This suffix is supported, but the source_type is not.", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported source_type 'whatsapp'"):
+        parse_document(source, source_type="whatsapp")
+
+
+def test_import_file_rejects_source_type_outside_runtime_contract(settings, tmp_path):
+    source = tmp_path / "note.txt"
+    source.write_text("Unsupported imports should fail before persistence.", encoding="utf-8")
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        with pytest.raises(ValueError, match="unsupported source_type 'whatsapp'"):
+            service.import_file(
+                settings,
+                conn,
+                workspace_slug="default",
+                path=source,
+                source_type="whatsapp",
+            )
+
+        count = conn.execute("SELECT COUNT(*) AS count FROM sources").fetchone()["count"]
+
+    assert count == 0
+
+
+def test_import_text_rejects_source_type_outside_runtime_contract(settings):
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        with pytest.raises(ValueError, match="unsupported source_type 'whatsapp'"):
+            service.import_text(
+                settings,
+                conn,
+                workspace_slug="default",
+                text="Alice lives in Lisbon.",
+                title="Alice Seed",
+                source_type="whatsapp",
+            )
+
+
+def test_import_file_normalizes_supported_source_type(settings, tmp_path):
+    source = tmp_path / "note.txt"
+    source.write_text("Source type casing should not create a new contract.", encoding="utf-8")
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type=" NOTE ",
+        )
+        row = conn.execute("SELECT source_type FROM sources WHERE id = ?", (result.source_id,)).fetchone()
+
+    assert result.source_type == "note"
+    assert row["source_type"] == "note"
 
 
 def test_import_text_uses_title_and_writes_inside_runtime(settings):

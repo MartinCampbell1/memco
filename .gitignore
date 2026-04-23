@@ -17,6 +17,7 @@ htmlcov/
 .vscode/
 
 # local operator/spec artifacts
+.omc/
 HANDOFF_NEXT_AGENT.md
 plan.md
 table.md

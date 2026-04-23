@@ -2,13 +2,13 @@
 
 ## Phase 8 Private Gate
 
-This document is the explicit Phase 8 gate for the current private local single-user release.
+This document is the explicit Phase 8 gate for the current local private operator-controlled review-gated single-user release.
 
 Date: 2026-04-21
 
 ## Scope
 
-This document is the acceptance checklist for the current private local single-user release.
+This document is the acceptance checklist for the current local private operator-controlled review-gated single-user release.
 
 It is intentionally not a strict original execution-brief gate.
 It assumes the current Stage A owner-only actor exception.
@@ -27,6 +27,7 @@ Do not use it to claim:
 - strict original execution-brief completion
 - infra compliance with the PostgreSQL + Docker Compose + migration path
 - actor-scoped multi-user contract completion
+- universal memory substrate or fully autonomous production-memory readiness
 
 ## Checklist
 
@@ -80,6 +81,6 @@ Current recorded result:
 
 ## Current Verdict
 
-Private release readiness: green for the current local single-user slice.
+Private release readiness: green for the current local private operator-controlled review-gated slice.
 
 Full brief readiness: not established by this gate.

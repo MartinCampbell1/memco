@@ -304,6 +304,44 @@ def test_openai_compatible_provider_parses_response():
     assert result.usage.estimated_cost_usd is None
 
 
+def test_openai_compatible_provider_uses_request_timeout(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [{"message": {"content": json.dumps({"items": []})}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout=None):
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr("memco.llm.urllib.request.urlopen", fake_urlopen)
+    provider = OpenAICompatibleLLMProvider(
+        model="gpt-test",
+        base_url="https://example.com/v1",
+        api_key="secret",
+    )
+
+    provider.complete_json(
+        system_prompt="Return JSON",
+        prompt="Extract city",
+        schema_name="memory_fact_candidates",
+    )
+
+    assert captured["timeout"] == 60
+
+
 def test_extraction_service_from_settings_uses_configured_mock_provider():
     settings = Settings(root=Path("/tmp/memco-test-llm"))
     settings.runtime.profile = "fixture"
