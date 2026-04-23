@@ -755,8 +755,8 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert result.exit_code == 0, result.output
     publish_help = _plain(result.output)
     assert "retrieve" in publish_help
-    assert "fact-operations" in result.output
-    assert "--latest-candidate" in result.output
+    assert "fact-operations" in publish_help
+    assert "--latest-candidate" in publish_help
     assert "--person-slug" in result.output
     assert "--domain" in result.output
 
