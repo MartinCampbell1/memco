@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from click.testing import CliRunner
 from typer.main import get_command
 
 from memco.cli.main import app
+
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
 
 
 def _seed_repo_root(path: Path) -> Path:
@@ -254,4 +262,6 @@ def test_cli_strict_release_check_requires_postgres_url(tmp_path):
     )
 
     assert result.exit_code != 0
-    assert "--postgres-database-url is required" in result.output
+    plain = _plain(result.output)
+    assert "--postgres-database-url" in plain
+    assert "required for strict-release-check" in plain

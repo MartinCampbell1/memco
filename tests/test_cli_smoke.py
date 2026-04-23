@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from click.testing import CliRunner
 from typer.main import get_command
@@ -13,6 +14,13 @@ from memco.repositories.review_repository import ReviewRepository
 from memco.repositories.source_repository import SourceRepository
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.ingest_service import IngestService
+
+
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    return ANSI_ESCAPE_RE.sub("", text)
 
 
 def test_cli_init_and_person_upsert(settings):
@@ -726,23 +734,27 @@ def test_cli_flow_commands_advertise_next_steps(settings):
 
     result = runner.invoke(command, ["import", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "conversation-import SOURCE_ID" in result.output
+    import_help = _plain(result.output)
+    assert "conversation-import SOURCE_ID" in import_help
 
     result = runner.invoke(command, ["conversation-import", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-extract" in result.output
-    assert "CONVERSATION_ID" in result.output
-    assert "--latest-source" in result.output
+    conversation_help = _plain(result.output)
+    assert "candidate-extract" in conversation_help
+    assert "CONVERSATION_ID" in conversation_help
+    assert "--latest-source" in conversation_help
 
     result = runner.invoke(command, ["candidate-extract", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-publish" in result.output
-    assert "review-list" in result.output
-    assert "--latest-conversation" in result.output
+    extract_help = _plain(result.output)
+    assert "candidate-publish" in extract_help
+    assert "review-list" in extract_help
+    assert "--latest-conversation" in extract_help
 
     result = runner.invoke(command, ["candidate-publish", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "retrieve" in result.output
+    publish_help = _plain(result.output)
+    assert "retrieve" in publish_help
     assert "fact-operations" in result.output
     assert "--latest-candidate" in result.output
     assert "--person-slug" in result.output
