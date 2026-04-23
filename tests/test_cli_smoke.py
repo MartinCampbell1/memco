@@ -757,56 +757,64 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert "retrieve" in publish_help
     assert "fact-operations" in publish_help
     assert "--latest-candidate" in publish_help
-    assert "--person-slug" in result.output
-    assert "--domain" in result.output
+    assert "--person-slug" in publish_help
+    assert "--domain" in publish_help
 
     result = runner.invoke(command, ["candidate-reject", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "--latest-candidate" in result.output
-    assert "--person-slug" in result.output
-    assert "--domain" in result.output
+    reject_help = _plain(result.output)
+    assert "--latest-candidate" in reject_help
+    assert "--person-slug" in reject_help
+    assert "--domain" in reject_help
 
     result = runner.invoke(command, ["fact-rollback", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-list" in result.output
-    assert "retrieve" in result.output
-    assert "--latest-operation" in result.output
+    rollback_help = _plain(result.output)
+    assert "fact-list" in rollback_help
+    assert "retrieve" in rollback_help
+    assert "--latest-operation" in rollback_help
 
     result = runner.invoke(command, ["conversation-speakers", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "conversation-speaker-resolve" in result.output
-    assert "candidate-extract" in result.output
-    assert "--latest-conversation" in result.output
+    speakers_help = _plain(result.output)
+    assert "conversation-speaker-resolve" in speakers_help
+    assert "candidate-extract" in speakers_help
+    assert "--latest-conversation" in speakers_help
 
     result = runner.invoke(command, ["conversation-speaker-resolve", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-extract" in result.output
-    assert "CONVERSATION_ID" in result.output
-    assert "--latest-conversation" in result.output
+    speaker_resolve_help = _plain(result.output)
+    assert "candidate-extract" in speaker_resolve_help
+    assert "CONVERSATION_ID" in speaker_resolve_help
+    assert "--latest-conversation" in speaker_resolve_help
 
     result = runner.invoke(command, ["candidate-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-publish" in result.output
-    assert "review-resolve" in result.output
-    assert "--person-slug" in result.output
+    candidate_list_help = _plain(result.output)
+    assert "candidate-publish" in candidate_list_help
+    assert "review-resolve" in candidate_list_help
+    assert "--person-slug" in candidate_list_help
 
     result = runner.invoke(command, ["review-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "review-resolve" in result.output
-    assert "candidate-list" in result.output
-    assert "--person-slug" in result.output
+    review_list_help = _plain(result.output)
+    assert "review-resolve" in review_list_help
+    assert "candidate-list" in review_list_help
+    assert "--person-slug" in review_list_help
 
     result = runner.invoke(command, ["fact-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "candidate-publish" in result.output
-    assert "fact-rollback" in result.output
-    assert "--person-slug" in result.output
+    fact_list_help = _plain(result.output)
+    assert "candidate-publish" in fact_list_help
+    assert "fact-rollback" in fact_list_help
+    assert "--person-slug" in fact_list_help
 
     result = runner.invoke(command, ["fact-operations", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-rollback" in result.output
-    assert "--latest-target-fact" in result.output
-    assert "--person-slug" in result.output
+    fact_ops_help = _plain(result.output)
+    assert "fact-rollback" in fact_ops_help
+    assert "--latest-target-fact" in fact_ops_help
+    assert "--person-slug" in fact_ops_help
 
     result = runner.invoke(command, ["fact-delete", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
