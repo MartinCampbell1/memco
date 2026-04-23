@@ -866,15 +866,17 @@ def test_cli_flow_commands_advertise_next_steps(settings):
 
     result = runner.invoke(command, ["eval-run", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "release-check" in result.output
+    eval_help = _plain(result.output)
+    assert "release-check" in eval_help
 
     result = runner.invoke(command, ["review-resolve", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "--latest-review" in result.output
-    assert "Resolved person slug" in result.output
-    assert "Resolved target" in result.output
-    assert "--publish" in result.output
-    assert "--person-slug" in result.output
+    review_resolve_help = _plain(result.output)
+    assert "--latest-review" in review_resolve_help
+    assert "Resolved person slug" in review_resolve_help
+    assert "Resolved target" in review_resolve_help
+    assert "--publish" in review_resolve_help
+    assert "--person-slug" in review_resolve_help
 
 
 def test_cli_operator_flow_supports_latest_shortcuts(settings, tmp_path):
