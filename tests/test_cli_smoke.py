@@ -818,44 +818,51 @@ def test_cli_flow_commands_advertise_next_steps(settings):
 
     result = runner.invoke(command, ["fact-delete", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-restore" in result.output
-    assert "retrieve" in result.output
-    assert "--latest-fact" in result.output
-    assert "--person-slug" in result.output
+    fact_delete_help = _plain(result.output)
+    assert "fact-restore" in fact_delete_help
+    assert "retrieve" in fact_delete_help
+    assert "--latest-fact" in fact_delete_help
+    assert "--person-slug" in fact_delete_help
 
     result = runner.invoke(command, ["fact-restore", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "fact-list" in result.output
-    assert "retrieve" in result.output
-    assert "--latest-fact" in result.output
-    assert "--person-slug" in result.output
+    fact_restore_help = _plain(result.output)
+    assert "fact-list" in fact_restore_help
+    assert "retrieve" in fact_restore_help
+    assert "--latest-fact" in fact_restore_help
+    assert "--person-slug" in fact_restore_help
 
     result = runner.invoke(command, ["person-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "person-alias-upsert" in result.output
-    assert "person-merge" in result.output
+    person_list_help = _plain(result.output)
+    assert "person-alias-upsert" in person_list_help
+    assert "person-merge" in person_list_help
 
     result = runner.invoke(command, ["person-alias-upsert", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "conversation-speaker-resolve" in result.output
-    assert "candidate-extract" in result.output
+    alias_help = _plain(result.output)
+    assert "conversation-speaker-resolve" in alias_help
+    assert "candidate-extract" in alias_help
 
     result = runner.invoke(command, ["person-merge", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "person-list" in result.output
-    assert "retrieve" in result.output
+    merge_help = _plain(result.output)
+    assert "person-list" in merge_help
+    assert "retrieve" in merge_help
 
     result = runner.invoke(command, ["fact-add", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "retrieve" in result.output
-    assert "fact-operations" in result.output
-    assert "--latest-source" in result.output
+    fact_add_help = _plain(result.output)
+    assert "retrieve" in fact_add_help
+    assert "fact-operations" in fact_add_help
+    assert "--latest-source" in fact_add_help
 
     result = runner.invoke(command, ["retrieval-log-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
-    assert "retrieve" in result.output
-    assert "chat" in result.output
-    assert "--person-slug" in result.output
+    retrieval_log_help = _plain(result.output)
+    assert "retrieve" in retrieval_log_help
+    assert "chat" in retrieval_log_help
+    assert "--person-slug" in retrieval_log_help
 
     result = runner.invoke(command, ["eval-run", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
