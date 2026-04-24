@@ -20,11 +20,33 @@ QUESTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None, str]] = [
     (re.compile(r"жив(?:у|ет|ут|ешь)|переехал(?:а|и)?\s+в", re.IGNORECASE), "biography", "residence", "question asks about residence"),
     (re.compile(r"\bprefer(?:s)?\b|\blike(?:s)?\b|\bfavorit", re.IGNORECASE), "preferences", "preference", "question asks about preferences"),
     (re.compile(r"предпоч|нрав|любл", re.IGNORECASE), "preferences", "preference", "question asks about preferences"),
+    (
+        re.compile(r"\btool(?:s)?\b|\buse(?:s|d|ing)?\b(?!\s+to\b)|\bstack\b|\bsoftware\b|\btechnolog(?:y|ies)\b", re.IGNORECASE),
+        "work",
+        "tool",
+        "question asks about work tools",
+    ),
+    (
+        re.compile(r"\bproject(?:s)?\b|\bworked\s+on\b|\blaunched\b|\bshipped\b|\bbuilt\b|\bbuilding\b", re.IGNORECASE),
+        "work",
+        "project",
+        "question asks about work projects",
+    ),
+    (
+        re.compile(r"\bskill(?:s)?\b|\bknow(?:s)?\b|\bcan\b|\bable\s+to\b", re.IGNORECASE),
+        "work",
+        "skill",
+        "question asks about skills",
+    ),
     (re.compile(r"\bwork\b|\bjob\b|\bcareer\b|\bprofession\b|\bdo for work\b", re.IGNORECASE), "work", "employment", "question asks about work"),
     (re.compile(r"работ|професси|карьер|чем .*занима", re.IGNORECASE), "work", "employment", "question asks about work"),
-    (re.compile(r"\bskill\b|\buse\b|\bknow\b", re.IGNORECASE), "work", "skill", "question asks about skills"),
     (re.compile(r"уме|использ|знаю", re.IGNORECASE), "work", "skill", "question asks about skills"),
-    (re.compile(r"\battend(?:ed)?\b|\bvisit(?:ed)?\b|\bwent\b|\btrip\b|\btravel(?:ed)?\b|\bexperience\b", re.IGNORECASE), "experiences", "event", "question asks about experiences"),
+    (
+        re.compile(r"\bwhat\s+happened\b|\bwhat\s+event\b|\bwhen\s+did\b.*\bhappen\b|\bwhy\s+did\b.*\b(?:pause|stop|quit)\b|\baccident\b|\binjur(?:y|ed)\b|\btrip\b|\bexperience\b|\battend(?:ed)?\b|\bvisit(?:ed)?\b|\bwent\b|\btravel(?:ed)?\b", re.IGNORECASE),
+        "experiences",
+        "event",
+        "question asks about experiences",
+    ),
     (re.compile(r"посет|был на|была на|ходил на|ходила на|поездк|путешеств", re.IGNORECASE), "experiences", "event", "question asks about experiences"),
     (
         re.compile(r"\bfriend\b|\bsister\b|\bbrother\b|\bmother\b|\bfather\b|\bpartner\b|\bspouse\b|\bwife\b|\bhusband\b|\bcolleague\b",
@@ -48,6 +70,10 @@ TEMPORAL_WHEN_RE = re.compile(r"\b(when|когда)\b", re.IGNORECASE)
 NAME_CLAIM_RE = re.compile(r"\b(?:named|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)")
 PROPER_NAME_RE = re.compile(r"\b[A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*\b")
 WORK_AT_RE = re.compile(r"\b(?:work(?:s)?\s+at|работ(?:аю|ает|ал|ала)?\s+в)\s+([A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*)", re.IGNORECASE)
+WORK_TOOL_CLAIM_RE = re.compile(
+    r"\b(?:use(?!\s+to\b)|uses|using|used(?!\s+to\b)|work(?:s)?\s+with|использ(?:ую|ует|овал|овала)|работ(?:аю|ает)\s+с)\s+(?P<value>[A-Z][A-Za-z0-9&.\-+#]*(?:\s+[A-Z][A-Za-z0-9&.\-+#]*)*)",
+    re.IGNORECASE,
+)
 LOCATION_CLAIM_RE = re.compile(
     r"\b(?:live|lives|living|based|located|moved?|move|жив(?:у|ет|ут|ешь)|переехал(?:а|и)?)\s+(?:in|to|в)\s+(?P<value>[A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*)",
     re.IGNORECASE,
@@ -61,6 +87,7 @@ EVENT_CLAIM_RE = re.compile(
     r"(?P<value>[A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*)"
     r"(?:\s+in\s+(?:19|20)\d{2}\b)?",
 )
+ACCIDENT_CLAIM_RE = re.compile(r"\b(?P<value>[a-z]+(?:\s+[a-z]+){0,3}\s+accident)\b", re.IGNORECASE)
 DATE_CLAIM_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 RELATION_TARGET_RE = re.compile(
     r"\b(?:is|was)\s+(?P<target>[A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*)\s+[A-Z][A-Za-z0-9&.\-]+'s\s+(?:"
@@ -443,6 +470,20 @@ class PlannerService:
                         )
                     )
                     seen.add(family_key)
+            if domain == "work" and category == "employment":
+                for fallback_category in ("role", "org", "project", "skill", "tool", "engagement"):
+                    fallback_key = ("work", fallback_category)
+                    if fallback_key in seen:
+                        continue
+                    domain_queries.append(
+                        RetrievalDomainPlan(
+                            domain="work",
+                            category=fallback_category,
+                            field_query=payload.query,
+                            reason="generic work query searches multiple work categories",
+                        )
+                    )
+                    seen.add(fallback_key)
 
         if not domain_queries:
             domain_queries.append(
@@ -543,12 +584,18 @@ class PlannerService:
             checks.append(RetrievalClaimCheck(label="named_entity", value=match.strip(), claim_type="name"))
         for match in WORK_AT_RE.findall(query):
             checks.append(RetrievalClaimCheck(label="employer", value=match.strip(), claim_type="employer"))
+        for match in WORK_TOOL_CLAIM_RE.findall(query):
+            checks.append(RetrievalClaimCheck(label="tool", value=match.strip(), claim_type="tool"))
         for match in LOCATION_CLAIM_RE.findall(query):
             checks.append(RetrievalClaimCheck(label="location", value=match.strip(), claim_type="location"))
         for match in PREFERENCE_CLAIM_RE.findall(query):
             checks.append(RetrievalClaimCheck(label="preference", value=match.strip(), claim_type="preference"))
         for match in EVENT_CLAIM_RE.findall(query):
             checks.append(RetrievalClaimCheck(label="event", value=match.strip(), claim_type="event"))
+        for match in ACCIDENT_CLAIM_RE.findall(query):
+            value = re.sub(r"^.*\b(?:in|had|have|has)\s+a\s+", "", match.strip(), flags=re.IGNORECASE)
+            value = re.sub(r"^.*\b(?:have|has|had)\s+the\s+", "", value, flags=re.IGNORECASE)
+            checks.append(RetrievalClaimCheck(label="event", value=value, claim_type="event"))
         for match in DATE_CLAIM_RE.findall(query):
             checks.append(RetrievalClaimCheck(label="date", value=match.strip(), claim_type="date"))
         temporal_anchor_target = None
@@ -556,11 +603,35 @@ class PlannerService:
         if before_match:
             temporal_anchor_target = before_match.group(1).strip()
         person_phrase = (person_slug or "").replace("-", " ").strip()
-        quoted_names = [
-            match.strip()
-            for match in PROPER_NAME_RE.findall(query)
-            if match.strip().lower() not in {"where", "what", "when", "does", "did", "who", "alice"}
-        ]
+        ignored_name_tokens = {
+            "where",
+            "what",
+            "when",
+            "does",
+            "did",
+            "who",
+            "why",
+            "alice",
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        }
+        quoted_names = []
+        for match in PROPER_NAME_RE.findall(query):
+            value = match.strip()
+            first_word = value.split(maxsplit=1)[0].lower() if value else ""
+            if value.lower() in ignored_name_tokens or first_word in ignored_name_tokens:
+                continue
+            quoted_names.append(value)
         for match in quoted_names:
             words = match.split()
             if words and words[0].lower() in {"does", "did", "is", "what", "where", "when", "who", "tell", "show", "explain", "describe", "give"}:

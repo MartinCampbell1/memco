@@ -123,6 +123,7 @@ class AnswerService:
         details: list[dict] = []
         prefixes = {
             "No evidence for employer claim:": "employer",
+            "No evidence for tool claim:": "tool",
             "No evidence for location claim:": "location",
             "No evidence for preference claim:": "preference",
             "No evidence for event claim:": "event",

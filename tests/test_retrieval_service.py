@@ -11,6 +11,92 @@ from memco.services.consolidation_service import ConsolidationService
 from memco.services.retrieval_service import RetrievalService
 
 
+def _seed_alice_work_fact(settings, *, category: str, payload: dict, summary: str) -> None:
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    value = next(iter(payload.values()))
+    key_value = str(value).lower().replace(" ", "-")
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path=f"var/raw/alice-work-{category}-{key_value}.md",
+            source_type="note",
+            origin_uri=f"/tmp/alice-work-{category}-{key_value}.md",
+            title=f"alice-work-{category}-{key_value}",
+            sha256=f"alice-work-{category}-{key_value}",
+            parsed_text=summary,
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="work",
+                category=category,
+                canonical_key=f"alice:work:{category}:{key_value}",
+                payload=payload,
+                summary=summary,
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text=summary,
+            ),
+        )
+
+
+def _seed_alice_experience_fact(settings, *, payload: dict, summary: str, event_at: str = "") -> None:
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    key_value = str(payload.get("event", "event")).lower().replace(" ", "-")
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path=f"var/raw/alice-experience-{key_value}.md",
+            source_type="note",
+            origin_uri=f"/tmp/alice-experience-{key_value}.md",
+            title=f"alice-experience-{key_value}",
+            sha256=f"alice-experience-{key_value}",
+            parsed_text=summary,
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="experiences",
+                category="event",
+                canonical_key=f"alice:experiences:event:{key_value}",
+                payload=payload,
+                summary=summary,
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                event_at=event_at,
+                source_id=source_id,
+                quote_text=summary,
+            ),
+        )
+
+
 def test_retrieve_returns_matching_fact(settings):
     fact_repo = FactRepository()
     source_repo = SourceRepository()
@@ -245,6 +331,123 @@ def test_retrieve_matches_phase6_expanded_domain_fields(settings, domain, catego
     assert result.support_level == "supported"
     assert len(result.hits) == 1
     assert expected_key in result.hits[0].payload
+
+
+def test_work_tool_query_retrieves_tool_fact(settings):
+    _seed_alice_work_fact(settings, category="tool", payload={"tool": "Python"}, summary="Alice uses Python.")
+    _seed_alice_work_fact(settings, category="tool", payload={"tool": "Postgres"}, summary="Alice uses Postgres.")
+
+    with get_connection(settings.db_path) as conn:
+        result = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="What tools does Alice use?"),
+        )
+
+    assert result.support_level == "supported"
+    assert result.answerable is True
+    assert {hit.payload["tool"] for hit in result.hits} == {"Python", "Postgres"}
+    assert all(hit.evidence for hit in result.hits)
+
+
+def test_work_tool_yes_no_supported_and_false_premise_refused(settings):
+    _seed_alice_work_fact(settings, category="tool", payload={"tool": "Python"}, summary="Alice uses Python.")
+    _seed_alice_work_fact(settings, category="tool", payload={"tool": "Postgres"}, summary="Alice uses Postgres.")
+
+    with get_connection(settings.db_path) as conn:
+        python_result = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Does Alice use Python?"),
+        )
+        ruby_result = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Does Alice use Ruby?"),
+        )
+
+    assert python_result.support_level == "supported"
+    assert python_result.answerable is True
+    assert python_result.hits[0].payload["tool"] == "Python"
+    assert ruby_result.support_level == "contradicted"
+    assert ruby_result.answerable is False
+    assert ruby_result.must_not_use_as_fact is True
+    assert any("Ruby" in claim for claim in ruby_result.unsupported_claims)
+
+
+def test_work_project_and_generic_work_queries_use_work_category_fallback(settings):
+    _seed_alice_work_fact(settings, category="project", payload={"project": "Project Phoenix"}, summary="Alice launched Project Phoenix.")
+    _seed_alice_work_fact(settings, category="tool", payload={"tool": "Python"}, summary="Alice uses Python.")
+
+    with get_connection(settings.db_path) as conn:
+        project_result = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="What project did Alice launch?"),
+        )
+        generic_result = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="What does Alice do for work?"),
+        )
+
+    assert project_result.support_level == "supported"
+    assert project_result.hits[0].payload["project"] == "Project Phoenix"
+    assert generic_result.support_level == "supported"
+    assert {hit.category for hit in generic_result.hits} >= {"project", "tool"}
+
+
+def test_experience_accident_queries_are_supported_with_evidence(settings):
+    _seed_alice_experience_fact(
+        settings,
+        payload={
+            "event": "serious car accident",
+            "summary": "Alice had a serious car accident during a family road trip to the Grand Canyon.",
+            "temporal_anchor": "October 2023",
+            "location": "Grand Canyon",
+            "outcome": "pause pottery",
+            "valence": "negative",
+            "intensity": "high",
+        },
+        summary="Alice had a serious car accident during a family road trip to the Grand Canyon and had to pause pottery.",
+        event_at="October 2023",
+    )
+
+    with get_connection(settings.db_path) as conn:
+        happened = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="What happened to Alice in October 2023?"),
+        )
+        when = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="When did Alice have the accident?"),
+        )
+        why = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Why did Alice pause pottery?"),
+        )
+
+    for result in (happened, when, why):
+        assert result.support_level == "supported"
+        assert result.answerable is True
+        assert result.hits
+        assert result.hits[0].evidence
+    assert when.hits[0].event_at == "October 2023"
+
+
+def test_experience_false_premise_accident_is_contradicted(settings):
+    _seed_alice_experience_fact(
+        settings,
+        payload={"event": "serious car accident", "temporal_anchor": "October 2023"},
+        summary="Alice had a serious car accident in October 2023.",
+        event_at="October 2023",
+    )
+
+    with get_connection(settings.db_path) as conn:
+        result = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Was Alice in a ski accident?"),
+        )
+
+    assert result.support_level == "contradicted"
+    assert result.answerable is False
+    assert result.must_not_use_as_fact is True
+    assert any("ski accident" in claim.lower() for claim in result.unsupported_claims)
 
 
 def test_relationship_query_retrieves_biography_family_fallback(settings):

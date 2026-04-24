@@ -20,6 +20,7 @@ class DomainPromptContract:
     evidence_rules: tuple[str, ...]
     temporal_rules: tuple[str, ...]
     negation_rules: tuple[str, ...]
+    examples: tuple[dict[str, str], ...] = ()
 
 
 DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
@@ -64,6 +65,20 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         negation_rules=(
             "Negated constraints can be extracted only as constraints, never as positive preferences or residences.",
         ),
+        examples=(
+            {
+                "text": "I was born in 1990 and I speak English and Spanish.",
+                "extract": "age_birth.birth_year=1990; languages.languages=[English, Spanish]",
+            },
+            {
+                "text": "I might move to Paris next year.",
+                "extract": "no current residence fact",
+            },
+            {
+                "text": "Please send me short direct updates in English.",
+                "extract": "communication_preference.preference=short direct updates; language=English",
+            },
+        ),
     ),
     "preferences": DomainPromptContract(
         domain="preferences",
@@ -98,6 +113,20 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         ),
         negation_rules=(
             "A negated statement like 'I do not like sushi' must never become a positive preference.",
+        ),
+        examples=(
+            {
+                "text": "I used to prefer tea, but now I prefer coffee.",
+                "extract": "preference.value=tea; polarity=like; is_current=false; valid_to=now; preference_category=drink; preference.value=coffee; is_current=true",
+            },
+            {
+                "text": "I strongly dislike coffee because it makes me anxious.",
+                "extract": "preference.value=coffee; polarity=dislike; strength=strong; reason=it makes me anxious",
+            },
+            {
+                "text": "If I prefer tea later, I will tell you.",
+                "extract": "no preference fact",
+            },
         ),
     ),
     "social_circle": DomainPromptContract(
@@ -149,7 +178,7 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "engagement": ("engagement", "role", "org", "client", "status", "start_date", "end_date", "outcomes", "team"),
             "role": ("role", "is_current", "status", "start_date", "end_date"),
             "org": ("org", "client", "is_current", "status"),
-            "project": ("project", "role", "org", "outcomes", "status", "start_date", "end_date", "team"),
+            "project": ("project", "role", "org", "client", "outcomes", "status", "start_date", "end_date", "team"),
             "skill": ("skill",),
             "tool": ("tool",),
         },
@@ -164,6 +193,20 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         ),
         negation_rules=(
             "Negated capability statements should not become positive skills or tools.",
+        ),
+        examples=(
+            {
+                "text": "I work as a staff engineer at OpenAI with the Applied team since 2022.",
+                "extract": "employment.title=staff engineer; org=OpenAI; team=Applied; status=current; start_date=2022",
+            },
+            {
+                "text": "I consult for Acme as a platform advisor since 2024.",
+                "extract": "engagement=consulting; client=Acme; role=platform advisor; start_date=2024",
+            },
+            {
+                "text": "I shipped Project Atlas for Acme with the mobile team. The outcome was 20% faster onboarding.",
+                "extract": "project=Project Atlas; client=Acme; team=mobile; status=completed; outcomes=[20% faster onboarding]",
+            },
         ),
     ),
     "experiences": DomainPromptContract(
@@ -187,6 +230,7 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
                 "recurrence",
                 "linked_persons",
                 "linked_projects",
+                "event_hierarchy",
                 "temporal_anchor",
             )
         },
@@ -202,6 +246,16 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         ),
         negation_rules=(
             "Do not extract events that are explicitly denied or described as not having happened.",
+        ),
+        examples=(
+            {
+                "text": "In March 2024, I attended launch week with Bob and Dana during Project Phoenix. We won the beta award and I learned to plan rehearsals.",
+                "extract": "event=launch week; linked_persons=[Bob,Dana]; linked_projects=[Project Phoenix]; outcome=won the beta award; lesson=plan rehearsals",
+            },
+            {
+                "text": "Every summer I went to PyCon with Bob from 2021 to 2023.",
+                "extract": "event=PyCon; recurrence=every summer; date_range=2021 to 2023; linked_persons=[Bob]",
+            },
         ),
     ),
     "psychometrics": DomainPromptContract(
@@ -268,10 +322,16 @@ class ExtractionContext:
     resolve_person_id: Callable[[str], int | None] | None = None
 
 
-def build_extraction_system_prompt(*, include_style: bool, include_psychometrics: bool) -> str:
+def build_extraction_system_prompt(
+    *,
+    include_style: bool,
+    include_psychometrics: bool,
+    domain_names: tuple[str, ...] | None = None,
+) -> str:
     contract_payload = build_extraction_contract(
         include_style=include_style,
         include_psychometrics=include_psychometrics,
+        domain_names=domain_names,
     )
     return (
         "You are the Memco extraction runtime. "
@@ -286,7 +346,12 @@ def build_extraction_system_prompt(*, include_style: bool, include_psychometrics
     )
 
 
-def _selected_domain_contracts(*, include_style: bool, include_psychometrics: bool) -> list[DomainPromptContract]:
+def _selected_domain_contracts(
+    *,
+    include_style: bool,
+    include_psychometrics: bool,
+    domain_names: tuple[str, ...] | None = None,
+) -> list[DomainPromptContract]:
     selected = [
         DOMAIN_PROMPT_CONTRACTS["biography"],
         DOMAIN_PROMPT_CONTRACTS["preferences"],
@@ -298,14 +363,23 @@ def _selected_domain_contracts(*, include_style: bool, include_psychometrics: bo
         selected.append(DOMAIN_PROMPT_CONTRACTS["psychometrics"])
     if include_style:
         selected.append(DOMAIN_PROMPT_CONTRACTS["style"])
+    if domain_names is not None:
+        allowed = set(domain_names)
+        selected = [contract for contract in selected if contract.domain in allowed]
     return selected
 
 
-def build_extraction_contract(*, include_style: bool, include_psychometrics: bool) -> dict[str, Any]:
+def build_extraction_contract(
+    *,
+    include_style: bool,
+    include_psychometrics: bool,
+    domain_names: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     domains = []
     for contract in _selected_domain_contracts(
         include_style=include_style,
         include_psychometrics=include_psychometrics,
+        domain_names=domain_names,
     ):
         domains.append(
             {
@@ -316,6 +390,7 @@ def build_extraction_contract(*, include_style: bool, include_psychometrics: boo
                 "evidence_rules": list(contract.evidence_rules),
                 "temporal_rules": list(contract.temporal_rules),
                 "negation_rules": list(contract.negation_rules),
+                "examples": list(contract.examples),
             }
         )
     return {
@@ -343,6 +418,7 @@ def build_prompt_payload(
     *,
     include_style: bool,
     include_psychometrics: bool,
+    domain_names: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     return {
         "contract_version": EXTRACTION_CONTRACT_VERSION,
@@ -362,6 +438,7 @@ def build_prompt_payload(
         "output_contract": build_extraction_contract(
             include_style=include_style,
             include_psychometrics=include_psychometrics,
+            domain_names=domain_names,
         ),
     }
 
@@ -585,7 +662,7 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
                 _optional_string(payload, key)
         elif category == "project":
             _require_string(payload, "project")
-            for key in ("role", "org", "status", "start_date", "end_date", "team"):
+            for key in ("role", "org", "client", "status", "start_date", "end_date", "team"):
                 _optional_string(payload, key)
             _optional_list_of_strings(payload, "outcomes")
         elif category == "skill":
@@ -606,6 +683,7 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_list_of_strings(payload, "participants")
         _optional_list_of_strings(payload, "linked_persons")
         _optional_list_of_strings(payload, "linked_projects")
+        _optional_list_of_strings(payload, "event_hierarchy")
         if "event_at" in payload and not isinstance(payload.get("event_at", ""), str):
             raise ValueError("payload.event_at must be a string")
         for key in ("date_range", "location", "lesson", "recurrence"):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 from click.testing import CliRunner
 from typer.main import get_command
@@ -29,10 +30,86 @@ def test_personal_memory_goldens_cover_required_groups():
         group: sum(1 for item in cases if item["group"] == group)
         for group in EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS
     }
+    realistic_cases = [
+        item for item in cases if str(item["id"]).startswith("realistic_")
+    ]
+    scenario_counts = {
+        scenario: sum(1 for item in realistic_cases if item.get("scenario") == scenario)
+        for scenario in {
+            "biography",
+            "work",
+            "experiences",
+            "preferences",
+            "social",
+            "temporal",
+            "adversarial",
+            "cross_person",
+            "update_supersede",
+            "speakerless",
+            "negation_hypothetical",
+        }
+    }
+    realistic_text = "\n".join(json.dumps(item, ensure_ascii=False).lower() for item in realistic_cases)
+    placeholder_re = re.compile(
+        r"Realistic [A-Za-z ]+ \d{3}|[a-z]+-value-\d{3}|Work\d{3}|ClientPortal\d{3}|OldCity\d{3}|HypotheticalValue\d{3}"
+    )
 
-    assert len(cases) == 380
+    assert len(cases) == 680
     assert len({item["id"] for item in cases}) == len(cases)
-    assert counts == EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS
+    assert (GOLDENS_DIR / "realistic_personal_memory_goldens.jsonl").exists()
+    assert {item["group"] for item in realistic_cases} == set(EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS)
+    assert len(realistic_cases) == 300
+    assert scenario_counts == {
+        "biography": 25,
+        "work": 25,
+        "experiences": 25,
+        "preferences": 25,
+        "social": 25,
+        "temporal": 25,
+        "adversarial": 50,
+        "cross_person": 25,
+        "update_supersede": 25,
+        "speakerless": 25,
+        "negation_hypothetical": 25,
+    }
+    for required_phrase in (
+        "i do not like sushi.",
+        "i might move to paris next year.",
+        "berlin",
+        "lisbon",
+        "maria in porto",
+        "bob in berlin",
+        "i use python and postgres.",
+        "in october 2023 i had a serious accident at the grand canyon.",
+        "i worked on project phoenix and launched it in march.",
+        "i prefer coffee, but i used to prefer tea.",
+    ):
+        assert required_phrase in realistic_text
+    source_checks = {
+        item.get("source_hard_check"): item.get("source_text")
+        for item in realistic_cases
+        if item.get("source_hard_check")
+    }
+    assert source_checks == {
+        "combined_tools_split": "I use Python and Postgres.",
+        "combined_project_temporal": "I worked on Project Phoenix and launched it in March.",
+        "experience_accident_temporal": "In October 2023 I had a serious accident at the Grand Canyon.",
+        "preference_update_current": "I prefer coffee, but I used to prefer tea.",
+        "negated_preference_not_positive": "I do not like sushi.",
+        "hypothetical_residence_not_positive": "I might move to Paris next year.",
+    }
+    assert placeholder_re.search("\n".join(json.dumps(item, ensure_ascii=False) for item in realistic_cases)) is None
+    assert counts == {
+        **EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS,
+        "core_fact": 174,
+        "adversarial_false_premise": 125,
+        "social_family": 75,
+        "temporal": 76,
+        "preference": 75,
+        "cross_person_contamination": 55,
+        "speakerless_note": 55,
+        "rollback_update": 45,
+    }
 
 
 def test_personal_memory_planner_does_not_treat_personal_as_son_relation():
@@ -54,8 +131,8 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["artifact_type"] == "personal_memory_eval_artifact"
     assert result["release_scope"] == "personal-agent-memory"
     assert result["ok"] is True
-    assert result["total"] == 380
-    assert result["passed"] == 380
+    assert result["total"] == 680
+    assert result["passed"] == 680
     assert result["failed"] == 0
     assert result["failures"] == []
     assert all(item["ok"] for item in result["policy_checks"].values())
@@ -66,6 +143,82 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["metrics"]["unsupported_premise_answered_as_fact"] == 0
     assert result["metrics"]["evidence_missing_on_supported_answers"] == 0
     assert result["metrics"]["speakerless_owner_fallback_accuracy"] >= 0.95
+    assert result["metrics"]["tool_project_retrieval_pass_rate"] >= 0.95
+    assert result["metrics"]["experience_event_retrieval_pass_rate"] >= 0.90
+    assert result["metrics"]["source_hard_case_failures"] == 0
+    assert result["source_hard_checks_total"] == 6
+    assert result["source_hard_checks_passed"] == 6
+    assert {item["source_hard_check"] for item in result["source_hard_checks"]} == {
+        "combined_tools_split",
+        "combined_project_temporal",
+        "experience_accident_temporal",
+        "preference_update_current",
+        "negated_preference_not_positive",
+        "hypothetical_residence_not_positive",
+    }
+    assert result["policy_checks"]["tool_project_retrieval_pass_rate"]["ok"] is True
+    assert result["policy_checks"]["experience_event_retrieval_pass_rate"]["ok"] is True
+    assert result["policy_checks"]["source_hard_case_failures"]["ok"] is True
+
+
+def test_personal_memory_eval_fails_when_hard_cases_are_mutated(settings, tmp_path):
+    mutated_dir = tmp_path / "goldens"
+    mutated_dir.mkdir()
+    synthetic = GOLDENS_DIR / "synthetic_personal_memory_goldens.jsonl"
+    (mutated_dir / synthetic.name).write_text(synthetic.read_text(encoding="utf-8"), encoding="utf-8")
+    hard_case_ids = {
+        "realistic_work_001",
+        "realistic_work_002",
+        "realistic_experiences_001",
+        "realistic_preference_001",
+        "realistic_update_001",
+        "realistic_cross_person_001",
+        "realistic_negation_hypothetical_001",
+        "realistic_negation_hypothetical_002",
+    }
+    mutated_lines = []
+    with (GOLDENS_DIR / "realistic_personal_memory_goldens.jsonl").open("r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            item = json.loads(raw_line)
+            if item["id"] in hard_case_ids:
+                if item["expect_refused"]:
+                    item["expect_refused"] = False
+                else:
+                    item["expected_values"] = ["mutated value that is not present"]
+            mutated_lines.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
+    (mutated_dir / "realistic_personal_memory_goldens.jsonl").write_text("\n".join(mutated_lines) + "\n", encoding="utf-8")
+
+    result = EvalService().run_personal_memory(project_root=settings.root, goldens_dir=mutated_dir)
+    failed_ids = {item["id"] for item in result["failures"]}
+
+    assert result["ok"] is False
+    assert hard_case_ids <= failed_ids
+
+
+def test_personal_memory_source_hard_check_rejects_seed_masked_project_source():
+    result = EvalService()._personal_source_hard_check(
+        {
+            "id": "probe_project_seed_masks_source",
+            "person_slug": "probe",
+            "person_display_name": "Probe",
+            "source_hard_check": "combined_project_temporal",
+            "source_text": "I ate a banana.",
+            "seed_facts": [
+                {
+                    "domain": "work",
+                    "category": "project",
+                    "payload": {"project": "Project Phoenix", "temporal_anchor": "March"},
+                    "summary": "Probe worked on Project Phoenix and launched it in March.",
+                }
+            ],
+        }
+    )
+
+    assert result["passed"] is False
+    assert "source_project_phoenix_missing" in result["failures"]
+    assert "source_project_temporal_anchor_missing" in result["failures"]
+    assert "seed_project_phoenix_missing" not in result["failures"]
+    assert "seed_project_temporal_anchor_missing" not in result["failures"]
 
 
 def test_personal_memory_eval_cli_writes_gate_artifact(tmp_path):
@@ -93,5 +246,5 @@ def test_personal_memory_eval_cli_writes_gate_artifact(tmp_path):
     artifact = json.loads(output_path.read_text(encoding="utf-8"))
     assert artifact["artifact_path"] == str(output_path.resolve())
     assert artifact["ok"] is True
-    assert artifact["total"] == 380
+    assert artifact["total"] == 680
     assert artifact["failed"] == 0

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit, urlunsplit
 
 import typer
 
@@ -87,6 +88,82 @@ def _emit_json_artifact(payload: dict, *, output: str | None) -> None:
         final_payload["artifact_path"] = str(output_path)
         output_path.write_text(json.dumps(final_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     typer.echo(json.dumps(final_payload, ensure_ascii=False, indent=2))
+
+
+def _redact_database_target(value: str) -> str:
+    if "://" not in value:
+        return value
+    parts = urlsplit(value)
+    hostname = parts.hostname or ""
+    port = f":{parts.port}" if parts.port is not None else ""
+    netloc = f"***@{hostname}{port}" if parts.username or parts.password else f"{hostname}{port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def _doctor_report(project_root: Path) -> dict:
+    settings = load_settings(project_root)
+    personal_goldens = project_root / "eval" / "personal_memory_goldens"
+    realistic_goldens = personal_goldens / "realistic_personal_memory_goldens.jsonl"
+    repo_local = settings.runtime_profile == "repo-local"
+    checks = {
+        "config_exists": settings.config_path.exists(),
+        "api_token_configured": bool((settings.api.auth_token or "").strip()),
+        "backup_path_exists": settings.backup_path.exists(),
+        "personal_memory_goldens_exist": personal_goldens.is_dir(),
+        "realistic_personal_memory_goldens_exist": realistic_goldens.exists(),
+        "postgres_url_configured": bool((settings.storage.database_url or "").strip()),
+        "owner_configured": bool((settings.owner.person_slug or "").strip() or (settings.owner.display_name or "").strip()),
+        "live_smoke_available": bool((settings.storage.database_url or "").strip())
+        and os.environ.get("MEMCO_RUN_LIVE_SMOKE", "").strip().lower() in {"1", "true", "yes", "on"},
+    }
+    ok = (
+        checks["personal_memory_goldens_exist"]
+        and checks["realistic_personal_memory_goldens_exist"]
+        and (not repo_local or checks["api_token_configured"])
+        and (not repo_local or checks["backup_path_exists"])
+    )
+    return {
+        "artifact_type": "doctor_report",
+        "ok": ok,
+        "project_root": str(project_root),
+        "config_path": str(settings.config_path),
+        "runtime_profile": settings.runtime_profile,
+        "storage": {
+            "engine": settings.storage.engine,
+            "contract_engine": settings.storage.contract_engine,
+            "role": settings.storage_role,
+            "database_target": _redact_database_target(settings.database_target),
+            "backup_path": str(settings.backup_path),
+        },
+        "llm": {
+            "provider": settings.llm.provider,
+            "model": settings.llm.model,
+            "base_url": _redact_database_target(settings.llm.base_url),
+            "api_key_configured": bool((settings.llm.api_key or "").strip()),
+            "allow_mock_provider": settings.llm.allow_mock_provider,
+        },
+        "api": {
+            "auth_token_configured": checks["api_token_configured"],
+            "require_actor_scope": settings.api.require_actor_scope,
+            "actor_policy_count": len(settings.api.actor_policies),
+        },
+        "owner": {
+            "person_slug_configured": bool((settings.owner.person_slug or "").strip()),
+            "display_name_configured": bool((settings.owner.display_name or "").strip()),
+        },
+        "live_smoke": {
+            "available": checks["live_smoke_available"],
+            "requested": os.environ.get("MEMCO_RUN_LIVE_SMOKE", "").strip().lower() in {"1", "true", "yes", "on"},
+            "postgres_url_configured": checks["postgres_url_configured"],
+        },
+        "checks": checks,
+        "next_commands": {
+            "fixture_personal_memory_eval": "uv run memco eval personal-memory --goldens eval/personal_memory_goldens --output var/reports/personal-memory-eval-current.json",
+            "fixture_gate": "uv run memco release-check --project-root . --fixture-ok --include-realistic-eval --output var/reports/release-check-fixture-current.json",
+            "repo_local_gate": "uv run memco release-check --project-root . --include-realistic-eval --output var/reports/release-check-current.json",
+            "release_grade_gate": "MEMCO_RUN_LIVE_SMOKE=1 uv run memco release-readiness-check --project-root . --postgres-database-url \"$MEMCO_POSTGRES_DATABASE_URL\" --require-live-provider --require-postgres --output var/reports/release-readiness-check-current.json",
+        },
+    }
 
 
 def _backup_passphrase(*, encrypted_or_required: bool, passphrase_env: str | None) -> str | None:
@@ -269,6 +346,18 @@ def init_db(root: str | None = typer.Option(None, help="Project root.")) -> None
     typer.echo(f"Storage role: {settings.storage_role}")
     typer.echo(f"Storage engine: {settings.storage.engine}")
     typer.echo(f"Database ready at {settings.database_target}")
+
+
+@app.command("doctor", help="Print a redacted local runtime and release-gate preflight report.")
+def doctor_command(
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    output: str | None = typer.Option(None, help="Optional file path to save the doctor report JSON."),
+) -> None:
+    resolved_project_root = _project_root(project_root)
+    result = _doctor_report(resolved_project_root)
+    _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
 
 
 @app.command(
@@ -1395,6 +1484,16 @@ def release_check_command(
         help="Postgres maintenance URL for the canonical Postgres gate. When set, acceptance runs on Postgres and the API bootstrap smoke is required.",
     ),
     postgres_port: int | None = typer.Option(None, help="Optional port for the temporary Postgres smoke API run."),
+    fixture_ok: bool = typer.Option(
+        False,
+        "--fixture-ok",
+        help="Run an archive-safe fixture gate. The artifact is explicitly fixture_only=true and release_eligible=false.",
+    ),
+    include_realistic_eval: bool = typer.Option(
+        False,
+        "--include-realistic-eval",
+        help="Also run the realistic personal-memory JSONL eval gate from eval/personal_memory_goldens.",
+    ),
     output: str | None = typer.Option(None, help="Optional file path to save the release artifact JSON."),
 ) -> None:
     eval_root = Path(root).expanduser().resolve() if root else None
@@ -1406,6 +1505,8 @@ def release_check_command(
         project_root=resolved_project_root,
         eval_root=eval_root,
         include_eval=True,
+        include_realistic_eval=include_realistic_eval,
+        fixture_ok=fixture_ok,
         postgres_database_url=postgres_database_url,
         postgres_root=postgres_root,
         postgres_port=postgres_port,
@@ -1460,10 +1561,24 @@ def release_readiness_check_command(
         help="Required Postgres maintenance URL for the release-grade gate.",
     ),
     postgres_port: int | None = typer.Option(None, help="Optional port for the temporary Postgres smoke API run."),
+    require_live_provider: bool = typer.Option(
+        False,
+        "--require-live-provider",
+        help="Document and enforce the release-grade intent: live smoke must be requested with MEMCO_RUN_LIVE_SMOKE=1.",
+    ),
+    require_postgres: bool = typer.Option(
+        False,
+        "--require-postgres",
+        help="Document and enforce the release-grade intent: --postgres-database-url is required.",
+    ),
     output: str | None = typer.Option(None, help="Optional file path to save the release-grade artifact JSON."),
 ) -> None:
     if not postgres_database_url:
         raise typer.BadParameter("--postgres-database-url is required for release-readiness-check")
+    if require_live_provider and os.environ.get("MEMCO_RUN_LIVE_SMOKE", "").strip().lower() not in {"1", "true", "yes", "on"}:
+        raise typer.BadParameter("--require-live-provider requires MEMCO_RUN_LIVE_SMOKE=1")
+    if require_postgres and not postgres_database_url:
+        raise typer.BadParameter("--require-postgres requires --postgres-database-url")
     eval_root = Path(root).expanduser().resolve() if root else None
     resolved_project_root = _project_root(project_root)
     postgres_root = None

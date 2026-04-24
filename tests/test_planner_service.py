@@ -357,3 +357,63 @@ def test_planner_provider_failure_can_fall_back_to_rule_planner_when_requested()
     assert plan.plan_version == "v2"
     assert ("biography", "residence") in domains
     assert ("work", "employment") in domains
+
+
+@pytest.mark.parametrize(
+    ("query", "expected_category"),
+    [
+        ("What tools does Alice use?", "tool"),
+        ("Does Alice use Python?", "tool"),
+        ("What project did Alice launch?", "project"),
+        ("What skills does Alice know?", "skill"),
+    ],
+)
+def test_planner_routes_work_tool_project_and_skill_queries(query, expected_category):
+    planner = PlannerService()
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query=query))
+
+    assert any(item.domain == "work" and item.category == expected_category for item in plan.domain_queries)
+
+
+def test_planner_generic_work_query_searches_multiple_work_categories():
+    planner = PlannerService()
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="What does Alice do for work?"))
+
+    categories = {item.category for item in plan.domain_queries if item.domain == "work"}
+    assert {"employment", "role", "org", "project", "skill", "tool", "engagement"} <= categories
+
+
+def test_planner_extracts_tool_false_premise_claim_check():
+    planner = PlannerService()
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Does Alice use Ruby?"))
+
+    assert any(check.claim_type == "tool" and check.value == "Ruby" for check in plan.claim_checks)
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "What happened to Alice in October 2023?",
+        "What event happened to Alice in October 2023?",
+        "When did Alice have the accident?",
+        "Why did Alice pause pottery?",
+        "Was Alice in a ski accident?",
+    ],
+)
+def test_planner_routes_real_experience_event_queries(query):
+    planner = PlannerService()
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query=query))
+
+    assert any(item.domain == "experiences" and item.category == "event" for item in plan.domain_queries)
+
+
+def test_planner_extracts_accident_false_premise_claim_check():
+    planner = PlannerService()
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Was Alice in a ski accident?"))
+
+    assert any(check.claim_type == "event" and check.value.lower() == "ski accident" for check in plan.claim_checks)

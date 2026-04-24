@@ -68,6 +68,37 @@ def _seed_conversation(settings, tmp_path):
     return conversation.conversation_id
 
 
+def _seed_speakerless_conversation(settings, tmp_path, text: str):
+    source = tmp_path / "api-candidates-speakerless.json"
+    source.write_text(
+        json.dumps({"messages": [{"timestamp": "2026-04-21T10:00:00Z", "text": text}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    with get_connection(settings.db_path) as conn:
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        imported = IngestService().import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+        )
+        conversation = ConversationIngestService().import_conversation(
+            settings,
+            conn,
+            workspace_slug="default",
+            source_id=imported.source_id,
+        )
+    return conversation.conversation_id
+
+
 def _seed_publish_candidate(
     settings,
     *,
@@ -272,6 +303,88 @@ def test_api_candidate_extract_can_include_style_and_psychometrics(monkeypatch, 
     assert "psychometrics" in domains
 
 
+def test_api_candidate_extract_owner_first_person_fallback(monkeypatch, settings, tmp_path):
+    conversation_id = _seed_speakerless_conversation(
+        settings,
+        tmp_path,
+        "I live in Porto. I work as a designer. I prefer coffee.",
+    )
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/candidates/extract",
+        json={
+            "workspace": "default",
+            "conversation_id": conversation_id,
+            "owner_person_slug": "alice",
+            "owner_display_name": "Alice",
+            "attribution_policy": "owner_first_person_fallback",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items
+    assert {item["candidate_status"] for item in items} == {"validated_candidate"}
+    assert {item["domain"] for item in items} >= {"biography", "work", "preferences"}
+    assert all(item["person_id"] is not None for item in items)
+    assert all(item["payload"]["attribution_method"] == "owner_first_person_fallback" for item in items)
+    facts = {(item["domain"], item["category"]): item for item in items}
+    assert facts[("biography", "residence")]["payload"]["city"] == "Porto"
+    assert facts[("work", "employment")]["payload"]["title"] == "designer"
+    assert facts[("preferences", "preference")]["payload"]["value"] == "coffee"
+
+
+def test_api_candidate_extract_strict_speaker_only_keeps_speakerless_note_for_review(monkeypatch, settings, tmp_path):
+    conversation_id = _seed_speakerless_conversation(settings, tmp_path, "I live in Porto.")
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/candidates/extract",
+        json={
+            "workspace": "default",
+            "conversation_id": conversation_id,
+            "attribution_policy": "strict_speaker_only",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items
+    assert {item["candidate_status"] for item in items} == {"needs_review"}
+    assert all(item["person_id"] is None for item in items)
+    assert all("speaker_unresolved" in item["reason"] for item in items)
+
+
+def test_api_candidate_extract_owner_fallback_not_used_for_ambiguous_third_person_note(monkeypatch, settings, tmp_path):
+    conversation_id = _seed_speakerless_conversation(settings, tmp_path, "I live in Porto. Bob lives in Paris.")
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/candidates/extract",
+        json={
+            "workspace": "default",
+            "conversation_id": conversation_id,
+            "owner_person_slug": "alice",
+            "owner_display_name": "Alice",
+            "attribution_policy": "owner_first_person_fallback",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items
+    assert all(item["person_id"] is None for item in items)
+    assert all(item["candidate_status"] == "needs_review" for item in items)
+    assert all("attribution_method" not in item["payload"] for item in items)
+
+
 def test_api_publish_rejects_invalid_candidate_status(monkeypatch, settings):
     candidate_id = _seed_publish_candidate(settings, candidate_status="needs_review")
     monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
@@ -352,7 +465,7 @@ def test_api_publish_rejects_low_confidence(monkeypatch, settings):
     assert "confidence threshold" in response.json()["detail"]
 
 
-def test_api_publish_rejects_unresolved_social_target(monkeypatch, settings):
+def test_api_publish_auto_creates_unresolved_social_target(monkeypatch, settings):
     candidate_id = _seed_publish_candidate(
         settings,
         domain="social_circle",
@@ -366,8 +479,11 @@ def test_api_publish_rejects_unresolved_social_target(monkeypatch, settings):
 
     response = client.post("/v1/candidates/publish", json={"workspace": "default", "candidate_id": candidate_id, "actor": _actor(settings)})
 
-    assert response.status_code == 422
-    assert "unresolved hard conflict" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["fact"]["domain"] == "social_circle"
+    assert payload["fact"]["payload"]["target_label"] == "Bob"
+    assert payload["fact"]["payload"]["target_person_id"] is not None
 
 
 def test_api_publish_rejects_workspace_scope_mismatch(monkeypatch, settings):

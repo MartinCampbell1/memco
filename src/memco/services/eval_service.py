@@ -10,6 +10,11 @@ from typing import Any
 from memco.api.deps import build_internal_actor
 from memco.config import load_settings
 from memco.db import get_connection
+from memco.extractors.base import ExtractionContext
+from memco.extractors.biography import extract as extract_biography
+from memco.extractors.experiences import extract as extract_experiences
+from memco.extractors.preferences import extract as extract_preferences
+from memco.extractors.work import extract as extract_work
 from memco.llm_usage import LLMUsageTracker
 from memco.models.memory_fact import MemoryFactInput
 from memco.models.retrieval import RetrievalRequest
@@ -457,6 +462,9 @@ class EvalService:
         "unsupported_premise_answered_as_fact": 0,
         "evidence_missing_on_supported_answers": 0,
         "speakerless_owner_fallback_accuracy": 0.95,
+        "tool_project_retrieval_pass_rate": 0.95,
+        "experience_event_retrieval_pass_rate": 0.90,
+        "source_hard_case_failures": 0,
     }
 
     BEHAVIOR_CHECKS = (
@@ -1657,6 +1665,157 @@ class EvalService:
             return 0.0
         return round(sum(1 for item in selected if item["passed"]) / len(selected), 4)
 
+    def _personal_case_pass_rate(self, *, cases: list[dict[str, Any]], results: list[dict], predicate) -> float:
+        selected_ids = {str(item["id"]) for item in cases if predicate(item)}
+        selected = [item for item in results if str(item["id"]) in selected_ids]
+        if not selected:
+            return 0.0
+        return round(sum(1 for item in selected if item["passed"]) / len(selected), 4)
+
+    def _source_hard_context(self, case: dict[str, Any]) -> ExtractionContext:
+        return ExtractionContext(
+            text=str(case.get("source_text") or ""),
+            subject_key=str(case["person_slug"]),
+            subject_display=str(case["person_display_name"]),
+            speaker_label=str(case["person_display_name"]),
+            person_id=1,
+            message_id=1,
+            source_segment_id=1,
+            session_id=1,
+            occurred_at="2026-04-24T00:00:00Z",
+        )
+
+    def _personal_source_hard_check(self, case: dict[str, Any]) -> dict:
+        check_name = str(case.get("source_hard_check") or "")
+        source_text = str(case.get("source_text") or "")
+        failures: list[str] = []
+        if not source_text:
+            failures.append("source_text_missing")
+        context = self._source_hard_context(case)
+
+        if check_name == "combined_tools_split":
+            work_candidates = extract_work(context)
+            tools = [
+                str(candidate.get("payload", {}).get("tool") or "")
+                for candidate in work_candidates
+                if candidate.get("domain") == "work" and candidate.get("category") == "tool"
+            ]
+            seeded_tools = [
+                str(fact.get("payload", {}).get("tool") or "")
+                for fact in case.get("seed_facts", [])
+                if fact.get("domain") == "work" and fact.get("category") == "tool"
+            ]
+            if tools != ["Python", "Postgres"]:
+                failures.append(f"source_tools_not_split:{tools}")
+            if seeded_tools != ["Python", "Postgres"]:
+                failures.append(f"seed_tools_not_split:{seeded_tools}")
+            if any(value.lower() == "python and postgres" for value in tools + seeded_tools):
+                failures.append("combined_tool_value_present")
+            if any(value.lower() == "ruby" for value in tools + seeded_tools):
+                failures.append("false_tool_ruby_present")
+        elif check_name == "combined_project_temporal":
+            work_candidates = extract_work(context)
+            project_texts = [
+                " ".join(
+                    str(part)
+                    for part in (
+                        candidate.get("payload", {}).get("project"),
+                        candidate.get("summary"),
+                        candidate.get("evidence", [{}])[0].get("quote") if candidate.get("evidence") else "",
+                    )
+                    if part
+                )
+                for candidate in work_candidates
+                if candidate.get("domain") == "work" and candidate.get("category") == "project"
+            ]
+            seeded_text = " ".join(json.dumps(fact, ensure_ascii=False) for fact in case.get("seed_facts", []))
+            source_combined = " ".join(project_texts).lower()
+            seeded_combined = seeded_text.lower()
+            if "project phoenix" not in source_combined:
+                failures.append("source_project_phoenix_missing")
+            if "march" not in source_combined:
+                failures.append("source_project_temporal_anchor_missing")
+            if "project phoenix" not in seeded_combined:
+                failures.append("seed_project_phoenix_missing")
+            if "march" not in seeded_combined:
+                failures.append("seed_project_temporal_anchor_missing")
+        elif check_name == "experience_accident_temporal":
+            experience_candidates = extract_experiences(context)
+            combined = " ".join(json.dumps(candidate, ensure_ascii=False) for candidate in experience_candidates).lower()
+            if "serious accident" not in combined:
+                failures.append("serious_accident_missing")
+            if "october 2023" not in combined and "2023" not in combined:
+                failures.append("accident_temporal_anchor_missing")
+            if "negative" not in combined:
+                failures.append("accident_negative_valence_missing")
+        elif check_name == "negated_preference_not_positive":
+            preference_candidates = extract_preferences(context)
+            positive_sushi = [
+                candidate
+                for candidate in preference_candidates
+                if str(candidate.get("payload", {}).get("value") or "").lower() == "sushi"
+                and str(candidate.get("payload", {}).get("polarity") or "like").lower() == "like"
+                and candidate.get("payload", {}).get("is_current") is not False
+            ]
+            if positive_sushi:
+                failures.append("negated_sushi_became_positive_preference")
+            if case.get("seed_facts"):
+                failures.append("negated_case_seeded_positive_fact")
+        elif check_name == "hypothetical_residence_not_positive":
+            biography_candidates = extract_biography(context)
+            experience_candidates = extract_experiences(context)
+            paris_residence = [
+                candidate
+                for candidate in biography_candidates
+                if candidate.get("domain") == "biography"
+                and candidate.get("category") == "residence"
+                and str(candidate.get("payload", {}).get("city") or "").lower() == "paris"
+            ]
+            moved_to_paris = [
+                candidate
+                for candidate in experience_candidates
+                if "paris" in json.dumps(candidate.get("payload", {}), ensure_ascii=False).lower()
+            ]
+            if paris_residence or moved_to_paris:
+                failures.append("hypothetical_paris_became_positive_fact")
+            if case.get("seed_facts"):
+                failures.append("hypothetical_case_seeded_positive_fact")
+        elif check_name == "preference_update_current":
+            preference_candidates = extract_preferences(context)
+            current_coffee = [
+                candidate
+                for candidate in preference_candidates
+                if str(candidate.get("payload", {}).get("value") or "").lower() == "coffee"
+                and candidate.get("payload", {}).get("is_current") is not False
+            ]
+            current_tea = [
+                candidate
+                for candidate in preference_candidates
+                if str(candidate.get("payload", {}).get("value") or "").lower() == "tea"
+                and candidate.get("payload", {}).get("is_current") is not False
+            ]
+            if not current_coffee:
+                failures.append("current_coffee_missing")
+            if current_tea:
+                failures.append("old_tea_still_current")
+        else:
+            failures.append(f"unknown_source_hard_check:{check_name}")
+
+        return {
+            "id": case["id"],
+            "source_hard_check": check_name,
+            "source_text": source_text,
+            "passed": not failures,
+            "failures": failures,
+        }
+
+    def _personal_source_hard_checks(self, cases: list[dict[str, Any]]) -> list[dict]:
+        return [
+            self._personal_source_hard_check(case)
+            for case in cases
+            if str(case.get("source_hard_check") or "")
+        ]
+
     def _personal_group_counts(self, cases: list[dict[str, Any]]) -> dict[str, int]:
         return {group: sum(1 for item in cases if item["group"] == group) for group in sorted(self.PERSONAL_MEMORY_REQUIRED_COUNTS)}
 
@@ -1667,7 +1826,14 @@ class EvalService:
             for group, required in self.PERSONAL_MEMORY_REQUIRED_COUNTS.items()
         }
 
-    def _personal_metrics(self, *, cases: list[dict[str, Any]], results: list[dict], start_event_index: int) -> dict:
+    def _personal_metrics(
+        self,
+        *,
+        cases: list[dict[str, Any]],
+        results: list[dict],
+        source_hard_checks: list[dict],
+        start_event_index: int,
+    ) -> dict:
         unsupported_premise_answered_as_fact = sum(
             1
             for item in results
@@ -1683,6 +1849,7 @@ class EvalService:
             for item in results
             if item["group"] == "cross_person_contamination" and any("forbidden_value_present" in failure for failure in item["failures"])
         )
+        source_hard_case_failures = sum(1 for item in source_hard_checks if not item["passed"])
         metrics = {
             "core_memory_accuracy": self._personal_pass_rate(results=results, group="core_fact"),
             "adversarial_robustness": self._personal_pass_rate(results=results, group="adversarial_false_premise"),
@@ -1690,6 +1857,21 @@ class EvalService:
             "unsupported_premise_answered_as_fact": unsupported_premise_answered_as_fact,
             "evidence_missing_on_supported_answers": evidence_missing_on_supported_answers,
             "speakerless_owner_fallback_accuracy": self._personal_pass_rate(results=results, group="speakerless_note"),
+            "tool_project_retrieval_pass_rate": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=lambda item: item.get("scenario") == "work"
+                and item.get("domain") == "work"
+                and item.get("domain_category") in {"tool", "project"},
+            ),
+            "experience_event_retrieval_pass_rate": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=lambda item: item.get("scenario") == "experiences"
+                and item.get("domain") == "experiences"
+                and item.get("domain_category") == "event",
+            ),
+            "source_hard_case_failures": source_hard_case_failures,
         }
         checks = {
             "core_memory_accuracy": {
@@ -1725,6 +1907,24 @@ class EvalService:
                 "ok": metrics["speakerless_owner_fallback_accuracy"]
                 >= self.PERSONAL_MEMORY_THRESHOLDS["speakerless_owner_fallback_accuracy"],
             },
+            "tool_project_retrieval_pass_rate": {
+                "value": metrics["tool_project_retrieval_pass_rate"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["tool_project_retrieval_pass_rate"],
+                "ok": metrics["tool_project_retrieval_pass_rate"]
+                >= self.PERSONAL_MEMORY_THRESHOLDS["tool_project_retrieval_pass_rate"],
+            },
+            "experience_event_retrieval_pass_rate": {
+                "value": metrics["experience_event_retrieval_pass_rate"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["experience_event_retrieval_pass_rate"],
+                "ok": metrics["experience_event_retrieval_pass_rate"]
+                >= self.PERSONAL_MEMORY_THRESHOLDS["experience_event_retrieval_pass_rate"],
+            },
+            "source_hard_case_failures": {
+                "value": metrics["source_hard_case_failures"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["source_hard_case_failures"],
+                "ok": metrics["source_hard_case_failures"]
+                <= self.PERSONAL_MEMORY_THRESHOLDS["source_hard_case_failures"],
+            },
         }
         count_checks = self._personal_count_checks(cases)
         group_reports = []
@@ -1743,6 +1943,9 @@ class EvalService:
             "metrics": metrics,
             "policy_checks": checks,
             "dataset_count_checks": count_checks,
+            "source_hard_checks_total": len(source_hard_checks),
+            "source_hard_checks_passed": sum(1 for item in source_hard_checks if item["passed"]),
+            "source_hard_checks": source_hard_checks,
             "groups": group_reports,
             "retrieval_latency_ms": self._latency_summary(latencies),
             "token_accounting": self.llm_usage_tracker.summary(start_index=start_event_index),
@@ -1767,7 +1970,13 @@ class EvalService:
                 for case in cases
             ]
         results.sort(key=lambda item: (item["group"], item["id"]))
-        summary = self._personal_metrics(cases=cases, results=results, start_event_index=start_event_index)
+        source_hard_checks = self._personal_source_hard_checks(cases)
+        summary = self._personal_metrics(
+            cases=cases,
+            results=results,
+            source_hard_checks=source_hard_checks,
+            start_event_index=start_event_index,
+        )
         failures = [item for item in results if not item["passed"]]
         ok = (
             not failures

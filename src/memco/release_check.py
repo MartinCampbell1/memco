@@ -172,6 +172,45 @@ def _run_operator_safety_gate(*, project_root: Path) -> dict:
     }
 
 
+def _run_fixture_runtime_gate(*, project_root: Path) -> dict:
+    return {
+        "name": "runtime_policy",
+        "ok": True,
+        "root": str(project_root),
+        "runtime_profile": "fixture",
+        "provider": "mock",
+        "model": "fixture",
+        "fixture_only": True,
+        "release_eligible": False,
+        "reason": "fixture-ok mode is archive-safe and cannot be used as release-grade proof",
+    }
+
+
+def _run_fixture_storage_gate(*, project_root: Path) -> dict:
+    return {
+        "name": "storage_contract",
+        "ok": True,
+        "root": str(project_root),
+        "runtime_profile": "fixture",
+        "storage_engine": "sqlite",
+        "storage_contract_engine": "postgres",
+        "storage_role": "fallback",
+        "reason": "fixture-ok mode uses isolated sqlite fixture storage",
+    }
+
+
+def _run_fixture_operator_safety_gate(*, project_root: Path) -> dict:
+    return {
+        "name": "operator_safety",
+        "ok": True,
+        "root": str(project_root),
+        "runtime_profile": "fixture",
+        "api_token_configured": False,
+        "backup_path_exists": False,
+        "reason": "fixture-ok mode intentionally does not require live operator secrets",
+    }
+
+
 def _run_eval_gate(
     *,
     eval_root: Path,
@@ -368,31 +407,82 @@ def _run_benchmark_gate(
     }
 
 
+def _run_personal_memory_eval_gate(
+    *,
+    project_root: Path,
+    eval_root: Path,
+) -> dict:
+    goldens_dir = project_root / "eval" / "personal_memory_goldens"
+    settings = load_settings(eval_root)
+    settings.runtime.profile = "fixture"
+    settings.storage.engine = "sqlite"
+    write_settings(settings)
+    ensure_runtime(settings)
+    artifact = EvalService().run_personal_memory(
+        project_root=eval_root,
+        goldens_dir=goldens_dir,
+    )
+    realistic_cases: list[dict] = []
+    realistic_path = goldens_dir / "realistic_personal_memory_goldens.jsonl"
+    if realistic_path.exists():
+        for raw_line in realistic_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line:
+                realistic_cases.append(json.loads(line))
+    realistic_scenario_counts = {
+        str(scenario): sum(1 for item in realistic_cases if item.get("scenario") == scenario)
+        for scenario in sorted({item.get("scenario") for item in realistic_cases if item.get("scenario")})
+    }
+    return {
+        "name": "personal_memory_eval_artifact",
+        "ok": artifact["ok"],
+        "root": str(eval_root),
+        "goldens_dir": artifact["goldens_dir"],
+        "artifact_summary": {
+            "artifact_type": artifact["artifact_type"],
+            "release_scope": artifact["release_scope"],
+            "total": artifact["total"],
+            "passed": artifact["passed"],
+            "failed": artifact["failed"],
+            "realistic_total": len(realistic_cases),
+            "realistic_scenario_counts": realistic_scenario_counts,
+            "metrics": artifact["metrics"],
+            "policy_checks": artifact["policy_checks"],
+            "dataset_count_checks": artifact["dataset_count_checks"],
+            "groups": artifact["groups"],
+        },
+    }
+
+
 def run_release_check(
     *,
     project_root: Path,
     eval_root: Path | None = None,
     include_pytest: bool = True,
     include_eval: bool = True,
+    include_realistic_eval: bool = False,
+    fixture_ok: bool = False,
     postgres_database_url: str | None = None,
     postgres_root: Path | None = None,
     postgres_port: int | None = None,
     include_live_smoke: bool | None = None,
 ) -> dict:
-    if not include_pytest and not include_eval and not postgres_database_url:
+    if not include_pytest and not include_eval and not include_realistic_eval and not postgres_database_url:
         raise ValueError("run_release_check requires at least one enabled step")
+    if fixture_ok and postgres_database_url:
+        raise ValueError("fixture-ok release-check cannot include postgres_database_url")
     if postgres_database_url and (not include_pytest or not include_eval):
         raise ValueError("canonical postgres release-check requires both pytest and eval steps")
 
     steps: list[dict] = []
     live_smoke_requested = False
-    runtime_step = _run_runtime_policy_gate(project_root=project_root)
+    runtime_step = _run_fixture_runtime_gate(project_root=project_root) if fixture_ok else _run_runtime_policy_gate(project_root=project_root)
     steps.append(runtime_step)
     ok = runtime_step["ok"]
-    storage_step = _run_storage_contract_gate(project_root=project_root)
+    storage_step = _run_fixture_storage_gate(project_root=project_root) if fixture_ok else _run_storage_contract_gate(project_root=project_root)
     steps.append(storage_step)
     ok = ok and storage_step["ok"]
-    safety_step = _run_operator_safety_gate(project_root=project_root)
+    safety_step = _run_fixture_operator_safety_gate(project_root=project_root) if fixture_ok else _run_operator_safety_gate(project_root=project_root)
     steps.append(safety_step)
     ok = ok and safety_step["ok"]
     pytest_step: dict | None = None
@@ -427,6 +517,31 @@ def run_release_check(
             }
         steps.append(eval_step)
         ok = ok and eval_step["ok"]
+
+    if include_realistic_eval:
+        if ok:
+            if eval_root is not None:
+                personal_eval_root = eval_root / "personal-memory-eval"
+                personal_eval_root.mkdir(parents=True, exist_ok=True)
+                personal_eval_step = _run_personal_memory_eval_gate(
+                    project_root=project_root,
+                    eval_root=personal_eval_root,
+                )
+            else:
+                with TemporaryDirectory(prefix="memco-personal-memory-release-check-") as tmpdir:
+                    personal_eval_step = _run_personal_memory_eval_gate(
+                        project_root=project_root,
+                        eval_root=Path(tmpdir),
+                    )
+        else:
+            personal_eval_step = {
+                "name": "personal_memory_eval_artifact",
+                "ok": False,
+                "skipped": True,
+                "reason": "prior_gate_failed",
+            }
+        steps.append(personal_eval_step)
+        ok = ok and personal_eval_step["ok"]
 
     if postgres_database_url:
         if ok:
@@ -479,22 +594,41 @@ def run_release_check(
             ok = ok and live_smoke_step["ok"]
 
     payload = {
-        "artifact_type": "canonical_postgres_release_check" if postgres_database_url else "repo_local_release_check",
+        "artifact_type": "fixture_release_check"
+        if fixture_ok
+        else "canonical_postgres_release_check"
+        if postgres_database_url
+        else "repo_local_release_check",
         "ok": ok,
-        "gate_type": "canonical-postgres" if postgres_database_url else "quick-repo-local",
+        "gate_type": "fixture-ok" if fixture_ok else "canonical-postgres" if postgres_database_url else "quick-repo-local",
+        "fixture_only": fixture_ok,
+        "release_eligible": False if fixture_ok else ok,
         "include_pytest": include_pytest,
         "include_eval": include_eval,
+        "include_realistic_eval": include_realistic_eval,
         "include_postgres_smoke": bool(postgres_database_url),
         "project_root": str(project_root),
         "steps": steps,
     }
-    return attach_artifact_context(
+    result = attach_artifact_context(
         payload,
         project_root=project_root,
         steps=steps,
         live_smoke_requested=live_smoke_requested,
         live_smoke_required=False,
     )
+    if fixture_ok:
+        context = result.get("artifact_context") or {}
+        context["runtime_mode"] = "fixture"
+        context["runtime_provider"] = "mock"
+        context["runtime_model"] = "fixture"
+        context["fixture_only"] = True
+        context["release_eligible"] = False
+        if isinstance(context.get("config_source"), dict):
+            context["config_source"]["checkout_release_eligible"] = False
+            context["config_source"]["operator_release_eligible"] = False
+        result["artifact_context"] = context
+    return result
 
 
 def run_strict_release_check(

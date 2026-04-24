@@ -69,6 +69,48 @@ class PublishService:
             quote_text=source_fact["evidence"][0]["quote_text"] if source_fact.get("evidence") else candidate["summary"],
         )
 
+    def _ensure_social_target_person_id(self, conn, *, workspace_slug: str, target_label: str) -> int:
+        target_label = target_label.strip()
+        if not target_label:
+            raise ValueError("Cannot publish social_circle candidate without target_label")
+        target_slug = slugify(target_label)
+        try:
+            return self.fact_repository.resolve_person_id(
+                conn,
+                workspace_slug=workspace_slug,
+                person_slug=target_slug,
+            )
+        except ValueError:
+            person = self.fact_repository.upsert_person(
+                conn,
+                workspace_slug=workspace_slug,
+                display_name=target_label,
+                slug=target_slug,
+                person_type="human",
+                aliases=[target_label],
+            )
+            return int(person["id"])
+
+    def _resolve_social_target_for_publish(self, conn, *, workspace_slug: str, candidate: dict) -> dict:
+        if candidate.get("domain") != "social_circle":
+            return candidate
+        payload = dict(candidate.get("payload") or {})
+        if payload.get("target_person_id") is not None:
+            return candidate
+        target_label = str(payload.get("target_label") or "").strip()
+        target_person_id = self._ensure_social_target_person_id(
+            conn,
+            workspace_slug=workspace_slug,
+            target_label=target_label,
+        )
+        payload["target_person_id"] = target_person_id
+        return self.candidate_repository.update_candidate_payload(
+            conn,
+            candidate_id=int(candidate["id"]),
+            payload=payload,
+            reason="auto-resolved social target from target_label",
+        )
+
     def publish_candidate(self, conn, *, workspace_slug: str, candidate_id: int) -> dict:
         candidate = self.candidate_repository.get_candidate(conn, candidate_id=candidate_id)
         workspace_row = conn.execute(
@@ -106,6 +148,11 @@ class PublishService:
         primary_evidence = evidence_items[0]
         if not (primary_evidence.get("source_segment_ids") or []):
             raise ValueError("Cannot publish candidate without source-segment provenance")
+        candidate = self._resolve_social_target_for_publish(
+            conn,
+            workspace_slug=workspace_slug,
+            candidate=candidate,
+        )
         publish_block_reason = get_policy(str(candidate["domain"])).publish_block_reason(
             category=str(candidate["category"]),
             payload=candidate["payload"],

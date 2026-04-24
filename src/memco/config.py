@@ -77,6 +77,11 @@ class IngestSettings(BaseModel):
     )
 
 
+class OwnerSettings(BaseModel):
+    person_slug: str = ""
+    display_name: str = ""
+
+
 class LoggingSettings(BaseModel):
     enable_retrieval_logs: bool = True
     query_hash_salt: str = ""
@@ -94,6 +99,7 @@ class Settings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
+    owner: OwnerSettings = Field(default_factory=OwnerSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
 
@@ -149,6 +155,7 @@ def _settings_payload(settings: Settings) -> dict:
         "llm": settings.llm.model_dump(),
         "storage": settings.storage.model_dump(),
         "ingest": settings.ingest.model_dump(),
+        "owner": settings.owner.model_dump(),
         "logging": settings.logging.model_dump(),
         "runtime": settings.runtime.model_dump(),
     }

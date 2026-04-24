@@ -19,10 +19,14 @@ from memco.extractors.preferences import extract as extract_preferences
 from memco.extractors.psychometrics import extract as extract_psychometrics
 from memco.extractors.social_circle import extract as extract_social_circle
 from memco.extractors.work import extract as extract_work
+from memco.consolidation.biography import BiographyConsolidationPolicy
 from memco.db import get_connection
 from memco.llm import LLMJSONResponse, LLMTextResponse, LLMUsage
+from memco.models.memory_fact import MemoryFactInput
 from memco.repositories.fact_repository import FactRepository
+from memco.repositories.source_repository import SourceRepository
 from memco.services.candidate_service import CandidateService
+from memco.services.consolidation_service import ConsolidationService
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.extraction_service import ExtractionService
 from memco.services.ingest_service import IngestService
@@ -228,6 +232,123 @@ class _NonObjectThenValidChunkProvider(_EmptyChunkProvenanceProvider):
                 model=response.model,
             )
         return response
+
+
+class _DomainDenseProvider(_RecordingExtractionProvider):
+    def __init__(self, *, fail_domain: str = "") -> None:
+        super().__init__()
+        self.fail_domain = fail_domain
+
+    def complete_json(
+        self,
+        *,
+        system_prompt: str,
+        prompt: str,
+        schema_name: str,
+        metadata: dict | None = None,
+    ) -> LLMJSONResponse:
+        payload = json.loads(prompt)
+        metadata = metadata or {}
+        self.calls.append({"payload": payload, "metadata": metadata})
+        domain = str(metadata.get("extraction_domain") or "")
+        if domain == self.fail_domain:
+            raise RuntimeError(f"{domain} provider failure")
+        evidence = [{"quote": payload["text"], "message_ids": [], "source_segment_ids": [], "session_ids": []}]
+        items_by_domain = {
+            "biography": [
+                {
+                    "domain": "biography",
+                    "category": "residence",
+                    "subcategory": "",
+                    "canonical_key": f"{payload['subject_key']}:biography:residence:lisbon",
+                    "payload": {"city": "Lisbon"},
+                    "summary": "Alice lives in Lisbon.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": evidence,
+                },
+                {
+                    "domain": "biography",
+                    "category": "family",
+                    "subcategory": "sister",
+                    "canonical_key": f"{payload['subject_key']}:biography:family:sister:maria",
+                    "payload": {"relation": "sister", "name": "Maria"},
+                    "summary": "Alice's sister is Maria.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": evidence,
+                },
+            ],
+            "preferences": [
+                {
+                    "domain": "preferences",
+                    "category": "preference",
+                    "subcategory": "",
+                    "canonical_key": f"{payload['subject_key']}:preferences:preference:coffee",
+                    "payload": {"value": "coffee", "polarity": "like", "is_current": True},
+                    "summary": "Alice likes coffee.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": evidence,
+                }
+            ],
+            "work": [
+                {
+                    "domain": "work",
+                    "category": "tool",
+                    "subcategory": "",
+                    "canonical_key": f"{payload['subject_key']}:work:tool:python",
+                    "payload": {"tool": "Python"},
+                    "summary": "Alice uses Python.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": evidence,
+                },
+                {
+                    "domain": "work",
+                    "category": "org",
+                    "subcategory": "",
+                    "canonical_key": f"{payload['subject_key']}:work:org:acme",
+                    "payload": {"org": "Acme", "is_current": True},
+                    "summary": "Alice works at Acme.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": evidence,
+                },
+            ],
+            "experiences": [
+                {
+                    "domain": "experiences",
+                    "category": "event",
+                    "subcategory": "",
+                    "canonical_key": f"{payload['subject_key']}:experiences:event:car-accident",
+                    "payload": {"event": "car accident", "summary": "Alice had a car accident.", "event_at": "October", "valence": "negative"},
+                    "summary": "Alice had a car accident.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": evidence,
+                }
+            ],
+        }
+        items = items_by_domain.get(domain, [])
+        raw_text = json.dumps({"items": items}, ensure_ascii=False)
+        return LLMJSONResponse(
+            content={"items": items},
+            raw_text=raw_text,
+            usage=LLMUsage(
+                input_tokens=self.count_tokens(text=system_prompt) + self.count_tokens(text=prompt),
+                output_tokens=self.count_tokens(text=raw_text),
+                estimated_cost_usd=0.0,
+            ),
+            provider=self.name,
+            model=self.model,
+        )
 
 
 def test_extraction_prompt_contract_exposes_llm_first_domain_rules():
@@ -644,6 +765,57 @@ def test_provider_receives_conversation_chunk_payload(settings, tmp_path):
     assert all(call["metadata"]["message_id"] is None for call in provider.calls)
     residence = next(candidate for candidate in candidates if candidate["domain"] == "biography")
     assert residence["payload"] == {"city": "Lisbon", "valid_from": "2024"}
+
+
+def test_provider_extraction_runs_domain_scoped_prompts_for_dense_snippet():
+    provider = _DomainDenseProvider()
+    extraction = ExtractionService(llm_provider=provider)
+    dense = (
+        "I live in Lisbon. My sister is Maria. I prefer coffee. "
+        "I use Python. In October I had a car accident. I work at Acme."
+    )
+
+    candidates = extraction.extract_candidates(source_text=dense, person_hint="Alice")
+
+    call_domains = [call["metadata"]["extraction_domain"] for call in provider.calls]
+    assert call_domains == ["biography", "preferences", "social_circle", "work", "experiences"]
+    for call in provider.calls:
+        contract_domains = [item["domain"] for item in call["payload"]["output_contract"]["domains"]]
+        assert contract_domains == [call["metadata"]["extraction_domain"]]
+    domains = {candidate["domain"] for candidate in candidates}
+    assert {"biography", "preferences", "work", "experiences"} <= domains
+    assert any(candidate["domain"] == "biography" and candidate["category"] == "family" for candidate in candidates)
+
+
+def test_provider_domain_failure_does_not_suppress_other_domains_when_non_strict():
+    provider = _DomainDenseProvider(fail_domain="work")
+    extraction = ExtractionService(llm_provider=provider)
+    dense = (
+        "I live in Lisbon. My sister is Maria. I prefer coffee. "
+        "I use Python. In October I had a car accident. I work at Acme."
+    )
+
+    candidates = extraction._extract_candidates_via_provider(
+        text=dense,
+        subject_key="alice",
+        subject_display="Alice",
+        speaker_label="Alice",
+        person_id=None,
+        conn=None,
+        workspace_id=None,
+        strict_validation=False,
+    )
+
+    domains = {candidate["domain"] for candidate in candidates}
+    assert {"biography", "preferences", "experiences"} <= domains
+    assert "work" not in domains
+    assert [call["metadata"]["extraction_domain"] for call in provider.calls] == [
+        "biography",
+        "preferences",
+        "social_circle",
+        "work",
+        "experiences",
+    ]
     assert len(residence["evidence"][0]["source_segment_ids"]) == 3
 
 
@@ -1051,6 +1223,193 @@ def test_biography_extractor_covers_identity_education_family_habits_and_constra
     assert ("constraints", "") in categories
 
 
+BIOGRAPHY_CATEGORY_EXAMPLES = [
+    ("residence", _context("I live in Lisbon."), {"city": "Lisbon"}),
+    ("origin", _context("I'm from Canada."), {"place": "Canada"}),
+    ("identity", _context("My name is Alice Example."), {"name": "Alice Example"}),
+    ("education", _context("I studied computer science at MIT."), {"field": "computer science", "institution": "MIT"}),
+    ("family", _context("My sister is Emma."), {"relation": "sister", "name": "Emma"}),
+    ("pets", _context("My dog is Bruno."), {"pet_type": "dog", "pet_name": "Bruno"}),
+    ("age_birth", _context("I was born in 1990."), {"birth_year": "1990"}),
+    ("health", _context("I have asthma."), {"health_fact": "asthma", "status": "current"}),
+    ("languages", _context("I speak English and Spanish."), {"languages": ["English", "Spanish"]}),
+    ("habits", _context("I usually wake up at 6am."), {"habit": "wake up at 6am"}),
+    ("goals", _context("My goal is to run a marathon."), {"goal": "run a marathon"}),
+    ("constraints", _context("I must avoid gluten."), {"constraint": "gluten"}),
+    ("values", _context("I value independence in career decisions."), {"value": "independence", "context": "career decisions"}),
+    ("finances", _context("I keep an emergency fund for six months."), {"financial_note": "an emergency fund for six months", "caution": "sensitive"}),
+    ("legal", _context("I keep contracts private."), {"legal_note": "contracts private", "caution": "sensitive"}),
+    ("travel_history", _context("I traveled to Tokyo in 2024."), {"location": "Tokyo", "event_at": "2024", "date_range": "2024"}),
+    ("life_milestone", _context("I got married in 2021."), {"milestone": "got married", "event_at": "2021"}),
+    (
+        "communication_preference",
+        _context("Please send me short direct updates in English."),
+        {"preference": "short direct updates", "language": "English", "context": "communication"},
+    ),
+    (
+        "other_stable_self_knowledge",
+        _context("My passport is in the blue travel pouch."),
+        {"fact": "passport is in the blue travel pouch", "context": "private note"},
+    ),
+]
+
+
+@pytest.mark.parametrize("category,context,expected_payload", BIOGRAPHY_CATEGORY_EXAMPLES)
+def test_biography_extractor_covers_all_categories_with_evidence(category, context, expected_payload):
+    candidates = extract_biography(context)
+    candidate = next(item for item in candidates if item["category"] == category)
+
+    assert candidate["payload"] == expected_payload
+    assert candidate["domain"] == "biography"
+    assert candidate["evidence"][0]["quote"] == context.text
+    assert candidate["evidence"][0]["message_ids"] == [str(context.message_id)]
+    assert candidate["evidence"][0]["source_segment_ids"] == [context.source_segment_id]
+    assert validate_candidate_payload(domain="biography", category=category, payload=candidate["payload"]) == expected_payload
+
+
+BIOGRAPHY_NEGATED_EXAMPLES = [
+    ("residence", "I do not live in Lisbon."),
+    ("origin", "I'm not from Canada."),
+    ("identity", "My name is not Alice Example."),
+    ("education", "I did not study computer science at MIT."),
+    ("family", "My sister is not Emma."),
+    ("pets", "My dog is not Bruno."),
+    ("age_birth", "I was not born in 1990."),
+    ("health", "I do not have asthma."),
+    ("languages", "I do not speak Spanish."),
+    ("habits", "I do not usually wake up at 6am."),
+    ("goals", "My goal is not to run a marathon."),
+    ("constraints", "I do not have a gluten constraint."),
+    ("values", "I do not value independence in career decisions."),
+    ("finances", "I do not keep an emergency fund for six months."),
+    ("legal", "I do not keep contracts private."),
+    ("travel_history", "I did not travel to Tokyo in 2024."),
+    ("life_milestone", "I did not get married in 2021."),
+    ("communication_preference", "I do not prefer short direct updates in English."),
+    ("other_stable_self_knowledge", "My passport is not in the blue travel pouch."),
+]
+
+
+BIOGRAPHY_HYPOTHETICAL_EXAMPLES = [
+    ("residence", "If I live in Lisbon, I will update you."),
+    ("origin", "If I'm from Canada, this note is wrong."),
+    ("identity", "If my name is Alice Example, use that label."),
+    ("education", "If I studied computer science at MIT, add it later."),
+    ("family", "If my sister is Emma, invite her."),
+    ("pets", "If my dog is Bruno, call the vet."),
+    ("age_birth", "If I was born in 1990, check the record."),
+    ("health", "If I have asthma, remind me about inhalers."),
+    ("languages", "If I speak English and Spanish, translate it."),
+    ("habits", "If I usually wake up at 6am, schedule breakfast."),
+    ("goals", "If my goal is to run a marathon, make a plan."),
+    ("constraints", "If I can't eat gluten, choose another restaurant."),
+    ("values", "If I value independence in career decisions, remind me."),
+    ("finances", "If I keep an emergency fund for six months, tag it."),
+    ("legal", "If I keep contracts private, encrypt the note."),
+    ("travel_history", "If I traveled to Tokyo in 2024, add it."),
+    ("life_milestone", "If I got married in 2021, note it."),
+    ("communication_preference", "If I prefer short direct updates in English, use them."),
+    ("other_stable_self_knowledge", "If my passport is in the blue travel pouch, remind me."),
+]
+
+
+@pytest.mark.parametrize("category,text", BIOGRAPHY_NEGATED_EXAMPLES)
+def test_biography_extractor_skips_negated_positive_facts(category, text):
+    candidates = extract_biography(_context(text))
+
+    assert all(candidate["category"] != category for candidate in candidates)
+
+
+@pytest.mark.parametrize("category,text", BIOGRAPHY_HYPOTHETICAL_EXAMPLES)
+def test_biography_extractor_skips_hypothetical_positive_facts(category, text):
+    candidates = extract_biography(_context(text))
+
+    assert all(candidate["category"] != category for candidate in candidates)
+
+
+def test_biography_prompt_contract_includes_domain_specific_examples():
+    contract = build_extraction_contract(include_style=False, include_psychometrics=False)
+    biography = next(item for item in contract["domains"] if item["domain"] == "biography")
+
+    assert any("I was born in 1990" in item["text"] for item in biography["examples"])
+    assert any("no current residence fact" in item["extract"] for item in biography["examples"])
+    assert any("communication_preference" in item["extract"] for item in biography["examples"])
+
+
+def test_biography_consolidation_marks_residence_as_current_state_update():
+    policy = BiographyConsolidationPolicy()
+
+    assert "residence" in policy.current_state_categories
+    assert "travel_history" not in policy.current_state_categories
+    assert policy.semantic_duplicate_key(category="residence", payload={"city": "Lisbon"}) == "residence:lisbon"
+    assert "lisbon" in policy.semantic_duplicate_key(category="travel_history", payload={"location": "Lisbon", "event_at": "2024"})
+
+
+def test_biography_residence_update_supersedes_previous_active_fact(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    service = ConsolidationService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/biography-residence-update.md",
+            source_type="note",
+            origin_uri="/tmp/biography-residence-update.md",
+            title="biography-residence-update",
+            sha256="biography-residence-update-sha",
+            parsed_text="Alice lived in Berlin and later moved to Lisbon.",
+        )
+        berlin = service.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:berlin",
+                payload={"city": "Berlin"},
+                summary="Alice lives in Berlin.",
+                confidence=0.9,
+                observed_at="2025-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice lived in Berlin.",
+            ),
+        )
+        lisbon = service.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:lisbon",
+                payload={"city": "Lisbon"},
+                summary="Alice lives in Lisbon.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice moved to Lisbon.",
+            ),
+        )
+        berlin = fact_repo.get_fact(conn, fact_id=int(berlin["id"]))
+        lisbon = fact_repo.get_fact(conn, fact_id=int(lisbon["id"]))
+
+    assert berlin["status"] == "superseded"
+    assert berlin["superseded_by_fact_id"] == lisbon["id"]
+    assert lisbon["status"] == "active"
+    assert lisbon["supersedes_fact_id"] == berlin["id"]
+
+
 def test_preferences_extractor_tracks_polarity_strength_and_reason():
     candidates = extract_preferences(_context("I strongly dislike coffee because it makes me anxious."))
 
@@ -1060,6 +1419,11 @@ def test_preferences_extractor_tracks_polarity_strength_and_reason():
     assert candidate["payload"]["polarity"] == "dislike"
     assert candidate["payload"]["strength"] == "strong"
     assert candidate["payload"]["reason"] == "it makes me anxious"
+    assert candidate["payload"]["preference_domain"] == "food_drink"
+    assert candidate["payload"]["preference_category"] == "drink"
+    assert candidate["payload"]["original_phrasing"] == "I strongly dislike coffee because it makes me anxious"
+    assert candidate["evidence"][0]["quote"] == "I strongly dislike coffee because it makes me anxious."
+    assert validate_candidate_payload(domain="preferences", category="preference", payload=candidate["payload"]) == candidate["payload"]
 
 
 def test_preferences_extractor_marks_past_preference_as_not_current():
@@ -1084,10 +1448,53 @@ def test_preferences_extractor_handles_negated_preference_as_dislike():
 def test_preferences_extractor_prefers_current_self_correction():
     candidates = extract_preferences(_context("I used to like tea, but now I prefer coffee."))
 
-    assert len(candidates) == 1
-    candidate = candidates[0]
-    assert candidate["payload"]["value"] == "coffee"
-    assert candidate["payload"]["is_current"] is True
+    current = [candidate for candidate in candidates if candidate["payload"]["is_current"] is True]
+    past = [candidate for candidate in candidates if candidate["payload"]["is_current"] is False]
+    assert [candidate["payload"]["value"] for candidate in current] == ["coffee"]
+    assert [candidate["payload"]["value"] for candidate in past] == ["tea"]
+    assert past[0]["payload"]["valid_to"] == "now"
+
+
+def test_preferences_extractor_handles_current_preference_with_past_update():
+    candidates = extract_preferences(_context("I prefer coffee, but I used to prefer tea."))
+
+    current = [candidate for candidate in candidates if candidate["payload"]["is_current"] is True]
+    past = [candidate for candidate in candidates if candidate["payload"]["is_current"] is False]
+    assert [candidate["payload"]["value"] for candidate in current] == ["coffee"]
+    assert [candidate["payload"]["value"] for candidate in past] == ["tea"]
+
+
+def test_preferences_extractor_captures_required_schema_fields_for_evolution():
+    candidates = extract_preferences(_context("I used to prefer tea, but now I prefer coffee."))
+    by_value = {candidate["payload"]["value"]: candidate for candidate in candidates}
+
+    assert set(by_value) == {"tea", "coffee"}
+    assert by_value["coffee"]["payload"] == {
+        "value": "coffee",
+        "preference_domain": "food_drink",
+        "preference_category": "drink",
+        "polarity": "like",
+        "strength": "medium",
+        "reason": "",
+        "is_current": True,
+        "valid_from": "",
+        "valid_to": "",
+        "original_phrasing": "I prefer coffee",
+        "context": "",
+    }
+    assert by_value["tea"]["payload"] == {
+        "value": "tea",
+        "preference_domain": "food_drink",
+        "preference_category": "drink",
+        "polarity": "like",
+        "strength": "medium",
+        "reason": "",
+        "is_current": False,
+        "valid_from": "",
+        "valid_to": "now",
+        "original_phrasing": "I used to prefer tea, but now I prefer coffee",
+        "context": "",
+    }
 
 
 def test_preferences_extractor_supports_indirect_go_to_phrase():
@@ -1096,6 +1503,22 @@ def test_preferences_extractor_supports_indirect_go_to_phrase():
     assert len(candidates) == 1
     assert candidates[0]["payload"]["value"] == "Tea"
     assert candidates[0]["payload"]["polarity"] == "like"
+    assert candidates[0]["payload"]["preference_domain"] == "food_drink"
+    assert candidates[0]["payload"]["preference_category"] == "drink"
+    assert candidates[0]["payload"]["context"] == "I need to focus"
+
+
+def test_preferences_extractor_skips_hypothetical_preferences():
+    assert extract_preferences(_context("If I prefer tea later, I will tell you.")) == []
+
+
+def test_preferences_prompt_contract_includes_evolution_examples():
+    contract = build_extraction_contract(include_style=False, include_psychometrics=False)
+    preferences = next(item for item in contract["domains"] if item["domain"] == "preferences")
+
+    assert any("used to prefer tea" in item["text"] for item in preferences["examples"])
+    assert any("is_current=false" in item["extract"] for item in preferences["examples"])
+    assert any("no preference fact" in item["extract"] for item in preferences["examples"])
 
 
 def test_social_circle_extractor_captures_current_flag_and_relationship_event():
@@ -1144,6 +1567,84 @@ def test_work_extractor_covers_org_project_tool_and_current_flag():
     assert project["payload"]["project"] == "Memco"
 
 
+def test_work_extractor_splits_tool_lists_into_separate_candidates():
+    candidates = extract_work(_context("I use Python and Postgres."))
+    comma_candidates = extract_work(_context("I work with Docker, Kubernetes, and Terraform."))
+
+    tools = [candidate["payload"]["tool"] for candidate in candidates if candidate["category"] == "tool"]
+    assert tools == ["Python", "Postgres"]
+    comma_tools = [candidate["payload"]["tool"] for candidate in comma_candidates if candidate["category"] == "tool"]
+    assert comma_tools == ["Docker", "Kubernetes", "Terraform"]
+
+
+def test_work_extractor_covers_launched_and_worked_on_projects():
+    launched = extract_work(_context("I launched Project Phoenix in March."))
+    worked_on = extract_work(_context("I worked on Project Atlas."))
+    worked_on_and_launched = extract_work(_context("I worked on Project Phoenix and launched it in March."))
+
+    assert any(candidate["category"] == "project" and candidate["payload"]["project"] == "Project Phoenix in March" for candidate in launched)
+    assert any(candidate["category"] == "project" and candidate["payload"]["project"] == "Project Atlas" for candidate in worked_on)
+    combined_project = next(candidate for candidate in worked_on_and_launched if candidate["category"] == "project")
+    combined_text = f"{combined_project['payload']['project']} {combined_project['evidence'][0]['quote']}"
+    assert "Project Phoenix" in combined_text
+    assert "March" in combined_text
+
+
+def test_work_extractor_covers_employment_team_dates_and_status():
+    candidates = extract_work(_context("I work as a staff engineer at OpenAI with the Applied team since 2022."))
+    employment = next(candidate for candidate in candidates if candidate["category"] == "employment")
+
+    assert employment["payload"] == {
+        "title": "staff engineer",
+        "role": "staff engineer",
+        "is_current": True,
+        "org": "OpenAI",
+        "status": "current",
+        "start_date": "2022",
+        "team": "Applied",
+    }
+    assert validate_candidate_payload(domain="work", category="employment", payload=employment["payload"]) == employment["payload"]
+
+
+def test_work_extractor_covers_engagement_client_role_and_dates():
+    candidates = extract_work(_context("I consult for Acme as a platform advisor since 2024."))
+    engagement = next(candidate for candidate in candidates if candidate["category"] == "engagement")
+
+    assert engagement["payload"] == {
+        "engagement": "consulting",
+        "client": "Acme",
+        "status": "current",
+        "role": "platform advisor",
+        "start_date": "2024",
+    }
+    assert validate_candidate_payload(domain="work", category="engagement", payload=engagement["payload"]) == engagement["payload"]
+
+
+def test_work_extractor_covers_project_client_team_outcomes_and_status():
+    candidates = extract_work(
+        _context("I shipped Project Atlas for Acme with the mobile team. The outcome was 20% faster onboarding.")
+    )
+    project = next(candidate for candidate in candidates if candidate["category"] == "project")
+
+    assert project["payload"] == {
+        "project": "Project Atlas",
+        "status": "completed",
+        "team": "mobile",
+        "client": "Acme",
+        "outcomes": ["20% faster onboarding"],
+    }
+    assert validate_candidate_payload(domain="work", category="project", payload=project["payload"]) == project["payload"]
+
+
+def test_work_prompt_contract_includes_complete_category_examples():
+    contract = build_extraction_contract(include_style=False, include_psychometrics=False)
+    work = next(item for item in contract["domains"] if item["domain"] == "work")
+
+    assert any("staff engineer" in item["text"] for item in work["examples"])
+    assert any("engagement=consulting" in item["extract"] for item in work["examples"])
+    assert any("outcomes=" in item["extract"] for item in work["examples"])
+
+
 def test_work_extractor_captures_role_skill_and_past_context():
     candidates = extract_work(_context("I used to be a teacher. I know SQL."))
 
@@ -1168,6 +1669,112 @@ def test_experiences_extractor_captures_summary_time_participants_outcome_and_va
     assert candidate["payload"]["event_at"] == "2024"
     assert candidate["payload"]["outcome"] == "won the hackathon"
     assert candidate["payload"]["valence"] == "positive"
+
+
+def test_experiences_extractor_captures_accident_with_temporal_location_valence_and_outcome():
+    candidates = extract_experiences(
+        _context(
+            "In October 2023, I had a serious car accident during a family road trip to the Grand Canyon. "
+            "It was scary and I had to pause pottery."
+        )
+    )
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert "car accident" in payload["event"]
+    assert payload["event_at"] == "October 2023"
+    assert payload["temporal_anchor"] == "October 2023"
+    assert payload["location"] == "Grand Canyon"
+    assert payload["valence"] == "negative"
+    assert payload["intensity"] >= 0.8
+    assert payload["outcome"] == "pause pottery"
+    assert payload["lesson"] == ""
+    assert payload["linked_persons"] == []
+    assert payload["linked_projects"] == []
+
+
+def test_experiences_extractor_captures_hierarchy_linked_people_projects_and_lesson():
+    candidates = extract_experiences(
+        _context(
+            "In March 2024, I attended launch week with Bob and Dana during Project Phoenix. "
+            "We won the beta award and I learned to plan rehearsals."
+        )
+    )
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert payload["event"] == "launch week"
+    assert payload["event_at"] == "March 2024"
+    assert payload["participants"] == ["Bob", "Dana"]
+    assert payload["linked_persons"] == ["Bob", "Dana"]
+    assert payload["linked_projects"] == ["Project Phoenix"]
+    assert payload["event_hierarchy"] == ["Project Phoenix", "launch week"]
+    assert payload["outcome"] == "won the beta award and I learned to plan rehearsals"
+    assert payload["lesson"] == "plan rehearsals"
+    assert validate_candidate_payload(domain="experiences", category="event", payload=payload) == payload
+
+
+def test_experiences_extractor_captures_recurrence_and_date_range():
+    candidates = extract_experiences(_context("Every summer I went to PyCon with Bob from 2021 to 2023."))
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert payload["event"] == "PyCon"
+    assert payload["date_range"] == "2021 to 2023"
+    assert payload["temporal_anchor"] == "2021 to 2023"
+    assert payload["recurrence"] == "every summer"
+    assert payload["linked_persons"] == ["Bob"]
+
+
+def test_experiences_prompt_contract_includes_hierarchy_examples():
+    contract = build_extraction_contract(include_style=False, include_psychometrics=False)
+    experiences = next(item for item in contract["domains"] if item["domain"] == "experiences")
+
+    assert any("Project Phoenix" in item["text"] for item in experiences["examples"])
+    assert any("linked_projects" in item["extract"] for item in experiences["examples"])
+    assert any("recurrence=every summer" in item["extract"] for item in experiences["examples"])
+
+
+def test_experiences_extractor_cleans_month_year_from_event_text():
+    promoted = extract_experiences(_context("I got promoted in March 2024."))
+    suffered = extract_experiences(_context("I suffered a car accident in October 2023."))
+    attended_may = extract_experiences(_context("In May 2024, I attended PyCon with Bob."))
+
+    assert promoted[0]["payload"]["event"] == "promoted"
+    assert promoted[0]["payload"]["event_at"] == "March 2024"
+    assert suffered[0]["payload"]["event"] == "car accident"
+    assert suffered[0]["payload"]["event_at"] == "October 2023"
+    assert attended_may[0]["payload"]["event"] == "PyCon"
+    assert attended_may[0]["payload"]["event_at"] == "May 2024"
+
+
+def test_experiences_extractor_captures_dated_move_without_simple_move_duplication():
+    dated = extract_experiences(_context("I moved to Lisbon in October 2023."))
+    undated = extract_experiences(_context("I moved to Lisbon."))
+
+    assert dated[0]["payload"]["event"] == "moved to Lisbon"
+    assert dated[0]["payload"]["event_at"] == "October 2023"
+    assert undated == []
+
+
+def test_experiences_extractor_captures_breakup_as_event():
+    candidates = extract_experiences(_context("I broke up with Taylor in 2022."))
+
+    assert candidates[0]["payload"]["event"] == "broke up with Taylor"
+    assert candidates[0]["payload"]["event_at"] == "2022"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I did not have a car accident.",
+        "I had no car accident in 2024.",
+        "I might have a car accident someday.",
+        "I may attend PyCon someday.",
+    ],
+)
+def test_experiences_extractor_skips_negated_or_hypothetical_events(text):
+    assert extract_experiences(_context(text)) == []
 
 
 def test_extractors_support_russian_and_mixed_language_inputs():
@@ -1203,6 +1810,15 @@ def test_experiences_extractor_uses_temporal_anchor_for_approximate_dates():
     assert candidate["payload"]["event"] == "PyCon"
     assert candidate["payload"]["event_at"] == ""
     assert candidate["payload"]["temporal_anchor"] == "around 2024"
+
+
+def test_experiences_extractor_uses_temporal_anchor_for_relative_months():
+    candidates = extract_experiences(_context("Last October I had a car accident."))
+
+    assert len(candidates) == 1
+    assert candidates[0]["payload"]["event"] == "car accident"
+    assert candidates[0]["payload"]["event_at"] == ""
+    assert candidates[0]["payload"]["temporal_anchor"] == "Last October"
 
 
 def test_validate_candidate_payload_rejects_wrong_domain_shape():

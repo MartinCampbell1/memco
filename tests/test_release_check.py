@@ -37,9 +37,10 @@ def test_module_main_runs_quick_release_check(monkeypatch, tmp_path, capsys):
     output_path = tmp_path / "release-check.json"
     captured: dict[str, object] = {}
 
-    def fake_run_release_check(*, project_root, include_eval, postgres_database_url=None):
+    def fake_run_release_check(*, project_root, include_eval, include_realistic_eval=False, postgres_database_url=None):
         captured["project_root"] = project_root
         captured["include_eval"] = include_eval
+        captured["include_realistic_eval"] = include_realistic_eval
         captured["postgres_database_url"] = postgres_database_url
         return {
             "artifact_type": "repo_local_release_check",
@@ -63,6 +64,7 @@ def test_module_main_runs_quick_release_check(monkeypatch, tmp_path, capsys):
     assert captured == {
         "project_root": project_root.resolve(),
         "include_eval": True,
+        "include_realistic_eval": False,
         "postgres_database_url": None,
     }
 
@@ -227,6 +229,107 @@ def test_run_release_check_requires_at_least_one_step(tmp_path):
         assert "at least one enabled step" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected ValueError when all release-check steps are disabled")
+
+
+def test_run_release_check_can_include_realistic_personal_memory_eval(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    eval_root = tmp_path / "eval-runtime"
+    project_root.mkdir()
+    _write_live_runtime_settings(project_root)
+    seen: dict[str, Path] = {}
+
+    def fake_personal_eval(*, project_root: Path, eval_root: Path) -> dict:
+        seen["project_root"] = project_root
+        seen["eval_root"] = eval_root
+        return {
+            "name": "personal_memory_eval_artifact",
+            "ok": True,
+            "artifact_summary": {"total": 400, "failed": 0},
+        }
+
+    monkeypatch.setattr("memco.release_check._run_personal_memory_eval_gate", fake_personal_eval)
+
+    result = run_release_check(
+        project_root=project_root,
+        eval_root=eval_root,
+        include_pytest=False,
+        include_eval=False,
+        include_realistic_eval=True,
+    )
+
+    assert result["ok"] is True
+    assert result["include_realistic_eval"] is True
+    assert [step["name"] for step in result["steps"]] == [
+        "runtime_policy",
+        "storage_contract",
+        "operator_safety",
+        "personal_memory_eval_artifact",
+    ]
+    assert seen["project_root"] == project_root
+    assert seen["eval_root"] == eval_root / "personal-memory-eval"
+
+
+def test_run_release_check_fixture_ok_is_not_release_eligible(monkeypatch, tmp_path):
+    project_root = tmp_path / "repo"
+    eval_root = tmp_path / "eval-runtime"
+    project_root.mkdir()
+    seen: dict[str, Path] = {}
+
+    monkeypatch.setattr(
+        "memco.release_check.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=kwargs.get("args", args[0] if args else []),
+            returncode=0,
+            stdout="5 passed\n",
+            stderr="",
+        ),
+    )
+
+    class _FakeEvalService:
+        def seed_fixture_data(self, root: Path) -> None:
+            seen["acceptance_seed"] = root
+
+        def run_acceptance(self, root: Path) -> dict:
+            seen["acceptance_run"] = root
+            return {
+                "artifact_type": "eval_acceptance_artifact",
+                "release_scope": "private-single-user",
+                "total": 1,
+                "passed": 1,
+                "failed": 0,
+                "pass_rate": 1.0,
+                "accuracy": 1.0,
+                "refusal_correctness": {"total_cases": 1, "passed_cases": 1, "rate": 1.0},
+                "evidence_coverage": {"cases_with_hits": 1, "cases_with_evidence": 1, "rate": 1.0},
+                "retrieval_latency_ms": {"min": 1, "max": 1, "avg": 1, "p95": 1},
+                "token_accounting": {"status": "tracked"},
+                "behavior_checks_total": 1,
+                "behavior_checks_passed": 1,
+                "groups": [{"name": "supported_fact", "total": 1, "passed": 1, "pass_rate": 1.0}],
+            }
+
+    monkeypatch.setattr("memco.release_check.EvalService", _FakeEvalService)
+
+    result = run_release_check(
+        project_root=project_root,
+        eval_root=eval_root,
+        include_pytest=True,
+        include_eval=True,
+        fixture_ok=True,
+    )
+
+    assert result["ok"] is True
+    assert result["artifact_type"] == "fixture_release_check"
+    assert result["gate_type"] == "fixture-ok"
+    assert result["fixture_only"] is True
+    assert result["release_eligible"] is False
+    assert result["artifact_context"]["runtime_mode"] == "fixture"
+    assert result["artifact_context"]["fixture_only"] is True
+    assert result["artifact_context"]["release_eligible"] is False
+    assert result["steps"][0]["fixture_only"] is True
+    assert result["steps"][0]["release_eligible"] is False
+    assert result["steps"][1]["storage_engine"] == "sqlite"
+    assert result["steps"][2]["reason"] == "fixture-ok mode intentionally does not require live operator secrets"
 
 
 def test_run_release_check_can_run_optional_postgres_smoke(monkeypatch, tmp_path):

@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from typer.main import get_command
 
 from memco.cli.main import app
+from memco.config import Settings, write_settings
 
 
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -35,6 +36,8 @@ def test_cli_release_check_wraps_runner(monkeypatch, tmp_path):
         project_root: Path,
         eval_root: Path | None,
         include_eval: bool,
+        include_realistic_eval: bool,
+        fixture_ok: bool,
         postgres_database_url: str | None,
         postgres_root: Path | None,
         postgres_port: int | None,
@@ -42,6 +45,8 @@ def test_cli_release_check_wraps_runner(monkeypatch, tmp_path):
         captured["project_root"] = project_root
         captured["eval_root"] = eval_root
         captured["include_eval"] = include_eval
+        captured["include_realistic_eval"] = include_realistic_eval
+        captured["fixture_ok"] = fixture_ok
         captured["postgres_database_url"] = postgres_database_url
         captured["postgres_root"] = postgres_root
         captured["postgres_port"] = postgres_port
@@ -66,6 +71,8 @@ def test_cli_release_check_wraps_runner(monkeypatch, tmp_path):
     assert captured["project_root"] == Path.cwd().resolve()
     assert captured["eval_root"] == runtime_root.resolve()
     assert captured["include_eval"] is True
+    assert captured["include_realistic_eval"] is False
+    assert captured["fixture_ok"] is False
     assert captured["postgres_database_url"] is None
     assert captured["postgres_root"] is None
     assert captured["postgres_port"] is None
@@ -81,6 +88,8 @@ def test_cli_release_check_passes_optional_postgres_smoke(monkeypatch, tmp_path)
         project_root: Path,
         eval_root: Path | None,
         include_eval: bool,
+        include_realistic_eval: bool,
+        fixture_ok: bool,
         postgres_database_url: str | None,
         postgres_root: Path | None,
         postgres_port: int | None,
@@ -155,6 +164,8 @@ def test_cli_release_check_supports_explicit_project_root(monkeypatch, tmp_path)
         project_root: Path,
         eval_root: Path | None,
         include_eval: bool,
+        include_realistic_eval: bool,
+        fixture_ok: bool,
         postgres_database_url: str | None,
         postgres_root: Path | None,
         postgres_port: int | None,
@@ -175,6 +186,83 @@ def test_cli_release_check_supports_explicit_project_root(monkeypatch, tmp_path)
 
     assert result.exit_code == 0, result.output
     assert captured["project_root"] == repo_root.resolve()
+
+
+def test_cli_release_check_can_include_realistic_eval(monkeypatch):
+    command = get_command(app)
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    def fake_run_release_check(
+        *,
+        project_root: Path,
+        eval_root: Path | None,
+        include_eval: bool,
+        include_realistic_eval: bool,
+        fixture_ok: bool,
+        postgres_database_url: str | None,
+        postgres_root: Path | None,
+        postgres_port: int | None,
+    ):
+        captured["include_realistic_eval"] = include_realistic_eval
+        return {
+            "artifact_type": "repo_local_release_check",
+            "ok": True,
+            "include_realistic_eval": include_realistic_eval,
+            "steps": [{"name": "personal_memory_eval_artifact", "ok": True}],
+        }
+
+    monkeypatch.setattr("memco.cli.main.run_release_check", fake_run_release_check)
+    result = runner.invoke(
+        command,
+        ["release-check", "--include-realistic-eval"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert captured["include_realistic_eval"] is True
+    assert payload["include_realistic_eval"] is True
+
+
+def test_cli_release_check_fixture_ok_is_archive_safe(monkeypatch):
+    command = get_command(app)
+    runner = CliRunner()
+    captured: dict[str, object] = {}
+
+    def fake_run_release_check(
+        *,
+        project_root: Path,
+        eval_root: Path | None,
+        include_eval: bool,
+        include_realistic_eval: bool,
+        fixture_ok: bool,
+        postgres_database_url: str | None,
+        postgres_root: Path | None,
+        postgres_port: int | None,
+    ):
+        captured["fixture_ok"] = fixture_ok
+        captured["include_realistic_eval"] = include_realistic_eval
+        return {
+            "artifact_type": "fixture_release_check",
+            "ok": True,
+            "fixture_only": True,
+            "release_eligible": False,
+            "steps": [{"name": "personal_memory_eval_artifact", "ok": True}],
+        }
+
+    monkeypatch.setattr("memco.cli.main.run_release_check", fake_run_release_check)
+    result = runner.invoke(
+        command,
+        ["release-check", "--fixture-ok", "--include-realistic-eval"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert captured == {"fixture_ok": True, "include_realistic_eval": True}
+    assert payload["fixture_only"] is True
+    assert payload["release_eligible"] is False
 
 
 def test_cli_release_check_returns_nonzero_on_failure(monkeypatch, tmp_path):
@@ -198,6 +286,39 @@ def test_cli_release_check_returns_nonzero_on_failure(monkeypatch, tmp_path):
     assert result.exit_code == 1, result.output
     payload = json.loads(result.output)
     assert payload["ok"] is False
+
+
+def test_cli_doctor_reports_redacted_runtime_state(tmp_path):
+    command = get_command(app)
+    runner = CliRunner()
+    repo_root = _seed_repo_root(tmp_path)
+    goldens = repo_root / "eval" / "personal_memory_goldens"
+    goldens.mkdir(parents=True)
+    (goldens / "realistic_personal_memory_goldens.jsonl").write_text("{}", encoding="utf-8")
+    settings = Settings(root=repo_root)
+    settings.api.auth_token = "plain-secret-token"
+    settings.storage.database_url = "postgresql://alice:secret@127.0.0.1:5432/memco_local"
+    settings.backup_path.parent.mkdir(parents=True, exist_ok=True)
+    settings.backup_path.write_text("backup", encoding="utf-8")
+    write_settings(settings)
+
+    result = runner.invoke(
+        command,
+        ["doctor", "--project-root", str(repo_root)],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "plain-secret-token" not in result.output
+    assert "alice:secret" not in result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "doctor_report"
+    assert payload["ok"] is True
+    assert payload["storage"]["database_target"] == "postgresql://***@127.0.0.1:5432/memco_local"
+    assert payload["checks"]["realistic_personal_memory_goldens_exist"] is True
+    assert payload["live_smoke"]["available"] is False
+    assert payload["checks"]["live_smoke_available"] is False
+    assert "release-check --project-root . --fixture-ok --include-realistic-eval" in payload["next_commands"]["fixture_gate"]
 
 
 def test_cli_strict_release_check_wraps_runner(monkeypatch, tmp_path):

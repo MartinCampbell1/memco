@@ -66,10 +66,25 @@ class ExtractionService:
             text_handler=self._mock_complete_text,
         )
 
-    def _extraction_system_prompt(self, *, include_style: bool, include_psychometrics: bool) -> str:
+    def _enabled_extraction_domains(self, *, include_style: bool, include_psychometrics: bool) -> list[str]:
+        domains = ["biography", "preferences", "social_circle", "work", "experiences"]
+        if include_psychometrics:
+            domains.append("psychometrics")
+        if include_style:
+            domains.append("style")
+        return domains
+
+    def _extraction_system_prompt(
+        self,
+        *,
+        include_style: bool,
+        include_psychometrics: bool,
+        domain_names: tuple[str, ...] | None = None,
+    ) -> str:
         return build_extraction_system_prompt(
             include_style=include_style,
             include_psychometrics=include_psychometrics,
+            domain_names=domain_names,
         )
 
     def _extraction_prompt(
@@ -86,6 +101,7 @@ class ExtractionService:
         occurred_at: str,
         include_style: bool,
         include_psychometrics: bool,
+        domain_names: tuple[str, ...] | None = None,
         chunk: ExtractionChunk | None = None,
         target_message_ids: list[int] | None = None,
     ) -> str:
@@ -103,6 +119,7 @@ class ExtractionService:
             ),
             include_style=include_style,
             include_psychometrics=include_psychometrics,
+            domain_names=domain_names,
         )
         if chunk is not None:
             payload["chunk"] = {
@@ -127,9 +144,11 @@ class ExtractionService:
     ) -> list[dict]:
         if schema_name != EXTRACTION_SCHEMA_NAME:
             raise ValueError(f"Unsupported mock JSON schema: {schema_name}")
+        extraction_domain = str(metadata.get("extraction_domain") or "")
         if metadata.get("chunk_kind") == "conversation" and metadata.get("chunk_id") is not None:
-            return self._mock_extract_from_chunk(metadata)
-        return self._extract_from_text(
+            candidates = self._mock_extract_from_chunk(metadata)
+        else:
+            candidates = self._extract_from_text(
             text=metadata["text"],
             subject_key=metadata["subject_key"],
             subject_display=metadata["subject_display"],
@@ -144,6 +163,9 @@ class ExtractionService:
             include_style=metadata["include_style"],
             include_psychometrics=metadata["include_psychometrics"],
         )
+        if extraction_domain:
+            return [candidate for candidate in candidates if candidate.get("domain") == extraction_domain]
+        return candidates
 
     def _mock_complete_text(self, *, system_prompt: str, prompt: str, metadata: dict) -> str:
         return prompt
@@ -368,7 +390,7 @@ class ExtractionService:
             ("work", "engagement"): {"client", "end_date", "org", "role", "start_date", "status", "team"},
             ("work", "role"): {"end_date", "start_date", "status"},
             ("work", "org"): {"client", "status"},
-            ("work", "project"): {"end_date", "org", "role", "start_date", "status", "team"},
+            ("work", "project"): {"client", "end_date", "org", "role", "start_date", "status", "team"},
             ("work", "skill"): set(),
             ("work", "tool"): set(),
             ("experiences", "event"): {
@@ -388,7 +410,7 @@ class ExtractionService:
             if key in removable_fields and (not isinstance(value, str) or not value.strip()):
                 payload.pop(key, None)
         optional_list_fields = {
-            ("experiences", "event"): {"linked_persons", "linked_projects", "participants"},
+            ("experiences", "event"): {"event_hierarchy", "linked_persons", "linked_projects", "participants"},
             ("social_circle", "relationship"): {"aliases"},
             ("social_circle", "relationship_event"): {"aliases"},
             ("work", "engagement"): {"outcomes"},
@@ -564,7 +586,7 @@ class ExtractionService:
         strict_validation: bool = True,
     ) -> list[dict]:
         target_messages = target_messages or []
-        metadata = {
+        base_metadata = {
             "text": text,
             "subject_key": subject_key,
             "subject_display": subject_display,
@@ -590,51 +612,6 @@ class ExtractionService:
             "attribution_confidence": attribution_confidence,
             "source_type": source_type,
         }
-        response = self.llm_provider.complete_json(
-            system_prompt=self._extraction_system_prompt(
-                include_style=include_style,
-                include_psychometrics=include_psychometrics,
-            ),
-            prompt=self._extraction_prompt(
-                text=text,
-                subject_key=subject_key,
-                subject_display=subject_display,
-                speaker_label=speaker_label,
-                person_id=person_id,
-                message_id=message_id,
-                source_segment_id=source_segment_id,
-                session_id=session_id,
-                occurred_at=occurred_at,
-                include_style=include_style,
-                include_psychometrics=include_psychometrics,
-                chunk=chunk,
-                target_message_ids=[message.message_id for message in target_messages],
-            ),
-            schema_name=EXTRACTION_SCHEMA_NAME,
-            metadata=metadata,
-        )
-        content = response.content
-        if isinstance(content, dict) and isinstance(content.get("items"), list):
-            content = content["items"]
-        if not isinstance(content, list):
-            raise ValueError("LLM provider returned non-list candidate payload")
-        usage_metadata = {
-            **metadata,
-            "schema_name": EXTRACTION_SCHEMA_NAME,
-            "candidate_count": len(content),
-            "candidate_domains": sorted(
-                {
-                    str(candidate.get("domain") or "")
-                    for candidate in content
-                    if isinstance(candidate, dict) and candidate.get("domain")
-                }
-            ),
-        }
-        self._record_usage(
-            operation="complete_json",
-            metadata=usage_metadata,
-            usage=response.usage,
-        )
         fallback_message_ids = [message.message_id for message in chunk.messages] if chunk is not None else []
         fallback_source_segment_ids = list(chunk.source_segment_ids) if chunk is not None else []
         fallback_session_ids = (
@@ -643,33 +620,88 @@ class ExtractionService:
             else []
         )
         validated: list[dict] = []
-        for candidate in content:
+        for domain_name in self._enabled_extraction_domains(
+            include_style=include_style,
+            include_psychometrics=include_psychometrics,
+        ):
+            metadata = {**base_metadata, "extraction_domain": domain_name}
             try:
-                if not isinstance(candidate, dict):
-                    raise ValueError("LLM provider returned non-object candidate")
-                validated.append(
-                    validate_candidate(
-                        self._normalize_provider_candidate(
-                            candidate=candidate,
-                            text=text,
-                            subject_display=subject_display,
-                            person_id=person_id,
-                            message_id=message_id,
-                            source_segment_id=source_segment_id,
-                            session_id=session_id,
-                            fallback_message_ids=fallback_message_ids,
-                            fallback_source_segment_ids=fallback_source_segment_ids,
-                            fallback_session_ids=fallback_session_ids,
-                            chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
-                            attribution_method=attribution_method,
-                            attribution_confidence=attribution_confidence,
-                            source_type=source_type,
+                response = self.llm_provider.complete_json(
+                    system_prompt=self._extraction_system_prompt(
+                        include_style=include_style,
+                        include_psychometrics=include_psychometrics,
+                        domain_names=(domain_name,),
+                    ),
+                    prompt=self._extraction_prompt(
+                        text=text,
+                        subject_key=subject_key,
+                        subject_display=subject_display,
+                        speaker_label=speaker_label,
+                        person_id=person_id,
+                        message_id=message_id,
+                        source_segment_id=source_segment_id,
+                        session_id=session_id,
+                        occurred_at=occurred_at,
+                        include_style=include_style,
+                        include_psychometrics=include_psychometrics,
+                        domain_names=(domain_name,),
+                        chunk=chunk,
+                        target_message_ids=[message.message_id for message in target_messages],
+                    ),
+                    schema_name=EXTRACTION_SCHEMA_NAME,
+                    metadata=metadata,
+                )
+                content = response.content
+                if isinstance(content, dict) and isinstance(content.get("items"), list):
+                    content = content["items"]
+                if not isinstance(content, list):
+                    raise ValueError("LLM provider returned non-list candidate payload")
+                usage_metadata = {
+                    **metadata,
+                    "schema_name": EXTRACTION_SCHEMA_NAME,
+                    "candidate_count": len(content),
+                    "candidate_domains": sorted(
+                        {
+                            str(candidate.get("domain") or "")
+                            for candidate in content
+                            if isinstance(candidate, dict) and candidate.get("domain")
+                        }
+                    ),
+                }
+                self._record_usage(
+                    operation="complete_json",
+                    metadata=usage_metadata,
+                    usage=response.usage,
+                )
+                for candidate in content:
+                    if not isinstance(candidate, dict):
+                        raise ValueError("LLM provider returned non-object candidate")
+                    if str(candidate.get("domain") or "") != domain_name:
+                        continue
+                    validated.append(
+                        validate_candidate(
+                            self._normalize_provider_candidate(
+                                candidate=candidate,
+                                text=text,
+                                subject_display=subject_display,
+                                person_id=person_id,
+                                message_id=message_id,
+                                source_segment_id=source_segment_id,
+                                session_id=session_id,
+                                fallback_message_ids=fallback_message_ids,
+                                fallback_source_segment_ids=fallback_source_segment_ids,
+                                fallback_session_ids=fallback_session_ids,
+                                chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
+                                attribution_method=attribution_method,
+                                attribution_confidence=attribution_confidence,
+                                source_type=source_type,
+                            )
                         )
                     )
-                )
-            except ValueError:
+            except (RuntimeError, ValueError):
                 if strict_validation:
                     raise
+                continue
         return validated
 
     def _mock_extract_from_chunk(self, metadata: dict) -> list[dict]:

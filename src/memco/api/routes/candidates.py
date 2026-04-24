@@ -10,6 +10,7 @@ from memco.models.candidate import (
     CandidatePublishRequest,
     CandidateRejectRequest,
 )
+from memco.repositories.fact_repository import FactRepository
 from memco.services.candidate_service import CandidateService
 from memco.services.extraction_service import ExtractionService
 from memco.services.publish_service import PublishService
@@ -34,12 +35,36 @@ def extract_candidates(
     )
     service = CandidateService(extraction_service=ExtractionService.from_settings(settings))
     with get_connection(settings.db_path) as conn:
+        fact_repository = FactRepository()
+        attribution_policy = request.attribution_policy or settings.ingest.attribution_policy
+        owner_person_id = request.owner_person_id
+        owner_display_name = request.owner_display_name
+        owner_person_slug = (request.owner_person_slug or settings.owner.person_slug) if attribution_policy == "owner_first_person_fallback" else ""
+        if owner_person_id is None and owner_person_slug:
+            try:
+                owner_person_id = fact_repository.resolve_person_id(
+                    conn,
+                    workspace_slug=request.workspace,
+                    person_slug=owner_person_slug,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if owner_person_id is not None and not owner_display_name:
+            owner = fact_repository.get_person(
+                conn,
+                workspace_slug=request.workspace,
+                person_id=owner_person_id,
+            )
+            owner_display_name = str(owner.get("display_name") or "") if owner else ""
         result = service.extract_from_conversation(
             conn,
             workspace_slug=request.workspace,
             conversation_id=request.conversation_id,
             include_style=request.include_style,
             include_psychometrics=request.include_psychometrics,
+            owner_person_id=owner_person_id,
+            owner_display_name=owner_display_name,
+            attribution_policy=attribution_policy,
         )
     return {"items": result}
 

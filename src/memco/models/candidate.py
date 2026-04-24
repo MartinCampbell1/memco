@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from memco.config import AttributionPolicy
 from memco.models.retrieval import ActorContext
 
 
@@ -12,6 +13,10 @@ class CandidateExtractRequest(BaseModel):
     conversation_id: int
     include_style: bool = False
     include_psychometrics: bool = False
+    owner_person_id: int | None = None
+    owner_person_slug: str | None = None
+    owner_display_name: str = ""
+    attribution_policy: AttributionPolicy | None = None
     actor: ActorContext | None = None
 
 

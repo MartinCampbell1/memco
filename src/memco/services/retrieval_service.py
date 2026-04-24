@@ -30,6 +30,7 @@ class RetrievalService:
     NON_FACTUAL_DOMAINS = {"style", "psychometrics"}
     RESIDENCE_FIELDS = ("city", "place")
     ORG_FIELDS = ("org", "company", "employer")
+    WORK_VALUE_FIELDS = ("tool", "skill", "project", "engagement", "org", "title", "role")
     PREFERENCE_FIELDS = ("value",)
     EVENT_FIELDS = ("event",)
     YES_NO_PREFIXES = (
@@ -412,18 +413,33 @@ class RetrievalService:
                 continue
             if domain_query.domain in self.NON_FACTUAL_DOMAINS:
                 continue
-            raw_hits.extend(
-                self.retrieval_repository.retrieve_facts(
-                    conn,
-                    workspace_slug=payload.workspace,
-                    person_id=person_id,
-                    query=payload.query,
-                    domain=domain_query.domain,
-                    category=domain_query.category,
-                    temporal_mode=planner.temporal_mode,
-                    limit=payload.limit,
-                )
+            hits_for_query = self.retrieval_repository.retrieve_facts(
+                conn,
+                workspace_slug=payload.workspace,
+                person_id=person_id,
+                query=payload.query,
+                domain=domain_query.domain,
+                category=domain_query.category,
+                temporal_mode=planner.temporal_mode,
+                limit=payload.limit,
             )
+            if not hits_for_query and domain_query.domain == "work" and domain_query.category:
+                for fallback_category in self._work_fallback_categories(domain_query.category):
+                    hits_for_query.extend(
+                        self.retrieval_repository.retrieve_facts(
+                            conn,
+                            workspace_slug=payload.workspace,
+                            person_id=person_id,
+                            query=payload.query,
+                            domain="work",
+                            category=fallback_category,
+                            temporal_mode=planner.temporal_mode,
+                            limit=payload.limit,
+                        )
+                    )
+                    if hits_for_query:
+                        break
+            raw_hits.extend(hits_for_query)
         deduped_hits: list[dict] = []
         seen_fact_ids: set[int] = set()
         for hit in sorted(raw_hits, key=lambda item: (-item["score"], -item["confidence"], item["fact_id"])):
@@ -672,6 +688,8 @@ class RetrievalService:
                 claims.append(f"No evidence for related person in the premise: {check.value}.")
             elif check.claim_type == "employer":
                 claims.append(f"No evidence for employer claim: {check.value}.")
+            elif check.claim_type == "tool":
+                claims.append(f"No evidence for tool claim: {check.value}.")
             elif check.claim_type == "location":
                 claims.append(f"No evidence for location claim: {check.value}.")
             elif check.claim_type == "preference":
@@ -710,6 +728,32 @@ class RetrievalService:
                 values.add(self._normalize_person_label(str(value)))
         return values
 
+    def _work_fallback_categories(self, category: str) -> tuple[str, ...]:
+        if category == "tool":
+            return ("skill", "project", "employment", "org", "role", "engagement")
+        if category == "skill":
+            return ("tool", "project", "employment", "org", "role", "engagement")
+        if category == "project":
+            return ("engagement", "tool", "skill", "employment", "org", "role")
+        return ("employment", "role", "org", "project", "skill", "tool", "engagement")
+
+    def _normalized_work_values(self, *, hits: list[dict]) -> set[str]:
+        values: set[str] = set()
+        for hit in hits:
+            if hit.get("domain") != "work":
+                continue
+            payload = hit.get("payload", {})
+            for field in self.WORK_VALUE_FIELDS:
+                value = payload.get(field)
+                if value is None:
+                    continue
+                if isinstance(value, list):
+                    for item in value:
+                        values.add(self._normalize_person_label(str(item)))
+                else:
+                    values.add(self._normalize_person_label(str(value)))
+        return {value for value in values if value}
+
     def _relationship_targets(self, *, hits: list[dict]) -> set[str]:
         targets: set[str] = set()
         for hit in hits:
@@ -746,7 +790,11 @@ class RetrievalService:
             for field in ("temporal_anchor", "event_at"):
                 value = payload.get(field)
                 if value:
-                    values.add(self._normalize_person_label(str(value)))
+                    normalized_value = self._normalize_person_label(str(value))
+                    values.add(normalized_value)
+                    year_match = re.search(r"\b(19|20)\d{2}\b", str(value))
+                    if year_match:
+                        values.add(year_match.group(0))
             for field in ("observed_at", "valid_from", "valid_to"):
                 value = str(hit.get(field) or "")
                 if len(value) >= 4 and value[:4].isdigit():
@@ -756,6 +804,20 @@ class RetrievalService:
     def _is_contradicted(self, *, planner: RetrievalPlan, hits: list[dict], unsupported_checks: list) -> bool:
         if not hits or not unsupported_checks:
             return False
+        if any(domain_query.domain == "work" for domain_query in planner.domain_queries):
+            supported_orgs = self._normalized_work_orgs(hits=hits)
+            supported_work_values = self._normalized_work_values(hits=hits)
+            if supported_work_values and any(
+                check.claim_type in {"tool", "skill", "project"}
+                and self._normalize_person_label(check.value) not in supported_work_values
+                for check in unsupported_checks
+            ):
+                return True
+            if supported_orgs and any(
+                check.claim_type == "employer" and self._normalize_person_label(check.value) not in supported_orgs
+                for check in unsupported_checks
+            ):
+                return True
         if any(domain_query.domain == "social_circle" for domain_query in planner.domain_queries):
             target_checks = {
                 self._normalize_person_label(check.value)
@@ -799,6 +861,13 @@ class RetrievalService:
             )
         if domain_query.domain == "work":
             supported_orgs = self._normalized_work_orgs(hits=hits)
+            supported_work_values = self._normalized_work_values(hits=hits)
+            if supported_work_values and any(
+                check.claim_type in {"tool", "skill", "project"}
+                and self._normalize_person_label(check.value) not in supported_work_values
+                for check in unsupported_checks
+            ):
+                return True
             return bool(
                 supported_orgs
                 and any(

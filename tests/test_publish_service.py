@@ -295,7 +295,7 @@ def test_publish_candidate_rejects_workspace_scope_mismatch(settings):
             )
 
 
-def test_publish_candidate_rejects_unresolved_social_target(settings):
+def test_publish_candidate_auto_creates_unresolved_social_target(settings):
     service = PublishService()
     candidate_repo = CandidateRepository()
     fact_repo = FactRepository()
@@ -359,15 +359,24 @@ def test_publish_candidate_rejects_unresolved_social_target(settings):
             candidate_id=int(candidate["id"]),
             candidate_status="validated_candidate",
         )
-        with pytest.raises(ValueError, match="unresolved hard conflict"):
-            service.publish_candidate(
-                conn,
-                workspace_slug="default",
-                candidate_id=int(candidate["id"]),
-            )
+        result = service.publish_candidate(
+            conn,
+            workspace_slug="default",
+            candidate_id=int(candidate["id"]),
+        )
+        refreshed = candidate_repo.get_candidate(conn, candidate_id=int(candidate["id"]))
+        bob = conn.execute(
+            "SELECT * FROM persons WHERE slug = ?",
+            ("bob",),
+        ).fetchone()
+
+    assert bob is not None
+    assert result["fact"]["domain"] == "social_circle"
+    assert result["fact"]["payload"]["target_person_id"] == int(bob["id"])
+    assert refreshed["payload"]["target_person_id"] == int(bob["id"])
 
 
-def test_publish_candidate_rejects_unresolved_social_relationship_event(settings):
+def test_publish_candidate_auto_creates_unresolved_social_relationship_event_target(settings):
     service = PublishService()
     candidate_repo = CandidateRepository()
     fact_repo = FactRepository()
@@ -431,12 +440,21 @@ def test_publish_candidate_rejects_unresolved_social_relationship_event(settings
             candidate_id=int(candidate["id"]),
             candidate_status="validated_candidate",
         )
-        with pytest.raises(ValueError, match="unresolved hard conflict"):
-            service.publish_candidate(
-                conn,
-                workspace_slug="default",
-                candidate_id=int(candidate["id"]),
-            )
+        result = service.publish_candidate(
+            conn,
+            workspace_slug="default",
+            candidate_id=int(candidate["id"]),
+        )
+        refreshed = candidate_repo.get_candidate(conn, candidate_id=int(candidate["id"]))
+        bob = conn.execute(
+            "SELECT * FROM persons WHERE slug = ?",
+            ("bob",),
+        ).fetchone()
+
+    assert bob is not None
+    assert result["fact"]["category"] == "relationship_event"
+    assert result["fact"]["payload"]["target_person_id"] == int(bob["id"])
+    assert refreshed["payload"]["target_person_id"] == int(bob["id"])
 
 
 def test_reject_candidate_marks_status_reason_and_does_not_create_fact(settings):

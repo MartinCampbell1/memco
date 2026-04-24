@@ -6,6 +6,7 @@ import pytest
 from memco.api.app import app
 from memco.db import get_connection
 from memco.models.memory_fact import MemoryFactInput
+from memco.repositories.candidate_repository import CandidateRepository
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.source_repository import SourceRepository
 from memco.services.consolidation_service import ConsolidationService
@@ -36,8 +37,15 @@ def test_chat_returns_refusal_without_memory(monkeypatch, settings):
     )
 
     assert response.status_code == 200
-    assert response.json()["refused"] is True
-    assert response.json()["answer"] == "I don't have confirmed memory evidence for that."
+    payload = response.json()
+    assert payload["refused"] is True
+    assert payload["answerable"] is False
+    assert payload["must_not_use_as_fact"] is True
+    assert payload["used_fact_ids"] == []
+    assert payload["used_evidence_ids"] == []
+    assert payload["agent_response"]["answerable"] is False
+    assert payload["agent_response"]["must_not_use_as_fact"] is True
+    assert payload["answer"] == "I don't have confirmed memory evidence for that."
 
 
 def test_chat_returns_answer_with_memory(monkeypatch, settings):
@@ -91,11 +99,147 @@ def test_chat_returns_answer_with_memory(monkeypatch, settings):
     assert response.status_code == 200
     payload = response.json()
     assert payload["refused"] is False
+    assert payload["answerable"] is True
+    assert payload["must_not_use_as_fact"] is False
     assert "Lisbon" in payload["answer"]
     assert len(payload["fact_ids"]) == 1
     assert payload["fact_ids"] == [payload["retrieval"]["hits"][0]["fact_id"]]
     assert len(payload["evidence_ids"]) == 1
     assert payload["evidence_ids"][0] == payload["retrieval"]["hits"][0]["evidence"][0]["evidence_id"]
+    assert payload["used_fact_ids"] == payload["fact_ids"]
+    assert payload["used_evidence_ids"] == payload["evidence_ids"]
+    assert payload["agent_response"]["answerable"] is True
+    assert payload["agent_response"]["must_not_use_as_fact"] is False
+    assert payload["agent_response"]["used_fact_ids"] == payload["fact_ids"]
+    assert payload["agent_response"]["used_evidence_ids"] == payload["evidence_ids"]
+
+
+def test_chat_does_not_answer_from_unpublished_candidates(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    candidate_repo = CandidateRepository()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-candidate-only.md",
+            source_type="note",
+            origin_uri="/tmp/alice-candidate-only.md",
+            title="alice-candidate-only",
+            sha256="alice-candidate-only",
+            parsed_text="Alice lives in Porto.",
+        )
+        candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=source_id,
+            conversation_id=None,
+            chunk_kind="note",
+            chunk_id=None,
+            domain="biography",
+            category="residence",
+            subcategory="",
+            canonical_key="alice:biography:residence:porto:candidate-only",
+            payload={"city": "Porto"},
+            summary="Alice lives in Porto.",
+            confidence=0.95,
+        )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={"workspace": "default", "person_slug": "alice", "query": "Where does Alice live?", "actor": _actor(settings)},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refused"] is True
+    assert payload["answerable"] is False
+    assert payload["must_not_use_as_fact"] is True
+    assert payload["fact_ids"] == []
+    assert payload["evidence_ids"] == []
+    assert "Porto" not in payload["answer"]
+
+
+def test_chat_answers_work_tool_questions_and_refuses_false_tool_premise(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-tools.md",
+            source_type="note",
+            origin_uri="/tmp/alice-tools.md",
+            title="alice-tools",
+            sha256="alice-tools",
+            parsed_text="Alice uses Python and Postgres.",
+        )
+        for tool in ("Python", "Postgres"):
+            consolidation.add_fact(
+                conn,
+                MemoryFactInput(
+                    workspace="default",
+                    person_id=int(person["id"]),
+                    domain="work",
+                    category="tool",
+                    canonical_key=f"alice:work:tool:{tool.lower()}",
+                    payload={"tool": tool},
+                    summary=f"Alice uses {tool}.",
+                    source_kind="explicit",
+                    confidence=0.9,
+                    observed_at="2026-04-21T10:00:00Z",
+                    source_id=source_id,
+                    quote_text=f"Alice uses {tool}.",
+                ),
+            )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    supported = client.post(
+        "/v1/chat",
+        json={"workspace": "default", "person_slug": "alice", "query": "What tools does Alice use?", "actor": _actor(settings)},
+    )
+    false_premise = client.post(
+        "/v1/chat",
+        json={"workspace": "default", "person_slug": "alice", "query": "Does Alice use Ruby?", "actor": _actor(settings)},
+    )
+
+    assert supported.status_code == 200
+    supported_payload = supported.json()
+    assert supported_payload["refused"] is False
+    assert supported_payload["support_level"] == "supported"
+    assert "Python" in supported_payload["answer"]
+    assert "Postgres" in supported_payload["answer"]
+    assert supported_payload["fact_ids"]
+    assert supported_payload["evidence_ids"]
+
+    assert false_premise.status_code == 200
+    false_payload = false_premise.json()
+    assert false_payload["refused"] is True
+    assert false_payload["answerable"] is False
+    assert false_payload["must_not_use_as_fact"] is True
+    assert false_payload["support_level"] == "contradicted"
+    assert any("Ruby" in claim for claim in false_payload["unsupported_claims"])
 
 
 def test_chat_supports_core_only_detail_policy(monkeypatch, settings):

@@ -12,6 +12,27 @@ def _read(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
 
 
+def test_local_reproduction_runbook_documents_realistic_eval_and_live_split():
+    runbook = _read("docs/LOCAL_REPRODUCTION.md")
+
+    assert "uv run memco doctor --project-root ." in runbook
+    assert "uv run memco eval personal-memory" in runbook
+    assert "--fixture-ok" in runbook
+    assert "--include-realistic-eval" in runbook
+    assert "fixture_only: true" in runbook
+    assert "release_eligible: false" in runbook
+    assert "MEMCO_LLM_BASE_URL" in runbook
+    assert "MEMCO_POSTGRES_DATABASE_URL='postgresql://user:password@127.0.0.1:5432/postgres'" in runbook
+    assert "source .env" in runbook
+    assert "memco_local" not in _read(".env.example")
+    assert "uv run memco person-upsert" in runbook
+    assert "MEMCO_RUN_LIVE_SMOKE=1 uv run memco release-readiness-check" in runbook
+    assert "--require-live-provider" in runbook
+    assert "--require-postgres" in runbook
+    assert "Fixture checks may use sqlite and mock/deterministic providers" in runbook
+    assert "release claims require the configured Postgres runtime plus live smoke" in runbook
+
+
 def test_readme_uses_current_contract_language():
     readme = _read("README.md")
 
