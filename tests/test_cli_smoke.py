@@ -804,6 +804,14 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert "candidate-list" in review_list_help
     assert "--person-slug" in review_list_help
 
+    result = runner.invoke(command, ["review-dashboard", "--help"], prog_name="memco")
+    assert result.exit_code == 0, result.output
+    review_dashboard_help = _plain(result.output)
+    assert "evidence" in review_dashboard_help
+    assert "consolidation" in review_dashboard_help
+    assert "preview" in review_dashboard_help
+    assert "--low-confidence-threshold" in review_dashboard_help
+
     result = runner.invoke(command, ["fact-list", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
     fact_list_help = _plain(result.output)
@@ -1591,6 +1599,18 @@ def test_cli_review_flow_supports_latest_review_and_slug_resolution(settings, tm
     assert "candidate_summary" in review_items[0]
     assert "candidate_reason_codes" in review_items[0]
     assert review_items[0]["next_action_hint"] == "review-resolve approved|rejected"
+
+    result = runner.invoke(
+        command,
+        ["review-dashboard", "--root", str(settings.root), "--status", "pending", "--person-slug", "alice"],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+    dashboard = json.loads(result.output)
+    assert dashboard["summary"]["review_item_count"] >= 1
+    assert dashboard["candidate_cards"][0]["evidence_preview"][0]["quote"] == "Bob is my friend."
+    assert "low_confidence" in dashboard["candidate_cards"][0]["flags"]
+    assert dashboard["candidate_cards"][0]["consolidation_preview"]["action"] in {"insert_active", "needs_person_resolution"}
 
     result = runner.invoke(
         command,

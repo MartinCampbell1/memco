@@ -94,10 +94,13 @@ Typical review-driven branch:
 
 ```bash
 uv run memco review-list --status pending --person-slug alice --root "$ROOT"
+uv run memco review-dashboard --status pending --person-slug alice --root "$ROOT"
 uv run memco review-resolve approved --latest-review --person-slug alice --candidate-person-slug alice --candidate-target-person-slug bob --publish --reason "resolved review path" --root "$ROOT"
 ```
 
 In mixed workspaces, `retrieval-log-list --person-slug alice` lets the operator inspect one person’s redacted retrieval activity without scanning the whole workspace log stream.
+
+`review-dashboard` is the compact CLI review UX: it combines queue items, candidate cards, evidence previews, low-confidence/sensitive/psychometrics flags, and merge/supersede previews before the operator resolves or publishes anything.
 
 For unresolved-speaker flows, `conversation-speaker-resolve SPEAKER_KEY --latest-conversation --person-slug ...` removes the last manual conversation-id handoff from that branch too.
 

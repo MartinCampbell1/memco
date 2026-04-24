@@ -957,6 +957,40 @@ def review_list_command(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command(
+    "review-dashboard",
+    help="Inspect review queue candidates with evidence, risk flags, and consolidation preview. Next step: `review-resolve`, `candidate-publish`, or `candidate-reject`.",
+)
+def review_dashboard_command(
+    workspace: str = typer.Option("default", help="Workspace slug."),
+    status: str | None = typer.Option("pending", help="Review status filter."),
+    person_id: int | None = typer.Option(None, help="Person id filter."),
+    person_slug: str | None = typer.Option(None, help="Person slug filter."),
+    limit: int = typer.Option(50, help="Result limit."),
+    low_confidence_threshold: float = typer.Option(0.6, help="Flag candidates below this confidence."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    service = ReviewService()
+    with get_connection(settings.db_path) as conn:
+        resolved_person_id = _resolve_person_option(
+            conn=conn,
+            workspace_slug=workspace,
+            person_id=person_id,
+            person_slug=person_slug,
+            option_name="person",
+        )
+        result = service.dashboard(
+            conn,
+            workspace_slug=workspace,
+            status=status,
+            person_id=resolved_person_id,
+            limit=limit,
+            low_confidence_threshold=low_confidence_threshold,
+        )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @app.command("fact-list", help="List facts in the truth store. Often used after `candidate-publish` or `fact-rollback`.")
 def fact_list_command(
     workspace: str = typer.Option("default", help="Workspace slug."),

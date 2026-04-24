@@ -88,6 +88,7 @@ That means:
 ### Operator Surface
 
 - The current private release now has a CLI-only operator flow, including a dedicated `conversation-import` command for the `source -> conversation` step.
+- `review-dashboard` provides the minimum review UX for the private slice: queue items, candidate cards, evidence preview, proposed merge/supersede action, and flags for sensitive, low-confidence, and psychometrics candidates.
 - The operator surface is still intentionally narrow and optimized for a technical single-user local workflow, not for a broader multi-user or service-managed product shape.
 
 ## Practical Reading Guide
