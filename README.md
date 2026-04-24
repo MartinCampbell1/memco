@@ -107,6 +107,17 @@ The documented private-release acceptance checklist lives in [docs/2026-04-21_me
 
 The required private agent-memory pilot sequence lives in [docs/PRIVATE_PILOT_RUNBOOK.md](docs/PRIVATE_PILOT_RUNBOOK.md).
 
+Backup/export/restore checks are available through the backup command group:
+
+```bash
+uv run memco backup export --mode audit --output var/backups/memco-audit-export.json --root "$ROOT"
+uv run memco backup verify var/backups/memco-audit-export.json
+MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup export --mode full --encrypted --output var/backups/memco-full-backup.json.enc --root "$ROOT"
+MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup restore-dry-run var/backups/memco-full-backup.json.enc
+```
+
+Audit exports redact raw source/message/evidence text. Full encrypted exports are the restore-dry-run path and should remain private runtime artifacts.
+
 The top-level readiness split between `private release` and `strict original execution-brief readiness` lives in [docs/2026-04-21_memco_release_readiness_gate.md](docs/2026-04-21_memco_release_readiness_gate.md).
 
 The canonical repo-local remediation plan now lives in [docs/plans/2026-04-21_memco_full_fix_plan.md](docs/plans/2026-04-21_memco_full_fix_plan.md).

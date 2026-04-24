@@ -30,6 +30,7 @@ from memco.services.extraction_service import ExtractionService
 from memco.services.publish_service import PublishService
 from memco.services.eval_service import EvalService
 from memco.services.export_service import ExportService
+from memco.services.backup_service import BackupService
 from memco.services.chat_runtime import build_chat_services
 from memco.services.review_service import ReviewService
 from memco.repositories.fact_repository import FactRepository
@@ -44,6 +45,8 @@ from memco.services.pipeline_service import IngestPipelineService
 app = typer.Typer(help="Memco structured persona-memory CLI.")
 eval_app = typer.Typer(help="Evaluation commands.")
 app.add_typer(eval_app, name="eval")
+backup_app = typer.Typer(help="Backup, export, verification, and restore dry-run commands.")
+app.add_typer(backup_app, name="backup")
 
 
 def _settings(root: str | None) -> Settings:
@@ -84,6 +87,14 @@ def _emit_json_artifact(payload: dict, *, output: str | None) -> None:
         final_payload["artifact_path"] = str(output_path)
         output_path.write_text(json.dumps(final_payload, ensure_ascii=False, indent=2), encoding="utf-8")
     typer.echo(json.dumps(final_payload, ensure_ascii=False, indent=2))
+
+
+def _backup_passphrase(*, encrypted_or_required: bool, passphrase_env: str | None) -> str | None:
+    env_name = passphrase_env or "MEMCO_BACKUP_PASSPHRASE"
+    value = os.environ.get(env_name)
+    if encrypted_or_required and not value:
+        raise typer.BadParameter(f"{env_name} must be set for encrypted backup operations.")
+    return value
 
 
 def _resolve_cli_id(
@@ -1008,6 +1019,85 @@ def persona_export_command(
             actor=actor,
         )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _default_backup_output(settings: Settings, *, mode: str, encrypted: bool) -> Path:
+    suffix = ".json.enc" if encrypted else ".json"
+    stem = "memco-full-backup" if mode == "full" else "memco-audit-export"
+    return settings.root / "var" / "backups" / f"{stem}{suffix}"
+
+
+def _backup_encrypted_flag(path: Path) -> bool:
+    try:
+        return BackupService().is_encrypted_backup(path)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@backup_app.command("export", help="Write an audit or full backup export. Use --encrypted for passphrase-protected output.")
+def backup_export_command(
+    output: str | None = typer.Option(None, help="Output path. Defaults under var/backups."),
+    mode: str = typer.Option("audit", help="Export mode: audit|full. Audit mode redacts raw source text."),
+    encrypted: bool = typer.Option(False, "--encrypted", help="Encrypt the export with MEMCO_BACKUP_PASSPHRASE."),
+    passphrase_env: str | None = typer.Option(None, help="Environment variable holding the backup passphrase."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    normalized_mode = mode.strip().lower()
+    output_path = Path(output).expanduser().resolve() if output else _default_backup_output(
+        settings,
+        mode=normalized_mode,
+        encrypted=encrypted,
+    )
+    passphrase = _backup_passphrase(encrypted_or_required=encrypted, passphrase_env=passphrase_env)
+    service = BackupService()
+    with get_connection(settings.db_path) as conn:
+        try:
+            result = service.export_backup(
+                conn,
+                output_path=output_path,
+                storage_engine=settings.storage.engine,
+                mode=normalized_mode,
+                encrypted=encrypted,
+                passphrase=passphrase,
+            )
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@backup_app.command("verify", help="Verify a backup export and check migration compatibility.")
+def backup_verify_command(
+    backup_path: str = typer.Argument(..., help="Backup JSON or encrypted JSON path."),
+    passphrase_env: str | None = typer.Option(None, help="Environment variable holding the backup passphrase."),
+) -> None:
+    path = Path(backup_path).expanduser().resolve()
+    encrypted = _backup_encrypted_flag(path)
+    passphrase = _backup_passphrase(encrypted_or_required=encrypted, passphrase_env=passphrase_env)
+    try:
+        result = BackupService().verify_backup(path, passphrase=passphrase)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    if not result["ok"]:
+        raise typer.Exit(1)
+
+
+@backup_app.command("restore-dry-run", help="Validate a backup for restore without writing to the runtime database.")
+def backup_restore_dry_run_command(
+    backup_path: str = typer.Argument(..., help="Backup JSON or encrypted JSON path."),
+    passphrase_env: str | None = typer.Option(None, help="Environment variable holding the backup passphrase."),
+) -> None:
+    path = Path(backup_path).expanduser().resolve()
+    encrypted = _backup_encrypted_flag(path)
+    passphrase = _backup_passphrase(encrypted_or_required=encrypted, passphrase_env=passphrase_env)
+    try:
+        result = BackupService().restore_dry_run(path, passphrase=passphrase)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    if not result["ok"]:
+        raise typer.Exit(1)
 
 
 @app.command("fact-operations", help="List fact lifecycle operations. Often used before `fact-rollback`. Omit `--target-fact-id` with `--latest-target-fact` to target the newest matching fact in the current scope.")

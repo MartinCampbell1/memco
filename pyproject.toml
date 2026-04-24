@@ -11,6 +11,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Martin" }]
 dependencies = [
+  "cryptography>=42.0.0",
   "fastapi>=0.116.0",
   "psycopg[binary]>=3.2.0",
   "pydantic>=2.11.0",

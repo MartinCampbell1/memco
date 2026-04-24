@@ -39,6 +39,10 @@ def test_readme_uses_current_contract_language():
     assert "var/reports/local-artifacts-refresh-postgres-current.json" in readme
     assert "uv run memco local-artifacts-refresh --project-root /Users/martin/memco" in readme
     assert "--output /absolute/path/to/local-artifacts-refresh.json" in readme
+    assert "uv run memco backup export --mode audit" in readme
+    assert "uv run memco backup verify var/backups/memco-audit-export.json" in readme
+    assert "uv run memco backup restore-dry-run var/backups/memco-full-backup.json.enc" in readme
+    assert "Full encrypted exports are the restore-dry-run path" in readme
     assert "MEMCO_RUN_LIVE_SMOKE=1" in readme
     assert "fail-closed on incomplete live-provider config" in readme
     assert "runtime_policy.ok = false" in readme
