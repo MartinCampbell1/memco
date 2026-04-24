@@ -8,6 +8,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout
@@ -16,7 +20,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6.2.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -25,6 +29,9 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --frozen --extra dev --extra parsers
+
+      - name: Check dependency consistency
+        run: uv pip check
 
       - name: Run test suite
         run: uv run pytest -q

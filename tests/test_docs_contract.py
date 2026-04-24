@@ -201,6 +201,26 @@ def test_local_operator_artifacts_are_gitignored_but_tracked_status_snapshot_is_
     assert tracked.stdout == ""
 
 
+def test_ci_reproducibility_gate_uses_lockfile_matrix_and_pip_check():
+    ci = _read(".github/workflows/ci.yml")
+    candidates_route = _read("src/memco/api/routes/candidates.py")
+    review_route = _read("src/memco/api/routes/review.py")
+    deps = _read("src/memco/api/deps.py")
+
+    assert 'python-version: ["3.11", "3.12", "3.13"]' in ci
+    assert "uv sync --frozen --extra dev --extra parsers" in ci
+    assert "uv pip check" in ci
+    assert "HTTP_422_UNPROCESSABLE_CONTENT" not in candidates_route
+    assert "HTTP_422_UNPROCESSABLE_CONTENT" not in review_route
+    assert "HTTP_422_UNPROCESSABLE_CONTENT" not in deps
+    assert "HTTP_422_UNPROCESSABLE_ENTITY" not in candidates_route
+    assert "HTTP_422_UNPROCESSABLE_ENTITY" not in review_route
+    assert "HTTP_422_UNPROCESSABLE_ENTITY" not in deps
+    assert "status_code=422" in candidates_route
+    assert "status_code=422" in review_route
+    assert "status_code=422" in deps
+
+
 def test_current_contract_explicitly_scopes_out_whatsapp_and_telegram():
     readme = _read("README.md")
     notes = _read("IMPLEMENTATION_NOTES.md")

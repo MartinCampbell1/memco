@@ -45,7 +45,7 @@ def get_db(settings):
 def require_actor_context(actor, *, route_label: str) -> None:
     if actor is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=422,
             detail=f"Actor context is required for {route_label}.",
         )
 

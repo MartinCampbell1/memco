@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException
 
 from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
@@ -97,7 +97,7 @@ def publish_candidate(
             )
         except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=422,
                 detail=str(exc),
             ) from exc
     return result
@@ -128,7 +128,7 @@ def reject_candidate(
             )
         except ValueError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                status_code=422,
                 detail=str(exc),
             ) from exc
     return result
