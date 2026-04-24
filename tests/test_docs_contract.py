@@ -339,12 +339,14 @@ def test_release_closure_records_current_private_go_evidence():
     assert "Final private Hermes/API-backed verdict: `GO`" in closure
     assert "single-user, local/private/operator-controlled/review-gated" in closure
     assert "Strict original brief verdict: `NO-GO/reference-track`" in closure
-    assert "`uv run pytest -q` -> `358 passed`" in closure
+    assert "`uv run pytest -q` -> `441 passed`" in closure
     assert "`operator-preflight` -> `ok: true`" in closure
     assert "`release-readiness-check` -> `ok: true`" in closure
     assert "`status_source: config-only`" in closure
     assert "`env_overrides.used: false`" in closure
     assert "`live_operator_smoke.ok: true`" in closure
+    assert "`live_operator_smoke.artifact_context.checkout.dirty: false`" in closure
+    assert "`live_operator_smoke.artifact_context.checkout.git_head` is recorded in the current artifact" in closure
     assert "`current_for_checkout_config: True`" in closure
     assert "No provider key is recorded in tracked source/docs." in closure
     assert "Local runtime config permissions are owner-only: `var/config/` is `0700`, `settings.yaml` is `0600`." in closure
@@ -364,6 +366,9 @@ def test_docs_status_map_reflects_post_remediation_state():
     assert "root `IMPLEMENTATION_NOTES.md` is restored" in status_map
     assert "README HTTP examples include required actor payloads" in status_map
     assert "release-readiness-check-current.json` is fresh for checkout/config" in status_map
+    assert "`uv run pytest -q` passed with `441 passed`" in status_map
+    assert "read the exact current git head from the artifact" in status_map
+    assert "`api_queries.ok=true` is required" in status_map
     assert "root IMPLEMENTATION_NOTES.md is deleted" not in status_map
     assert "Full suite is red" not in status_map
     assert "Current Document-Level Fixes Still Needed" not in status_map

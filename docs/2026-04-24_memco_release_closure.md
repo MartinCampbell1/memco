@@ -15,14 +15,19 @@ The strict original track remains separate because the original brief still name
 
 ## Fresh Evidence
 
-These checks were run after the remediation work in the current checkout:
+These checks were run after the remediation work in the current checkout. The exact current git head is intentionally read from the fresh local artifacts instead of hardcoded here, so a docs-only commit does not make this closure stale by text.
 
-- `uv run pytest -q` -> `358 passed`
+- `uv run pytest -q` -> `441 passed`
 - `operator-preflight` -> `ok: true`
 - `release-readiness-check` -> `ok: true`
 - `status_source: config-only`
 - `env_overrides.used: false`
 - `live_operator_smoke.ok: true`
+- `live_operator_smoke.required: true`
+- `live_operator_smoke.requested: true`
+- `live_operator_smoke.ran: true`
+- `live_operator_smoke.artifact_context.checkout.dirty: false`
+- `live_operator_smoke.artifact_context.checkout.git_head` is recorded in the current artifact
 - `current_for_checkout_config: True`
 
 Current local artifacts:
@@ -55,6 +60,8 @@ Local runtime config permissions are owner-only: `var/config/` is `0700`, `setti
 - Historical plans and snapshots are marked as non-current release verdicts.
 - Live smoke can use project config when provider env vars are absent.
 - OpenAI-compatible provider calls have a request timeout so release gates cannot hang indefinitely on a stuck provider call.
+- LLM provider extraction now backfills missing chunk provenance and skips malformed per-candidate provider noise in pipeline mode without weakening strict direct extraction validation.
+- LLM planner now filters abstract answer-slot claim checks such as `current residence`, while preserving concrete false-premise checks.
 
 ## Current Use Boundary
 

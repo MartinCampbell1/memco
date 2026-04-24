@@ -107,12 +107,12 @@ Current private-release remediation state:
 | Area | Current state |
 |---|---|
 | Implementation notes | root `IMPLEMENTATION_NOTES.md` is restored and `docs/IMPLEMENTATION_NOTES.md` is available as supporting docs context. |
-| Test suite | `uv run pytest -q` passed with `358 passed`. |
+| Test suite | `uv run pytest -q` passed with `441 passed` on current clean HEAD. |
 | API actor docs | README HTTP examples include required actor payloads and shared API token guidance. |
 | Runtime config | live OpenAI-compatible provider is configured in ignored local `var/config/settings.yaml`. |
-| Release artifacts | `release-readiness-check-current.json` is fresh for checkout/config. |
-| Live smoke artifact | `live-operator-smoke-current.json` is fresh for checkout/config. |
-| Operator preflight artifact | `operator-preflight-current.json` is fresh for checkout/config. |
+| Release artifacts | `release-readiness-check-current.json` is fresh for checkout/config when artifact freshness reports `dirty=false` and `stale_relative_to_current_checkout=false`; read the exact current git head from the artifact. |
+| Live smoke artifact | `live-operator-smoke-current.json` is fresh for checkout/config when artifact freshness reports `dirty=false` and `stale_relative_to_current_checkout=false`; `api_queries.ok=true` is required. |
+| Operator preflight artifact | `operator-preflight-current.json` is fresh for checkout/config when artifact freshness reports `dirty=false` and `stale_relative_to_current_checkout=false`; read the exact current git head from the artifact. |
 
 This resolved state is scoped to the private single-user Hermes/API-backed release path. It is not strict original-brief or public SaaS closure.
 
