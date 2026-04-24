@@ -73,6 +73,41 @@ INTERROGATIVE_CLAIM_VALUE_RE = re.compile(
     r"^\s*(?:where|what|who|whom|whose|when|which|how|где|что|кто|когда|какой|какая|какие|как)\b",
     re.IGNORECASE,
 )
+CLAIM_VALUE_TOKEN_RE = re.compile(r"[a-zа-я0-9]+", re.IGNORECASE)
+GENERIC_CLAIM_SLOT_WORDS = {
+    "address",
+    "city",
+    "company",
+    "country",
+    "current",
+    "date",
+    "employer",
+    "employment",
+    "event",
+    "home",
+    "job",
+    "live",
+    "lives",
+    "living",
+    "location",
+    "place",
+    "preference",
+    "preferences",
+    "relationship",
+    "residence",
+    "role",
+    "status",
+    "time",
+    "work",
+    "адрес",
+    "город",
+    "дата",
+    "живет",
+    "место",
+    "работа",
+    "роль",
+}
+SUBJECT_SLOT_WORDS = {"a", "an", "her", "his", "in", "my", "of", "person", "s", "the", "their", "user"}
 
 
 class LLMPlannerDomain(BaseModel):
@@ -282,7 +317,7 @@ class PlannerService:
         if not domain_queries:
             raise ValueError("LLM planner returned no usable domain queries")
 
-        claim_checks = self._provider_claim_checks(output)
+        claim_checks = self._provider_claim_checks(output, person_slug=payload.person_slug)
         false_premise_risk = output.false_premise_risk if output.false_premise_risk in {"low", "medium", "high"} else self._false_premise_risk(payload.query)
         question_type = output.question_type if output.question_type in {"single_hop", "multi_hop", "temporal", "other"} else self._question_type(payload.query, temporal_mode=temporal_mode)
         return RetrievalPlan(
@@ -309,13 +344,23 @@ class PlannerService:
             "reason": item.reason.strip(),
         }
 
-    def _provider_claim_checks(self, output: LLMPlannerOutput) -> list[RetrievalClaimCheck]:
+    def _is_provider_answer_slot_claim(self, value: str, *, person_slug: str) -> bool:
+        tokens = [token.lower() for token in CLAIM_VALUE_TOKEN_RE.findall(value)]
+        if not tokens:
+            return True
+        subject_tokens = {token for token in re.split(r"[-_\s]+", person_slug.lower()) if token}
+        filtered = [token for token in tokens if token not in subject_tokens and token not in SUBJECT_SLOT_WORDS]
+        return bool(filtered) and all(token in GENERIC_CLAIM_SLOT_WORDS for token in filtered)
+
+    def _provider_claim_checks(self, output: LLMPlannerOutput, *, person_slug: str) -> list[RetrievalClaimCheck]:
         checks: list[RetrievalClaimCheck] = []
         for check in output.claim_checks:
             value = check.value.strip()
             if not check.must_be_supported or not value:
                 continue
             if INTERROGATIVE_CLAIM_VALUE_RE.search(value):
+                continue
+            if self._is_provider_answer_slot_claim(value, person_slug=person_slug):
                 continue
             checks.append(RetrievalClaimCheck(label=check.type, value=value, claim_type=check.type))
         return checks

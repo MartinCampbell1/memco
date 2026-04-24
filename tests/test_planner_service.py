@@ -277,6 +277,37 @@ def test_planner_drops_provider_question_phrase_claim_checks():
     assert not plan.claim_checks
 
 
+def test_planner_drops_provider_answer_slot_claim_checks():
+    planner = PlannerService(
+        llm_provider=MockLLMProvider(
+            json_handler=lambda **_: {
+                "target_person": "alice",
+                "domains": [
+                    {
+                        "domain": "biography",
+                        "categories": ["residence"],
+                        "field_query": "Where does Alice live?",
+                        "reason": "query asks about residence",
+                        "priority": 1,
+                    }
+                ],
+                "claim_checks": [{"type": "location", "value": "current residence", "must_be_supported": True}],
+                "temporal_mode": "current",
+                "false_premise_risk": "low",
+                "requires_temporal_reasoning": False,
+                "requires_cross_domain_synthesis": False,
+                "must_not_answer_without_evidence": True,
+                "question_type": "single_hop",
+            }
+        )
+    )
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"))
+
+    assert plan.plan_version == "v2_llm"
+    assert not plan.claim_checks
+
+
 def test_planner_bad_provider_output_fails_closed_by_default():
     planner = PlannerService(
         llm_provider=MockLLMProvider(
