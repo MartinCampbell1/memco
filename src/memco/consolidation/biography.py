@@ -7,6 +7,21 @@ class BiographyConsolidationPolicy(ConsolidationPolicy):
     domain = "biography"
     current_state_categories = frozenset({"residence"})
 
+    def semantic_duplicate_key(self, *, category: str, payload: dict) -> str:
+        if category == "residence":
+            return f"residence:{self._first_value(payload, 'city', 'place')}"
+        if category == "origin":
+            return f"origin:{self._first_value(payload, 'place', 'city')}"
+        if category == "family":
+            return f"family:{self._first_value(payload, 'relation')}:{self._first_value(payload, 'target_person_id', 'target_label', 'name')}"
+        if category == "languages":
+            return f"languages:{self._first_value(payload, 'languages', 'language')}"
+        if category == "pets":
+            return f"pets:{self._first_value(payload, 'pet_type')}:{self._first_value(payload, 'pet_name')}"
+        if category == "identity":
+            return f"identity:{self._first_value(payload, 'name')}"
+        return super().semantic_duplicate_key(category=category, payload=payload)
+
     def resolve(
         self,
         *,
@@ -30,4 +45,3 @@ class BiographyConsolidationPolicy(ConsolidationPolicy):
                 reason="residence update supersedes the previous current residence",
             )
         return decision
-

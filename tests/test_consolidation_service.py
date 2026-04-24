@@ -106,6 +106,131 @@ def test_add_fact_merges_duplicate_evidence_and_preserves_locator(settings):
     assert second["evidence"][1]["source_segment_id"] is not None
 
 
+def test_semantic_duplicate_merges_with_different_canonical_key_same_category(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    service = ConsolidationService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/semantic-dup.md",
+            source_type="note",
+            origin_uri="/tmp/semantic-dup.md",
+            title="semantic-dup",
+            sha256="semantic-dup-sha",
+            parsed_text="Alice likes tea.",
+        )
+        first = service.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="preferences",
+                category="preference",
+                canonical_key="alice:preferences:preference:tea",
+                payload={"value": "Tea", "polarity": "like", "reason": "warm"},
+                summary="Alice likes tea.",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice likes tea.",
+            ),
+        )
+        second = service.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="preferences",
+                category="preference",
+                canonical_key="alice:preferences:preference:black-tea",
+                payload={"value": " tea ", "polarity": "like", "reason": "with breakfast"},
+                summary="Alice still likes tea.",
+                confidence=0.92,
+                observed_at="2026-04-22T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice still likes tea.",
+            ),
+        )
+
+    assert first["id"] == second["id"]
+    assert len(second["evidence"]) == 2
+
+
+def test_semantic_duplicate_detection_does_not_merge_unrelated_categories(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    service = ConsolidationService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/category-guard.md",
+            source_type="note",
+            origin_uri="/tmp/category-guard.md",
+            title="category-guard",
+            sha256="category-guard-sha",
+            parsed_text="Alice knows Python and uses Python.",
+        )
+        skill = service.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="work",
+                category="skill",
+                canonical_key="alice:work:python",
+                payload={"skill": "Python"},
+                summary="Alice knows Python.",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice knows Python.",
+            ),
+        )
+        tool = service.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="work",
+                category="tool",
+                canonical_key="alice:work:python",
+                payload={"tool": "Python"},
+                summary="Alice uses Python.",
+                confidence=0.9,
+                observed_at="2026-04-21T10:05:00Z",
+                source_id=source_id,
+                quote_text="Alice uses Python.",
+            ),
+        )
+
+    assert skill["id"] != tool["id"]
+    assert skill["category"] == "skill"
+    assert tool["category"] == "tool"
+    assert skill["status"] == "active"
+    assert tool["status"] == "active"
+
+
 def test_residence_value_conflict_supersedes_previous_current_fact(settings):
     fact_repo = FactRepository()
     source_repo = SourceRepository()

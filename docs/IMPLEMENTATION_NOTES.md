@@ -79,6 +79,12 @@ That means:
 - `token_accounting.production_accounting` now breaks usage down by extraction/planner/retrieval/answer stage, event-summed retrieved context tokens, amortized extraction cost per candidate, and source/person/domain cost groups. Unknown live-provider pricing is reported as `null` with `cost_status: "unknown"` rather than as zero; source/domain/person groups are attribution groups, not additive billing totals.
 - This is still not the final strict original-brief acceptance/reporting closure.
 
+### Consolidation Surface
+
+- Fact consolidation now uses domain/category-scoped semantic duplicate keys before inserting a new fact, so equivalent payloads can merge evidence even when a candidate's canonical key differs.
+- Duplicate detection is scoped by workspace, person, domain, and category; unrelated categories never merge solely because a canonical key collides.
+- Current-state categories still supersede older active facts while preserving old fact evidence and historical retrieval.
+
 ### Operator Surface
 
 - The current private release now has a CLI-only operator flow, including a dedicated `conversation-import` command for the `source -> conversation` step.

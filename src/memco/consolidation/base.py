@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,31 @@ class ConsolidationPolicy:
 
     def publish_block_reason(self, *, category: str, payload: dict) -> str | None:
         return None
+
+    def semantic_duplicate_key(self, *, category: str, payload: dict) -> str:
+        return self._payload_key(payload)
+
+    def _norm(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, list):
+            return "|".join(sorted(item for item in (self._norm(item) for item in value) if item))
+        return " ".join(str(value).replace("_", " ").replace("-", " ").strip().lower().split())
+
+    def _first_value(self, payload: dict, *keys: str) -> str:
+        for key in keys:
+            value = self._norm(payload.get(key))
+            if value:
+                return value
+        return ""
+
+    def _payload_key(self, payload: dict) -> str:
+        normalized = {
+            key: self._norm(value)
+            for key, value in payload.items()
+            if self._norm(value)
+        }
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True)
 
     def _is_older_than_current(self, *, existing_fact: dict, observed_at: str) -> bool:
         existing_observed_at = str(existing_fact.get("observed_at") or "")
@@ -48,4 +75,3 @@ class ConsolidationPolicy:
             conflict_kind="value_conflict",
             reason="new current-state fact supersedes the previous active fact",
         )
-

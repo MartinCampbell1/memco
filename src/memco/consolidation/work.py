@@ -7,6 +7,21 @@ class WorkConsolidationPolicy(ConsolidationPolicy):
     domain = "work"
     current_state_categories = frozenset({"employment", "role", "org"})
 
+    def semantic_duplicate_key(self, *, category: str, payload: dict) -> str:
+        if category == "employment":
+            return f"employment:{self._first_value(payload, 'org', 'company', 'client')}:{self._first_value(payload, 'title', 'role')}"
+        if category == "role":
+            return f"role:{self._first_value(payload, 'role', 'title')}"
+        if category == "org":
+            return f"org:{self._first_value(payload, 'org', 'company', 'client')}"
+        if category == "project":
+            return f"project:{self._first_value(payload, 'project', 'name')}:{self._first_value(payload, 'org', 'client')}"
+        if category == "skill":
+            return f"skill:{self._first_value(payload, 'skill', 'value')}"
+        if category == "tool":
+            return f"tool:{self._first_value(payload, 'tool', 'value')}"
+        return super().semantic_duplicate_key(category=category, payload=payload)
+
     def resolve(
         self,
         *,
@@ -30,4 +45,3 @@ class WorkConsolidationPolicy(ConsolidationPolicy):
                 reason=f"{category} update supersedes the previous current work fact",
             )
         return decision
-

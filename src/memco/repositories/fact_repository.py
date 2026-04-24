@@ -159,8 +159,17 @@ class FactRepository:
             conn,
             workspace_slug=workspace_slug,
             person_id=person_id,
+            domain=domain,
+            category=category,
             canonical_key=canonical_key,
             payload=payload,
+            semantic_payload=self._semantic_payload(
+                payload=payload,
+                observed_at=observed_at,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                event_at=event_at,
+            ),
         )
         if duplicate is not None:
             self.add_evidence(
@@ -323,21 +332,70 @@ class FactRepository:
         *,
         workspace_slug: str,
         person_id: int,
+        domain: str,
+        category: str,
         canonical_key: str,
         payload: dict,
+        semantic_payload: dict | None = None,
     ) -> dict | None:
         workspace_id = self.ensure_workspace(conn, workspace_slug)
         row = conn.execute(
             """
             SELECT *
             FROM memory_facts
-            WHERE workspace_id = ? AND person_id = ? AND canonical_key = ? AND payload_json = ? AND status = 'active'
+            WHERE workspace_id = ? AND person_id = ? AND domain = ? AND category = ?
+              AND canonical_key = ? AND payload_json = ? AND status = 'active'
             ORDER BY observed_at DESC, id DESC
             LIMIT 1
             """,
-            (workspace_id, person_id, canonical_key, json_dumps(payload)),
+            (workspace_id, person_id, domain, category, canonical_key, json_dumps(payload)),
         ).fetchone()
-        return dict(row) if row is not None else None
+        if row is not None:
+            return dict(row)
+        policy = get_policy(domain)
+        semantic_key = policy.semantic_duplicate_key(category=category, payload=semantic_payload or payload)
+        if not semantic_key:
+            return None
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM memory_facts
+            WHERE workspace_id = ? AND person_id = ? AND domain = ? AND category = ? AND status = 'active'
+            ORDER BY observed_at DESC, id DESC
+            """,
+            (workspace_id, person_id, domain, category),
+        ).fetchall()
+        for candidate in rows:
+            candidate_payload = self._semantic_payload(
+                payload=json.loads(candidate["payload_json"] or "{}"),
+                observed_at=str(candidate["observed_at"] or ""),
+                valid_from=str(candidate["valid_from"] or ""),
+                valid_to=str(candidate["valid_to"] or ""),
+                event_at=str(candidate["event_at"] or ""),
+            )
+            if policy.semantic_duplicate_key(category=category, payload=candidate_payload) == semantic_key:
+                return dict(candidate)
+        return None
+
+    def _semantic_payload(
+        self,
+        *,
+        payload: dict,
+        observed_at: str = "",
+        valid_from: str = "",
+        valid_to: str = "",
+        event_at: str = "",
+    ) -> dict:
+        semantic_payload = dict(payload)
+        for key, value in {
+            "observed_at": observed_at,
+            "valid_from": valid_from,
+            "valid_to": valid_to,
+            "event_at": event_at,
+        }.items():
+            if value:
+                semantic_payload.setdefault(key, value)
+        return semantic_payload
 
     def add_evidence(
         self,

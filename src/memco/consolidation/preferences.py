@@ -7,6 +7,18 @@ class PreferencesConsolidationPolicy(ConsolidationPolicy):
     domain = "preferences"
     current_state_categories = frozenset({"preference"})
 
+    def semantic_duplicate_key(self, *, category: str, payload: dict) -> str:
+        if category == "preference":
+            return ":".join(
+                [
+                    "preference",
+                    self._first_value(payload, "preference_domain", "preference_category"),
+                    self._first_value(payload, "value"),
+                    self._first_value(payload, "polarity"),
+                ]
+            )
+        return super().semantic_duplicate_key(category=category, payload=payload)
+
     def resolve(
         self,
         *,
@@ -37,4 +49,3 @@ class PreferencesConsolidationPolicy(ConsolidationPolicy):
             conflict_kind="value_conflict",
             reason="preference update supersedes the previous current preference",
         )
-
