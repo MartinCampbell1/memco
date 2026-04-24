@@ -67,6 +67,7 @@ class RetrievalService:
     def _record_usage(self, *, query: str, result: RetrievalResult) -> None:
         if self.usage_tracker is None:
             return
+        metadata = self._usage_metadata(result)
         output = json.dumps(
             {
                 "support_level": result.support_level,
@@ -86,9 +87,49 @@ class RetrievalService:
                 output_tokens=estimate_token_count(output),
                 estimated_cost_usd=0.0,
                 deterministic=True,
-                metadata={"stage": "retrieval"},
+                metadata=metadata,
             )
         )
+
+    def _usage_metadata(self, result: RetrievalResult) -> dict:
+        source_ids = self._source_ids(result)
+        domains = sorted({hit.domain for hit in result.hits if hit.domain})
+        if result.planner is not None:
+            domains = sorted({*domains, *(item.domain for item in result.planner.domain_queries if item.domain)})
+        target_person = result.target_person or {}
+        metadata = {
+            "stage": "retrieval",
+            "support_level": result.support_level,
+            "source_ids": source_ids,
+            "domains": domains,
+            "retrieved_context_tokens": self._retrieved_context_tokens(result),
+        }
+        if target_person.get("id") is not None:
+            metadata["person_id"] = int(target_person["id"])
+        return metadata
+
+    def _source_ids(self, result: RetrievalResult) -> list[int]:
+        source_ids: set[int] = set()
+        for hit in result.hits:
+            for evidence in hit.evidence:
+                source_id = evidence.get("source_id")
+                if source_id is not None:
+                    source_ids.add(int(source_id))
+        for hit in result.fallback_hits:
+            source_ids.add(int(hit.source_id))
+        return sorted(source_ids)
+
+    def _retrieved_context_tokens(self, result: RetrievalResult) -> int:
+        parts: list[str] = []
+        for hit in result.hits:
+            parts.append(hit.summary)
+            if hit.payload:
+                parts.append(json.dumps(hit.payload, ensure_ascii=False, sort_keys=True))
+            for evidence in hit.evidence:
+                parts.append(str(evidence.get("quote_text") or evidence.get("quote") or ""))
+        for hit in result.fallback_hits:
+            parts.append(hit.text)
+        return estimate_token_count(" ".join(part for part in parts if part))
 
     def _hash_query(self, *, query: str, salt: str) -> str:
         return hashlib.sha256(f"{salt}:{query}".encode("utf-8")).hexdigest()

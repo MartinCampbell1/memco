@@ -261,6 +261,7 @@ class AnswerService:
         if self.usage_tracker is None:
             return
         factual_hits = self._factual_hits(retrieval_result)
+        metadata = self._usage_metadata(retrieval_result, answer_payload=answer_payload)
         input_text = " ".join(
             [
                 query,
@@ -278,9 +279,48 @@ class AnswerService:
                 output_tokens=estimate_token_count(output_text),
                 estimated_cost_usd=0.0,
                 deterministic=True,
-                metadata={"stage": "answer"},
+                metadata=metadata,
             )
         )
+
+    def _usage_metadata(self, retrieval_result, *, answer_payload: dict | None = None) -> dict:
+        factual_hits = self._factual_hits(retrieval_result)
+        source_ids = self._source_ids(retrieval_result)
+        domains = sorted({hit.domain for hit in factual_hits if getattr(hit, "domain", "")})
+        target_person = getattr(retrieval_result, "target_person", {}) or {}
+        metadata = {
+            "stage": "answer",
+            "support_level": (answer_payload or {}).get("support_level", getattr(retrieval_result, "support_level", "")),
+            "source_ids": source_ids,
+            "domains": domains,
+            "retrieved_context_tokens": self._retrieved_context_tokens(retrieval_result),
+        }
+        if target_person.get("id") is not None:
+            metadata["person_id"] = int(target_person["id"])
+        return metadata
+
+    def _source_ids(self, retrieval_result) -> list[int]:
+        source_ids: set[int] = set()
+        for hit in self._factual_hits(retrieval_result):
+            for evidence in hit.evidence:
+                source_id = evidence.get("source_id")
+                if source_id is not None:
+                    source_ids.add(int(source_id))
+        for hit in getattr(retrieval_result, "fallback_hits", []) or []:
+            source_ids.add(int(hit.source_id))
+        return sorted(source_ids)
+
+    def _retrieved_context_tokens(self, retrieval_result) -> int:
+        parts: list[str] = []
+        for hit in self._factual_hits(retrieval_result):
+            parts.append(str(hit.summary or ""))
+            if hit.payload:
+                parts.append(json.dumps(hit.payload, ensure_ascii=False, sort_keys=True))
+            for evidence in hit.evidence:
+                parts.append(str(evidence.get("quote_text") or evidence.get("quote") or ""))
+        for hit in getattr(retrieval_result, "fallback_hits", []) or []:
+            parts.append(str(hit.text or ""))
+        return estimate_token_count(" ".join(part for part in parts if part))
 
     def _factual_hits(self, retrieval_result):
         return [hit for hit in retrieval_result.hits if getattr(hit, "domain", "") not in self.NON_FACTUAL_DOMAINS]
@@ -343,7 +383,7 @@ class AnswerService:
         )
         return system_prompt, prompt
 
-    def _record_provider_usage(self, *, response, answer_payload: dict) -> None:
+    def _record_provider_usage(self, *, response, retrieval_result, answer_payload: dict) -> None:
         if self.usage_tracker is None:
             return
         self.usage_tracker.record(
@@ -355,7 +395,7 @@ class AnswerService:
                 output_tokens=response.usage.output_tokens,
                 estimated_cost_usd=response.usage.estimated_cost_usd,
                 deterministic=False,
-                metadata={"stage": "answer", "support_level": answer_payload.get("support_level", "")},
+                metadata=self._usage_metadata(retrieval_result, answer_payload=answer_payload),
             )
         )
 
@@ -377,7 +417,7 @@ class AnswerService:
                 retrieval_result=retrieval_result,
                 detail_policy=detail_policy,
             )
-            self._record_provider_usage(response=response, answer_payload=payload)
+            self._record_provider_usage(response=response, retrieval_result=retrieval_result, answer_payload=payload)
             return payload
         except Exception:
             return None

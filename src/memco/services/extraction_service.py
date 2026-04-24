@@ -161,9 +161,14 @@ class ExtractionService:
                 "stage": "extraction",
                 "schema_name": metadata.get("schema_name"),
                 "message_id": metadata.get("message_id"),
+                "source_id": metadata.get("source_id"),
                 "chunk_id": metadata.get("chunk_id"),
                 "workspace_id": metadata.get("workspace_id"),
+                "person_id": metadata.get("person_id"),
                 "has_person_id": metadata.get("person_id") is not None,
+                "source_type": metadata.get("source_type"),
+                "domains": metadata.get("candidate_domains", []),
+                "candidate_count": int(metadata.get("candidate_count") or 0),
                 "include_style": bool(metadata.get("include_style")),
                 "include_psychometrics": bool(metadata.get("include_psychometrics")),
             },
@@ -467,6 +472,7 @@ class ExtractionService:
         person_id: int | None,
         conn,
         workspace_id: int | None,
+        source_id: int | None = None,
         message_id: int | None = None,
         source_segment_id: int | None = None,
         session_id: int | None = None,
@@ -488,6 +494,7 @@ class ExtractionService:
             "person_id": person_id,
             "conn": conn,
             "workspace_id": workspace_id,
+            "source_id": source_id,
             "message_id": message_id,
             "source_segment_id": source_segment_id,
             "session_id": session_id,
@@ -528,16 +535,28 @@ class ExtractionService:
             schema_name=EXTRACTION_SCHEMA_NAME,
             metadata=metadata,
         )
-        self._record_usage(
-            operation="complete_json",
-            metadata={**metadata, "schema_name": EXTRACTION_SCHEMA_NAME},
-            usage=response.usage,
-        )
         content = response.content
         if isinstance(content, dict) and isinstance(content.get("items"), list):
             content = content["items"]
         if not isinstance(content, list):
             raise ValueError("LLM provider returned non-list candidate payload")
+        usage_metadata = {
+            **metadata,
+            "schema_name": EXTRACTION_SCHEMA_NAME,
+            "candidate_count": len(content),
+            "candidate_domains": sorted(
+                {
+                    str(candidate.get("domain") or "")
+                    for candidate in content
+                    if isinstance(candidate, dict) and candidate.get("domain")
+                }
+            ),
+        }
+        self._record_usage(
+            operation="complete_json",
+            metadata=usage_metadata,
+            usage=response.usage,
+        )
         return [
             validate_candidate(
                 self._normalize_provider_candidate(
@@ -622,6 +641,7 @@ class ExtractionService:
             speaker_label=person_hint or "",
             person_id=None,
             workspace_id=None,
+            source_id=None,
             conn=None,
         )
 
@@ -905,6 +925,7 @@ class ExtractionService:
                     person_id=effective_person_id,
                     conn=conn,
                     workspace_id=int(meta_row["workspace_id"]),
+                    source_id=int(meta_row["source_id"]),
                     message_id=primary.message_id if use_message_fallback else None,
                     source_segment_id=primary.source_segment_id if use_message_fallback else None,
                     session_id=primary.session_id,
@@ -1002,6 +1023,7 @@ class ExtractionService:
                 person_id=person_id,
                 conn=conn,
                 workspace_id=int(source_row["workspace_id"]),
+                source_id=int(source_row["id"]),
                 source_segment_id=source_segment_id,
                 include_style=include_style,
                 include_psychometrics=include_psychometrics,

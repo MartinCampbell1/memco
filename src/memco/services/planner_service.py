@@ -116,20 +116,32 @@ class PlannerService:
         self.use_llm = bool(llm_provider) if use_llm is None else use_llm
         self.fail_closed_on_provider_error = fail_closed_on_provider_error
 
-    def _record_usage(self, *, query: str, plan: RetrievalPlan) -> None:
+    def _record_usage(self, *, query: str, plan: RetrievalPlan, request: RetrievalRequest | None = None) -> None:
         if self.usage_tracker is None:
             return
-        payload = json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        plan_payload = json.dumps(plan.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        metadata = {"stage": "planner"}
+        if request is not None:
+            metadata.update(
+                {
+                    "person_slug": request.person_slug or "",
+                    "domain": request.domain or "",
+                    "category": request.category or "",
+                }
+            )
+            if request.person_id is not None:
+                metadata["person_id"] = request.person_id
+        metadata["domains"] = sorted({item.domain for item in plan.domain_queries if item.domain})
         self.usage_tracker.record(
             LLMUsageEvent(
                 provider="deterministic",
                 model="rule-based-planner",
                 operation="plan",
                 input_tokens=estimate_token_count(query),
-                output_tokens=estimate_token_count(payload),
+                output_tokens=estimate_token_count(plan_payload),
                 estimated_cost_usd=0.0,
                 deterministic=True,
-                metadata={"stage": "planner"},
+                metadata=metadata,
             )
         )
 
@@ -193,9 +205,19 @@ class PlannerService:
         )
         return system_prompt, prompt
 
-    def _record_provider_usage(self, *, query: str, response, plan: RetrievalPlan) -> None:
+    def _record_provider_usage(self, *, request: RetrievalRequest, response, plan: RetrievalPlan) -> None:
         if self.usage_tracker is None:
             return
+        metadata = {
+            "stage": "planner",
+            "plan_version": plan.plan_version,
+            "person_slug": request.person_slug or "",
+            "domain": request.domain or "",
+            "category": request.category or "",
+            "domains": sorted({item.domain for item in plan.domain_queries if item.domain}),
+        }
+        if request.person_id is not None:
+            metadata["person_id"] = request.person_id
         self.usage_tracker.record(
             LLMUsageEvent(
                 provider=response.provider,
@@ -205,7 +227,7 @@ class PlannerService:
                 output_tokens=response.usage.output_tokens,
                 estimated_cost_usd=response.usage.estimated_cost_usd,
                 deterministic=False,
-                metadata={"stage": "planner", "plan_version": plan.plan_version},
+                metadata=metadata,
             )
         )
 
@@ -222,7 +244,7 @@ class PlannerService:
             )
             output = LLMPlannerOutput.model_validate(response.content)
             plan = self._plan_from_provider_output(payload, output)
-            self._record_provider_usage(query=payload.query, response=response, plan=plan)
+            self._record_provider_usage(request=payload, response=response, plan=plan)
             return plan
         except Exception:
             return None
@@ -309,7 +331,7 @@ class PlannerService:
             ],
             support_expectation="unsupported",
         )
-        self._record_usage(query=payload.query, plan=plan)
+        self._record_usage(query=payload.query, plan=plan, request=payload)
         return plan
 
     def _rule_plan(self, payload: RetrievalRequest) -> RetrievalPlan:
@@ -333,7 +355,7 @@ class PlannerService:
                 claim_checks=self._claim_checks(payload.query, person_slug=payload.person_slug),
                 support_expectation=self._support_expectation(payload.query, 1),
             )
-            self._record_usage(query=payload.query, plan=plan)
+            self._record_usage(query=payload.query, plan=plan, request=payload)
             return plan
 
         domain_queries: list[RetrievalDomainPlan] = []
@@ -388,7 +410,7 @@ class PlannerService:
             claim_checks=self._claim_checks(payload.query, person_slug=payload.person_slug),
             support_expectation=self._support_expectation(payload.query, len({item.domain for item in domain_queries})),
         )
-        self._record_usage(query=payload.query, plan=plan)
+        self._record_usage(query=payload.query, plan=plan, request=payload)
         return plan
 
     def _resolve_temporal_mode(self, query: str, requested_mode: str) -> str:

@@ -1352,11 +1352,21 @@ class EvalService:
         return reports
 
     def _usage_delta(self, before: dict, after: dict) -> dict:
+        before_cost = before.get("estimated_cost_usd")
+        after_cost = after.get("estimated_cost_usd")
+        estimated_cost_usd = (
+            round(max(0.0, after_cost - before_cost), 6)
+            if before_cost is not None and after_cost is not None
+            else None
+        )
         return {
             "operation_count": max(0, after["operation_count"] - before["operation_count"]),
             "input_tokens": max(0, after["input_tokens"] - before["input_tokens"]),
             "output_tokens": max(0, after["output_tokens"] - before["output_tokens"]),
-            "estimated_cost_usd": round(max(0.0, after["estimated_cost_usd"] - before["estimated_cost_usd"]), 6),
+            "estimated_cost_usd": estimated_cost_usd,
+            "cost_status": after.get("cost_status", "not_applicable"),
+            "known_cost_event_count": max(0, int(after.get("known_cost_event_count", 0)) - int(before.get("known_cost_event_count", 0))),
+            "unknown_cost_event_count": max(0, int(after.get("unknown_cost_event_count", 0)) - int(before.get("unknown_cost_event_count", 0))),
             "providers": sorted(set(before.get("providers", [])) | set(after.get("providers", []))),
         }
 

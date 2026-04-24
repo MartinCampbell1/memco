@@ -76,6 +76,7 @@ That means:
 - Token usage is now tracked for both:
   - the explicit mock/deterministic fixture path
   - the OpenAI-compatible provider path exercised in tests
+- `token_accounting.production_accounting` now breaks usage down by extraction/planner/retrieval/answer stage, event-summed retrieved context tokens, amortized extraction cost per candidate, and source/person/domain cost groups. Unknown live-provider pricing is reported as `null` with `cost_status: "unknown"` rather than as zero; source/domain/person groups are attribution groups, not additive billing totals.
 - This is still not the final strict original-brief acceptance/reporting closure.
 
 ### Operator Surface

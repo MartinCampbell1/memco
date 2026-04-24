@@ -118,6 +118,8 @@ MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup rest
 
 Audit exports redact raw source/message/evidence text. Full encrypted exports are the restore-dry-run path and should remain private runtime artifacts.
 
+Eval and chat service wiring now expose production-style `token_accounting.production_accounting`: stage tokens for extraction/planner/retrieval/answer, retrieved-context tokens, amortized extraction cost per candidate, and cost/token rollups by source, person, and domain. Unknown live-provider pricing stays `null` with `cost_status: "unknown"` instead of being reported as zero. Attribution groups are non-additive: if one event references multiple sources or domains, the same event is counted in each relevant group.
+
 The top-level readiness split between `private release` and `strict original execution-brief readiness` lives in [docs/2026-04-21_memco_release_readiness_gate.md](docs/2026-04-21_memco_release_readiness_gate.md).
 
 The canonical repo-local remediation plan now lives in [docs/plans/2026-04-21_memco_full_fix_plan.md](docs/plans/2026-04-21_memco_full_fix_plan.md).
