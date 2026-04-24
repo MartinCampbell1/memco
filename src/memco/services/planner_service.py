@@ -69,6 +69,10 @@ RELATION_TARGET_RE = re.compile(
     re.IGNORECASE,
 )
 BEFORE_TARGET_RE = re.compile(r"\bbefore\s+([A-Z][A-Za-z0-9&.\-]+)\b", re.IGNORECASE)
+INTERROGATIVE_CLAIM_VALUE_RE = re.compile(
+    r"^\s*(?:where|what|who|whom|whose|when|which|how|где|что|кто|когда|какой|какая|какие|как)\b",
+    re.IGNORECASE,
+)
 
 
 class LLMPlannerDomain(BaseModel):
@@ -278,11 +282,7 @@ class PlannerService:
         if not domain_queries:
             raise ValueError("LLM planner returned no usable domain queries")
 
-        claim_checks = [
-            RetrievalClaimCheck(label=check.type, value=check.value.strip(), claim_type=check.type)
-            for check in output.claim_checks
-            if check.must_be_supported and check.value.strip()
-        ]
+        claim_checks = self._provider_claim_checks(output)
         false_premise_risk = output.false_premise_risk if output.false_premise_risk in {"low", "medium", "high"} else self._false_premise_risk(payload.query)
         question_type = output.question_type if output.question_type in {"single_hop", "multi_hop", "temporal", "other"} else self._question_type(payload.query, temporal_mode=temporal_mode)
         return RetrievalPlan(
@@ -308,6 +308,17 @@ class PlannerService:
             "field_query": item.field_query.strip(),
             "reason": item.reason.strip(),
         }
+
+    def _provider_claim_checks(self, output: LLMPlannerOutput) -> list[RetrievalClaimCheck]:
+        checks: list[RetrievalClaimCheck] = []
+        for check in output.claim_checks:
+            value = check.value.strip()
+            if not check.must_be_supported or not value:
+                continue
+            if INTERROGATIVE_CLAIM_VALUE_RE.search(value):
+                continue
+            checks.append(RetrievalClaimCheck(label=check.type, value=value, claim_type=check.type))
+        return checks
 
     def _normalize_provider_temporal_mode(self, temporal_mode: str, query: str, requested_mode: str) -> str:
         if temporal_mode in {"auto", "current", "history", "when"}:

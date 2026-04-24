@@ -26,6 +26,7 @@ from memco.services.candidate_service import CandidateService
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.extraction_service import ExtractionService
 from memco.services.ingest_service import IngestService
+from memco.services.pipeline_service import IngestPipelineService
 
 
 def _context(text: str, *, person_id: int | None = 1, resolve_person_id=None) -> ExtractionContext:
@@ -145,6 +146,88 @@ class _RecordingExtractionProvider:
             provider=self.name,
             model=self.model,
         )
+
+
+class _EmptyChunkProvenanceProvider(_RecordingExtractionProvider):
+    def complete_json(
+        self,
+        *,
+        system_prompt: str,
+        prompt: str,
+        schema_name: str,
+        metadata: dict | None = None,
+    ) -> LLMJSONResponse:
+        payload = json.loads(prompt)
+        self.calls.append({"payload": payload, "metadata": metadata or {}})
+        items: list[dict] = []
+        chunk = payload.get("chunk")
+        if isinstance(chunk, dict) and chunk.get("chunk_kind") == "conversation" and payload["speaker_label"] == "Alice":
+            items.append(
+                {
+                    "domain": "biography",
+                    "category": "residence",
+                    "subcategory": "city",
+                    "canonical_key": f"{payload['subject_key']}:biography:residence:lisbon",
+                    "payload": {"city": "Lisbon"},
+                    "summary": "Alice lives in Lisbon.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": [
+                        {
+                            "quote": "I live in Lisbon.",
+                            "message_ids": [],
+                            "source_segment_ids": [],
+                            "session_ids": [],
+                            "chunk_kind": "conversation",
+                        }
+                    ],
+                }
+            )
+        raw_text = json.dumps({"items": items}, ensure_ascii=False)
+        return LLMJSONResponse(
+            content={"items": items},
+            raw_text=raw_text,
+            usage=LLMUsage(
+                input_tokens=self.count_tokens(text=system_prompt) + self.count_tokens(text=prompt),
+                output_tokens=self.count_tokens(text=raw_text),
+                estimated_cost_usd=0.0,
+            ),
+            provider=self.name,
+            model=self.model,
+        )
+
+
+class _InvalidThenValidChunkProvider(_EmptyChunkProvenanceProvider):
+    def complete_json(self, **kwargs) -> LLMJSONResponse:
+        response = super().complete_json(**kwargs)
+        if isinstance(response.content, dict) and response.content.get("items"):
+            items = [{"domain": "biography"}, *response.content["items"]]
+            raw_text = json.dumps({"items": items}, ensure_ascii=False)
+            return LLMJSONResponse(
+                content={"items": items},
+                raw_text=raw_text,
+                usage=response.usage,
+                provider=response.provider,
+                model=response.model,
+            )
+        return response
+
+
+class _NonObjectThenValidChunkProvider(_EmptyChunkProvenanceProvider):
+    def complete_json(self, **kwargs) -> LLMJSONResponse:
+        response = super().complete_json(**kwargs)
+        if isinstance(response.content, dict) and response.content.get("items"):
+            items = [None, "not-a-candidate", *response.content["items"]]
+            raw_text = json.dumps({"items": items}, ensure_ascii=False)
+            return LLMJSONResponse(
+                content={"items": items},
+                raw_text=raw_text,
+                usage=response.usage,
+                provider=response.provider,
+                model=response.model,
+            )
+        return response
 
 
 def test_extraction_prompt_contract_exposes_llm_first_domain_rules():
@@ -562,6 +645,189 @@ def test_provider_receives_conversation_chunk_payload(settings, tmp_path):
     residence = next(candidate for candidate in candidates if candidate["domain"] == "biography")
     assert residence["payload"] == {"city": "Lisbon", "valid_from": "2024"}
     assert len(residence["evidence"][0]["source_segment_ids"]) == 3
+
+
+def test_pipeline_backfills_empty_provider_chunk_provenance(settings, tmp_path):
+    source = tmp_path / "provider-empty-provenance.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:00:00Z", "text": "I live in Lisbon."},
+                    {"speaker": "Bob", "timestamp": "2026-01-01T10:01:00Z", "text": "Noted."},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    provider = _EmptyChunkProvenanceProvider()
+    pipeline = IngestPipelineService(
+        candidate_service=CandidateService(extraction_service=ExtractionService(llm_provider=provider))
+    )
+
+    with get_connection(settings.db_path) as conn:
+        result = pipeline.ingest_path(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+            person_display_name="Alice",
+            person_slug="alice",
+            aliases=["Alice"],
+        )
+
+    assert result["publish_errors"] == []
+    assert len(result["published"]) == 1
+    candidate_evidence = result["published"][0]["candidate"]["evidence"][0]
+    fact_evidence = result["published"][0]["fact"]["evidence"][0]
+    assert candidate_evidence["source_segment_ids"]
+    assert candidate_evidence["message_ids"]
+    assert fact_evidence["source_segment_id"] is not None
+
+
+def test_pipeline_skips_invalid_provider_chunk_candidates(settings, tmp_path):
+    source = tmp_path / "provider-invalid-candidate.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:00:00Z", "text": "I live in Lisbon."},
+                    {"speaker": "Bob", "timestamp": "2026-01-01T10:01:00Z", "text": "Noted."},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    pipeline = IngestPipelineService(
+        candidate_service=CandidateService(extraction_service=ExtractionService(llm_provider=_InvalidThenValidChunkProvider()))
+    )
+
+    with get_connection(settings.db_path) as conn:
+        result = pipeline.ingest_path(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+            person_display_name="Alice",
+            person_slug="alice",
+            aliases=["Alice"],
+        )
+
+    assert result["publish_errors"] == []
+    assert len(result["published"]) == 1
+
+
+def test_pipeline_skips_non_object_provider_chunk_candidates(settings, tmp_path):
+    source = tmp_path / "provider-non-object-candidate.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:00:00Z", "text": "I live in Lisbon."},
+                    {"speaker": "Bob", "timestamp": "2026-01-01T10:01:00Z", "text": "Noted."},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    pipeline = IngestPipelineService(
+        candidate_service=CandidateService(extraction_service=ExtractionService(llm_provider=_NonObjectThenValidChunkProvider()))
+    )
+
+    with get_connection(settings.db_path) as conn:
+        result = pipeline.ingest_path(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+            person_display_name="Alice",
+            person_slug="alice",
+            aliases=["Alice"],
+        )
+
+    assert result["publish_errors"] == []
+    assert len(result["published"]) == 1
+
+
+def test_provider_optional_string_noise_is_removed_before_validation(settings):
+    extraction = ExtractionService.from_settings(settings)
+
+    normalized = extraction._normalize_provider_candidate(
+        candidate={
+            "domain": "work",
+            "category": "employment",
+            "subcategory": "",
+            "canonical_key": "alice:work:employment:designer",
+            "payload": {"title": "product designer", "client": {"name": "Acme"}, "status": ""},
+            "summary": "Alice works as a product designer.",
+            "confidence": 0.9,
+            "reason": "",
+            "needs_review": False,
+            "evidence": [
+                {
+                    "quote": "I am a product designer.",
+                    "message_ids": ["1"],
+                    "source_segment_ids": [1],
+                    "chunk_kind": "conversation",
+                }
+            ],
+        },
+        text="I am a product designer.",
+        subject_display="Alice",
+        person_id=1,
+        message_id=1,
+        source_segment_id=1,
+        session_id=1,
+    )
+
+    assert "client" not in normalized["payload"]
+    assert "status" not in normalized["payload"]
+    validate_candidate_payload(
+        domain=normalized["domain"],
+        category=normalized["category"],
+        payload=normalized["payload"],
+    )
+
+    event = extraction._normalize_provider_candidate(
+        candidate={
+            "domain": "experiences",
+            "category": "event",
+            "subcategory": "",
+            "canonical_key": "alice:experiences:event:pycon",
+            "payload": {"event": "attended PyCon", "linked_projects": {"name": "Memco"}},
+            "summary": "Alice attended PyCon.",
+            "confidence": 0.9,
+            "reason": "",
+            "needs_review": False,
+            "evidence": [
+                {
+                    "quote": "I attended PyCon.",
+                    "message_ids": ["1"],
+                    "source_segment_ids": [1],
+                    "chunk_kind": "conversation",
+                }
+            ],
+        },
+        text="I attended PyCon.",
+        subject_display="Alice",
+        person_id=1,
+        message_id=1,
+        source_segment_id=1,
+        session_id=1,
+    )
+
+    assert "linked_projects" not in event["payload"]
+    validate_candidate_payload(
+        domain=event["domain"],
+        category=event["category"],
+        payload=event["payload"],
+    )
 
 
 def test_extract_candidates_from_source_uses_source_chunk_payload(settings, tmp_path):

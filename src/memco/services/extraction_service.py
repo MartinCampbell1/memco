@@ -184,6 +184,9 @@ class ExtractionService:
         message_id: int | None,
         source_segment_id: int | None,
         session_id: int | None,
+        message_ids: list[int] | None = None,
+        source_segment_ids: list[int] | None = None,
+        session_ids: list[int] | None = None,
         chunk_kind: str = "conversation",
         attribution_method: str = "",
         attribution_confidence: float | None = None,
@@ -191,9 +194,11 @@ class ExtractionService:
     ) -> dict[str, Any]:
         item = {
             "quote": quote.strip(),
-            "message_ids": [str(message_id)] if message_id is not None else [],
-            "source_segment_ids": [int(source_segment_id)] if source_segment_id is not None else [],
-            "session_ids": [int(session_id)] if session_id is not None else [],
+            "message_ids": [str(message_id)] if message_id is not None else [str(item) for item in (message_ids or [])],
+            "source_segment_ids": [int(source_segment_id)]
+            if source_segment_id is not None
+            else [int(item) for item in (source_segment_ids or [])],
+            "session_ids": [int(session_id)] if session_id is not None else [int(item) for item in (session_ids or [])],
             "chunk_kind": chunk_kind,
         }
         if attribution_method:
@@ -210,6 +215,9 @@ class ExtractionService:
         message_id: int | None,
         source_segment_id: int | None,
         session_id: int | None,
+        fallback_message_ids: list[int] | None = None,
+        fallback_source_segment_ids: list[int] | None = None,
+        fallback_session_ids: list[int] | None = None,
         chunk_kind: str = "conversation",
         attribution_method: str = "",
         attribution_confidence: float | None = None,
@@ -220,6 +228,9 @@ class ExtractionService:
             message_id=message_id,
             source_segment_id=source_segment_id,
             session_id=session_id,
+            message_ids=fallback_message_ids,
+            source_segment_ids=fallback_source_segment_ids,
+            session_ids=fallback_session_ids,
             chunk_kind=chunk_kind,
             attribution_method=attribution_method,
             attribution_confidence=attribution_confidence,
@@ -234,6 +245,9 @@ class ExtractionService:
                     message_id=message_id,
                     source_segment_id=source_segment_id,
                     session_id=session_id,
+                    message_ids=fallback_message_ids,
+                    source_segment_ids=fallback_source_segment_ids,
+                    session_ids=fallback_session_ids,
                     chunk_kind=chunk_kind,
                     attribution_method=attribution_method,
                     attribution_confidence=attribution_confidence,
@@ -252,6 +266,9 @@ class ExtractionService:
                             message_id=message_id,
                             source_segment_id=source_segment_id,
                             session_id=session_id,
+                            message_ids=fallback_message_ids,
+                            source_segment_ids=fallback_source_segment_ids,
+                            session_ids=fallback_session_ids,
                             chunk_kind=chunk_kind,
                             attribution_method=attribution_method,
                             attribution_confidence=attribution_confidence,
@@ -267,13 +284,13 @@ class ExtractionService:
                 evidence_item = {
                     "quote": quote.strip(),
                     "message_ids": item.get("message_ids")
-                    if isinstance(item.get("message_ids"), list)
+                    if isinstance(item.get("message_ids"), list) and item.get("message_ids")
                     else list(default_item["message_ids"]),
                     "source_segment_ids": item.get("source_segment_ids")
-                    if isinstance(item.get("source_segment_ids"), list)
+                    if isinstance(item.get("source_segment_ids"), list) and item.get("source_segment_ids")
                     else list(default_item["source_segment_ids"]),
                     "session_ids": item.get("session_ids")
-                    if isinstance(item.get("session_ids"), list)
+                    if isinstance(item.get("session_ids"), list) and item.get("session_ids")
                     else list(default_item["session_ids"]),
                     "chunk_kind": item.get("chunk_kind")
                     if isinstance(item.get("chunk_kind"), str) and item.get("chunk_kind", "").strip()
@@ -298,6 +315,9 @@ class ExtractionService:
         message_id: int | None,
         source_segment_id: int | None,
         session_id: int | None,
+        fallback_message_ids: list[int] | None = None,
+        fallback_source_segment_ids: list[int] | None = None,
+        fallback_session_ids: list[int] | None = None,
         chunk_kind: str = "conversation",
         attribution_method: str = "",
         attribution_confidence: float | None = None,
@@ -311,20 +331,74 @@ class ExtractionService:
             normalized["payload"] = payload
         category = str(normalized.get("category") or "")
         optional_blank_string_fields = {
-            ("preferences", "preference"): {"strength", "reason"},
-            ("social_circle", "relationship_event"): {"context"},
-            ("work", "employment"): set(),
-            ("work", "role"): set(),
-            ("work", "org"): set(),
-            ("work", "project"): set(),
+            ("preferences", "preference"): {
+                "context",
+                "original_phrasing",
+                "preference_category",
+                "preference_domain",
+                "reason",
+                "strength",
+                "valid_from",
+                "valid_to",
+            },
+            ("social_circle", "relationship_event"): {
+                "context",
+                "related_person_name",
+                "relation_type",
+                "sensitivity",
+                "valence",
+            },
+            ("social_circle", "relationship"): {
+                "related_person_name",
+                "relation_type",
+                "sensitivity",
+                "valence",
+            },
+            ("work", "employment"): {
+                "client",
+                "constraints",
+                "end_date",
+                "org",
+                "preferences",
+                "role",
+                "start_date",
+                "status",
+                "team",
+            },
+            ("work", "engagement"): {"client", "end_date", "org", "role", "start_date", "status", "team"},
+            ("work", "role"): {"end_date", "start_date", "status"},
+            ("work", "org"): {"client", "status"},
+            ("work", "project"): {"end_date", "org", "role", "start_date", "status", "team"},
             ("work", "skill"): set(),
             ("work", "tool"): set(),
-            ("experiences", "event"): {"summary", "temporal_anchor", "outcome", "valence"},
+            ("experiences", "event"): {
+                "date_range",
+                "lesson",
+                "location",
+                "outcome",
+                "recurrence",
+                "summary",
+                "temporal_anchor",
+                "valence",
+            },
         }
         removable_fields = optional_blank_string_fields.get((domain, category), set())
         for key in list(payload.keys()):
             value = payload.get(key)
             if key in removable_fields and (not isinstance(value, str) or not value.strip()):
+                payload.pop(key, None)
+        optional_list_fields = {
+            ("experiences", "event"): {"linked_persons", "linked_projects", "participants"},
+            ("social_circle", "relationship"): {"aliases"},
+            ("social_circle", "relationship_event"): {"aliases"},
+            ("work", "engagement"): {"outcomes"},
+            ("work", "project"): {"outcomes"},
+        }
+        for key in optional_list_fields.get((domain, category), set()):
+            value = payload.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
                 payload.pop(key, None)
         lowered_text = text.lower()
         residence_markers = (" live in ", " moved to ", " based in ", " is my base")
@@ -360,6 +434,9 @@ class ExtractionService:
             message_id=message_id,
             source_segment_id=source_segment_id,
             session_id=session_id,
+            fallback_message_ids=fallback_message_ids,
+            fallback_source_segment_ids=fallback_source_segment_ids,
+            fallback_session_ids=fallback_session_ids,
             chunk_kind=chunk_kind,
             attribution_method=attribution_method,
             attribution_confidence=attribution_confidence,
@@ -484,6 +561,7 @@ class ExtractionService:
         attribution_method: str = "",
         attribution_confidence: float | None = None,
         source_type: str = "",
+        strict_validation: bool = True,
     ) -> list[dict]:
         target_messages = target_messages or []
         metadata = {
@@ -557,24 +635,42 @@ class ExtractionService:
             metadata=usage_metadata,
             usage=response.usage,
         )
-        return [
-            validate_candidate(
-                self._normalize_provider_candidate(
-                    candidate=candidate,
-                    text=text,
-                    subject_display=subject_display,
-                    person_id=person_id,
-                    message_id=message_id,
-                    source_segment_id=source_segment_id,
-                    session_id=session_id,
-                    chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
-                    attribution_method=attribution_method,
-                    attribution_confidence=attribution_confidence,
-                    source_type=source_type,
+        fallback_message_ids = [message.message_id for message in chunk.messages] if chunk is not None else []
+        fallback_source_segment_ids = list(chunk.source_segment_ids) if chunk is not None else []
+        fallback_session_ids = (
+            sorted({int(message.session_id) for message in chunk.messages if message.session_id is not None})
+            if chunk is not None
+            else []
+        )
+        validated: list[dict] = []
+        for candidate in content:
+            try:
+                if not isinstance(candidate, dict):
+                    raise ValueError("LLM provider returned non-object candidate")
+                validated.append(
+                    validate_candidate(
+                        self._normalize_provider_candidate(
+                            candidate=candidate,
+                            text=text,
+                            subject_display=subject_display,
+                            person_id=person_id,
+                            message_id=message_id,
+                            source_segment_id=source_segment_id,
+                            session_id=session_id,
+                            fallback_message_ids=fallback_message_ids,
+                            fallback_source_segment_ids=fallback_source_segment_ids,
+                            fallback_session_ids=fallback_session_ids,
+                            chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
+                            attribution_method=attribution_method,
+                            attribution_confidence=attribution_confidence,
+                            source_type=source_type,
+                        )
+                    )
                 )
-            )
-            for candidate in content
-        ]
+            except ValueError:
+                if strict_validation:
+                    raise
+        return validated
 
     def _mock_extract_from_chunk(self, metadata: dict) -> list[dict]:
         target_person_id = metadata.get("person_id")
@@ -937,6 +1033,7 @@ class ExtractionService:
                     attribution_method=attribution_method,
                     attribution_confidence=attribution_confidence,
                     source_type=str(meta_row["source_type"] or ""),
+                    strict_validation=False,
                 )
                 for candidate in extracted:
                     candidates.append(
@@ -1032,6 +1129,7 @@ class ExtractionService:
                 attribution_method=attribution_method,
                 attribution_confidence=attribution_confidence,
                 source_type=str(source_row["source_type"] or ""),
+                strict_validation=False,
             )
             for candidate in extracted:
                 candidates.append(
