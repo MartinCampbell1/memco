@@ -6,8 +6,9 @@ import re
 import time
 
 from memco.llm_usage import LLMUsageEvent, LLMUsageTracker, estimate_token_count
+from memco.models.relationships import canonical_relation_type
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
-from memco.models.retrieval import DetailPolicy, RetrievalHit, RetrievalPlan, RetrievalRequest, RetrievalResult
+from memco.models.retrieval import DetailPolicy, RefusalCategory, RetrievalHit, RetrievalPlan, RetrievalRequest, RetrievalResult
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.retrieval_repository import RetrievalRepository
 from memco.services.planner_service import PlannerService
@@ -15,22 +16,39 @@ from memco.services.planner_service import PlannerService
 
 EXPLICIT_SUBJECT_PATTERNS = (
     re.compile(
-        r"^\s*(?:(?i:where|what|when|why|how))\s+(?:(?i:does|did|is|was|can|could|will|would))\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b",
+        r"^\s*(?:(?i:where|what|when|why|how))\s+(?:(?i:does|did|is|was|can|could|will|would))\s+([A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*)\b",
     ),
     re.compile(
-        r"^\s*(?:(?i:does|did|is|was|can|could|will|would))\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b",
+        r"^\s*(?:(?i:does|did|is|was|can|could|will|would))\s+([A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*)\b",
     ),
-    re.compile(r"^\s*(?:(?i:who))\s+(?:(?i:is))\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b"),
-    re.compile(r"^\s*(?:(?i:tell me about|describe|show me))\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*)\b"),
+    re.compile(r"^\s*(?:(?i:who))\s+(?:(?i:is))\s+([A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*)\b"),
+    re.compile(r"^\s*(?:(?i:tell me about|describe|show me))\s+([A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*)\b"),
 )
 
 
 class RetrievalService:
     NON_FACTUAL_DOMAINS = {"style", "psychometrics"}
     RESIDENCE_FIELDS = ("city", "place")
-    ORG_FIELDS = ("org",)
+    ORG_FIELDS = ("org", "company", "employer")
     PREFERENCE_FIELDS = ("value",)
     EVENT_FIELDS = ("event",)
+    YES_NO_PREFIXES = (
+        "do",
+        "does",
+        "did",
+        "is",
+        "are",
+        "was",
+        "were",
+        "can",
+        "could",
+        "will",
+        "would",
+        "has",
+        "have",
+        "had",
+        "should",
+    )
 
     def __init__(
         self,
@@ -112,17 +130,33 @@ class RetrievalService:
         planner: RetrievalPlan,
         detail_policy: DetailPolicy,
         reason: str = "",
+        refusal_category: RefusalCategory = "unsupported_no_evidence",
+        target_person: dict | None = None,
     ) -> RetrievalResult:
         unsupported_claims = [reason] if reason else []
         return RetrievalResult(
             query=query,
+            answerable=False,
             unsupported_premise_detected=True,
             support_level="unsupported",
+            refusal_category=refusal_category,
+            must_not_use_as_fact=True,
             detail_policy=detail_policy,
             unsupported_claims=unsupported_claims,
+            safe_known_facts=[],
+            target_person=target_person or {},
             hits=[],
             planner=planner,
         )
+
+    def _target_person_payload(self, person: dict | None) -> dict:
+        if person is None:
+            return {}
+        return {
+            "id": int(person["id"]),
+            "slug": str(person.get("slug") or ""),
+            "display_name": str(person.get("display_name") or ""),
+        }
 
     def _present_hit(self, hit: RetrievalHit, *, detail_policy: DetailPolicy) -> dict:
         if detail_policy == "core_only":
@@ -233,10 +267,14 @@ class RetrievalService:
             except ValueError:
                 result = RetrievalResult(
                     query=payload.query,
+                    answerable=False,
                     unsupported_premise_detected=True,
                     support_level="unsupported",
+                    refusal_category="unsupported_no_evidence",
+                    must_not_use_as_fact=True,
                     detail_policy=payload.detail_policy,
                     unsupported_claims=["Unknown person."],
+                    safe_known_facts=[],
                     hits=[],
                     planner=planner,
                 )
@@ -263,6 +301,8 @@ class RetrievalService:
                 planner=planner,
                 detail_policy=payload.detail_policy,
                 reason=subject_mismatch_reason,
+                refusal_category="subject_mismatch",
+                target_person=self._target_person_payload(person),
             )
             self._write_log(
                 conn,
@@ -312,6 +352,7 @@ class RetrievalService:
                     planner=planner,
                     detail_policy=payload.detail_policy,
                     reason="Actor scope prevents answering this request.",
+                    target_person=self._target_person_payload(person),
                 )
                 self._write_log(
                     conn,
@@ -355,6 +396,8 @@ class RetrievalService:
             if historical_hits:
                 deduped_hits = historical_hits
         hits = deduped_hits[: payload.limit]
+        hits = self._filter_relationship_hits_for_requested_relation(planner=planner, hits=hits)
+        hits = self._dedupe_relationship_mirror_hits(hits=hits)
         fallback_hits = []
         requested_only_non_factual = bool(payload.domain) and payload.domain in self.NON_FACTUAL_DOMAINS
         if not hits and payload.include_fallback and not requested_only_non_factual and self._actor_can_view_sensitive(actor):
@@ -379,12 +422,30 @@ class RetrievalService:
         unsupported_flag = support_level in {"unsupported", "ambiguous", "contradicted"} or bool(unsupported_checks)
         if temporal_conflict_reason:
             unsupported_flag = True
+        answerable = self._answerable_from_support(
+            query=payload.query,
+            support_level=support_level,
+            unsupported_checks=unsupported_checks,
+        )
+        refusal_category = self._refusal_category(
+            query=payload.query,
+            planner=planner,
+            support_level=support_level,
+            unsupported_checks=unsupported_checks,
+            unsupported_claims=unsupported_claims,
+        )
+        safe_known_facts = self._safe_known_facts(hits=hits)
         result = RetrievalResult(
             query=payload.query,
+            answerable=answerable,
             unsupported_premise_detected=unsupported_flag,
             support_level=support_level,
+            refusal_category=refusal_category,
+            must_not_use_as_fact=not answerable,
             detail_policy=payload.detail_policy,
             unsupported_claims=unsupported_claims,
+            safe_known_facts=safe_known_facts,
+            target_person=self._target_person_payload(person),
             hits=[
                 RetrievalHit.model_validate(
                     {key: value for key, value in hit.items() if key not in {"sensitivity", "visibility"}}
@@ -406,6 +467,132 @@ class RetrievalService:
         self._record_usage(query=payload.query, result=result)
         return result
 
+    def _is_yes_no_query(self, query: str) -> bool:
+        first = query.strip().split(maxsplit=1)[0].lower().strip("¿?!.:,;") if query.strip() else ""
+        return first in self.YES_NO_PREFIXES
+
+    def _answerable_from_support(self, *, query: str, support_level: str, unsupported_checks: list) -> bool:
+        if support_level == "supported":
+            return True
+        if support_level == "partial":
+            return not unsupported_checks
+        return False
+
+    def _refusal_category(
+        self,
+        *,
+        query: str,
+        planner: RetrievalPlan,
+        support_level: str,
+        unsupported_checks: list,
+        unsupported_claims: list[str],
+    ) -> RefusalCategory:
+        if support_level == "supported":
+            return ""
+        if any(claim == "Query subject does not match requested person." for claim in unsupported_claims):
+            return "subject_mismatch"
+        if support_level == "contradicted":
+            return "contradicted_by_memory"
+        if support_level == "partial":
+            if unsupported_checks:
+                return "unsupported_no_evidence"
+            return ""
+        if support_level == "ambiguous":
+            if any(check.claim_type in {"relation", "relation_target"} for check in unsupported_checks) or any(
+                domain_query.domain == "social_circle" for domain_query in planner.domain_queries
+            ):
+                return "ambiguous_relationship"
+            return "insufficient_evidence"
+        return "unsupported_no_evidence"
+
+    def _safe_known_facts(self, *, hits: list[dict]) -> list[str]:
+        facts: list[str] = []
+        seen: set[str] = set()
+        for hit in hits:
+            if hit.get("domain") in self.NON_FACTUAL_DOMAINS:
+                continue
+            summary = str(hit.get("summary") or "").strip()
+            if not summary or summary in seen:
+                continue
+            seen.add(summary)
+            facts.append(summary)
+        return facts
+
+    def _requested_relationship_relations(self, *, planner: RetrievalPlan) -> set[str]:
+        if not any(domain_query.domain == "social_circle" for domain_query in planner.domain_queries):
+            return set()
+        return {
+            canonical_relation_type(check.value)
+            for check in planner.claim_checks
+            if check.claim_type == "relation"
+        }
+
+    def _requested_relationship_targets(self, *, planner: RetrievalPlan) -> set[str]:
+        if not any(domain_query.domain == "social_circle" for domain_query in planner.domain_queries):
+            return set()
+        return {
+            self._normalize_person_label(check.value)
+            for check in planner.claim_checks
+            if check.claim_type in {"relation_target", "name"}
+        }
+
+    def _relationship_hit_relation(self, hit: dict) -> str:
+        if hit.get("domain") == "biography" and hit.get("category") != "family":
+            return ""
+        if hit.get("domain") not in {"social_circle", "biography"}:
+            return ""
+        payload = hit.get("payload", {})
+        relation = payload.get("relation") or hit.get("subcategory") or hit.get("category")
+        return canonical_relation_type(str(relation or ""))
+
+    def _filter_relationship_hits_for_requested_relation(self, *, planner: RetrievalPlan, hits: list[dict]) -> list[dict]:
+        requested_relations = self._requested_relationship_relations(planner=planner)
+        requested_targets = self._requested_relationship_targets(planner=planner)
+        if not requested_relations:
+            return hits
+        filtered: list[dict] = []
+        for hit in hits:
+            relation = self._relationship_hit_relation(hit)
+            if not relation:
+                filtered.append(hit)
+                continue
+            if relation in requested_relations:
+                filtered.append(hit)
+                continue
+            payload = hit.get("payload", {})
+            target_label = self._normalize_person_label(str(payload.get("target_label") or payload.get("name") or ""))
+            if target_label and target_label in requested_targets:
+                filtered.append(hit)
+        return filtered
+
+    def _relationship_hit_target(self, hit: dict) -> str:
+        payload = hit.get("payload", {})
+        return self._normalize_person_label(str(payload.get("target_label") or payload.get("name") or ""))
+
+    def _is_derived_relationship_mirror(self, hit: dict) -> bool:
+        payload = hit.get("payload", {})
+        return hit.get("source_kind") == "derived_mirror" or bool(payload.get("mirrored_from_fact_id"))
+
+    def _dedupe_relationship_mirror_hits(self, *, hits: list[dict]) -> list[dict]:
+        deduped: list[dict] = []
+        key_to_index: dict[tuple[str, str], int] = {}
+        for hit in hits:
+            relation = self._relationship_hit_relation(hit)
+            target = self._relationship_hit_target(hit)
+            if not relation or not target:
+                deduped.append(hit)
+                continue
+            key = (relation, target)
+            existing_index = key_to_index.get(key)
+            if existing_index is None:
+                key_to_index[key] = len(deduped)
+                deduped.append(hit)
+                continue
+            existing = deduped[existing_index]
+            if self._is_derived_relationship_mirror(existing) and not self._is_derived_relationship_mirror(hit):
+                deduped[existing_index] = hit
+        return deduped
+
     def _hit_haystacks(self, *, hits: list[dict]) -> list[str]:
         haystacks = []
         for hit in hits:
@@ -423,6 +610,10 @@ class RetrievalService:
         haystacks = self._hit_haystacks(hits=hits)
         unsupported = []
         for check in planner.claim_checks:
+            if check.claim_type == "relation":
+                relation = canonical_relation_type(check.value)
+                if relation and relation in self._relationship_relations(hits=hits):
+                    continue
             needle = check.value.lower()
             if any(needle in haystack for haystack in haystacks):
                 continue
@@ -465,6 +656,46 @@ class RetrievalService:
                 values.add(self._normalize_person_label(str(value)))
         return values
 
+    def _normalized_work_orgs(self, *, hits: list[dict]) -> set[str]:
+        values: set[str] = set()
+        for hit in hits:
+            if hit.get("domain") != "work" or hit.get("category") not in {"employment", "org"}:
+                continue
+            payload = hit.get("payload", {})
+            for field in self.ORG_FIELDS:
+                value = payload.get(field)
+                if value is None:
+                    continue
+                values.add(self._normalize_person_label(str(value)))
+        return values
+
+    def _relationship_targets(self, *, hits: list[dict]) -> set[str]:
+        targets: set[str] = set()
+        for hit in hits:
+            if hit.get("domain") not in {"social_circle", "biography"}:
+                continue
+            if hit.get("domain") == "biography" and hit.get("category") != "family":
+                continue
+            payload = hit.get("payload", {})
+            for field in ("target_label", "name"):
+                value = payload.get(field)
+                if value:
+                    targets.add(self._normalize_person_label(str(value)))
+        return targets
+
+    def _relationship_relations(self, *, hits: list[dict]) -> set[str]:
+        relations: set[str] = set()
+        for hit in hits:
+            if hit.get("domain") not in {"social_circle", "biography"}:
+                continue
+            if hit.get("domain") == "biography" and hit.get("category") != "family":
+                continue
+            payload = hit.get("payload", {})
+            relation = payload.get("relation") or hit.get("subcategory") or hit.get("category")
+            if relation:
+                relations.add(canonical_relation_type(str(relation)))
+        return relations
+
     def _event_year_values(self, *, hits: list[dict]) -> set[str]:
         values: set[str] = set()
         for hit in hits:
@@ -482,7 +713,38 @@ class RetrievalService:
         return values
 
     def _is_contradicted(self, *, planner: RetrievalPlan, hits: list[dict], unsupported_checks: list) -> bool:
-        if not hits or not unsupported_checks or len(planner.domain_queries) != 1:
+        if not hits or not unsupported_checks:
+            return False
+        if any(domain_query.domain == "social_circle" for domain_query in planner.domain_queries):
+            target_checks = {
+                self._normalize_person_label(check.value)
+                for check in planner.claim_checks
+                if check.claim_type in {"relation_target", "name"}
+            }
+            relation_checks = {
+                canonical_relation_type(check.value)
+                for check in unsupported_checks
+                if check.claim_type == "relation"
+            }
+            supported_targets = self._relationship_targets(hits=hits)
+            supported_relations = self._relationship_relations(hits=hits)
+            if (
+                target_checks
+                and supported_targets
+                and supported_relations
+                and any(target not in supported_targets for target in target_checks)
+            ):
+                return True
+            if relation_checks and supported_relations and all(relation not in supported_relations for relation in relation_checks):
+                return True
+            if target_checks and relation_checks:
+                for hit in hits:
+                    payload = hit.get("payload", {})
+                    target_label = self._normalize_person_label(str(payload.get("target_label") or payload.get("name") or ""))
+                    relation = canonical_relation_type(str(payload.get("relation") or hit.get("category") or ""))
+                    if target_label in target_checks and relation and relation not in relation_checks:
+                        return True
+        if len(planner.domain_queries) != 1:
             return False
         domain_query = planner.domain_queries[0]
         if domain_query.domain == "biography" and domain_query.category == "residence":
@@ -495,7 +757,7 @@ class RetrievalService:
                 )
             )
         if domain_query.domain == "work":
-            supported_orgs = self._normalized_values(hits=hits, category="org", fields=self.ORG_FIELDS)
+            supported_orgs = self._normalized_work_orgs(hits=hits)
             return bool(
                 supported_orgs
                 and any(
@@ -526,25 +788,6 @@ class RetrievalService:
             ):
                 return True
             return False
-        if domain_query.domain == "social_circle":
-            target_checks = {
-                self._normalize_person_label(check.value)
-                for check in planner.claim_checks
-                if check.claim_type == "relation_target"
-            }
-            relation_checks = {
-                self._normalize_person_label(check.value)
-                for check in unsupported_checks
-                if check.claim_type == "relation"
-            }
-            if not target_checks or not relation_checks:
-                return False
-            for hit in hits:
-                payload = hit.get("payload", {})
-                target_label = self._normalize_person_label(str(payload.get("target_label") or ""))
-                relation = self._normalize_person_label(str(payload.get("relation") or hit.get("category") or ""))
-                if target_label in target_checks and relation and relation not in relation_checks:
-                    return True
         return False
 
     def _support_level(self, *, planner: RetrievalPlan, hits: list[dict], fallback_hits: list[dict], unsupported_checks: list) -> str:

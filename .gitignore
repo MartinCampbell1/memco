@@ -3,10 +3,12 @@
 __pycache__/
 
 .env
+.env.*
 .venv/
 .pytest_cache/
 
 var/
+*.zip
 
 .coverage
 htmlcov/

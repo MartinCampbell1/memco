@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from memco.db import get_connection
 from memco.models.memory_fact import MemoryFactInput
 from memco.models.retrieval import RetrievalRequest
@@ -136,6 +138,492 @@ def test_retrieve_filters_by_domain(settings):
     assert result.unsupported_premise_detected is False
     assert len(result.hits) == 1
     assert result.hits[0].domain == "preferences"
+
+
+@pytest.mark.parametrize(
+    ("domain", "category", "canonical_key", "payload", "summary", "query", "expected_key"),
+    [
+        (
+            "biography",
+            "health",
+            "alice:biography:health:gluten",
+            {"health_fact": "gluten sensitivity", "status": "current"},
+            "Alice has a current gluten sensitivity.",
+            "What health note mentions gluten?",
+            "health_fact",
+        ),
+        (
+            "experiences",
+            "event",
+            "alice:experiences:event:pycon-berlin",
+            {"event": "PyCon", "location": "Berlin", "outcome": "won the hackathon", "intensity": 0.8},
+            "Alice attended PyCon in Berlin and won the hackathon.",
+            "What happened at PyCon in Berlin?",
+            "location",
+        ),
+        (
+            "preferences",
+            "preference",
+            "alice:preferences:preference:tea-focus",
+            {"value": "tea", "preference_domain": "food", "preference_category": "drink", "context": "focus"},
+            "Alice likes tea when focusing.",
+            "What does Alice like?",
+            "value",
+        ),
+        (
+            "social_circle",
+            "friend",
+            "alice:social_circle:friend:bob",
+            {"relation": "friend", "target_label": "Bob", "target_person_id": None, "aliases": ["Bobby"], "valence": "positive"},
+            "Alice says Bob is their friend.",
+            "Who is Alice's friend Bobby?",
+            "target_label",
+        ),
+        (
+            "work",
+            "engagement",
+            "alice:work:engagement:memco-launch",
+            {"engagement": "Memco launch", "role": "builder", "outcomes": ["private memory API"], "team": "solo"},
+            "Alice is building the Memco launch engagement.",
+            "What work engagement produced a private memory API?",
+            "engagement",
+        ),
+    ],
+)
+def test_retrieve_matches_phase6_expanded_domain_fields(settings, domain, category, canonical_key, payload, summary, query, expected_key):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path=f"var/raw/{canonical_key.replace(':', '-')}.md",
+            source_type="note",
+            origin_uri=f"/tmp/{canonical_key.replace(':', '-')}.md",
+            title=canonical_key.replace(":", "-"),
+            sha256=canonical_key.replace(":", "-"),
+            parsed_text=summary,
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain=domain,
+                category=category,
+                canonical_key=canonical_key,
+                payload=payload,
+                summary=summary,
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text=summary,
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query=query,
+                domain=domain,
+                category=category,
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert len(result.hits) == 1
+    assert expected_key in result.hits[0].payload
+
+
+def test_relationship_query_retrieves_biography_family_fallback(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-family.md",
+            source_type="note",
+            origin_uri="/tmp/alice-family.md",
+            title="alice-family",
+            sha256="alice-family-sha",
+            parsed_text="Alice's sister is Maria.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="family",
+                subcategory="sister",
+                canonical_key="alice:biography:family:sister:maria",
+                payload={"relation": "sister", "name": "Maria"},
+                summary="Alice's sister is Maria.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice's sister is Maria.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Who is Alice's sister?",
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert result.unsupported_premise_detected is False
+    assert len(result.hits) == 1
+    assert result.hits[0].domain == "biography"
+    assert result.hits[0].category == "family"
+    assert result.hits[0].payload["name"] == "Maria"
+
+
+@pytest.mark.parametrize(
+    ("relation", "target_name", "domain", "category"),
+    [
+        ("sister", "Maria", "biography", "family"),
+        ("brother", "Noah", "biography", "family"),
+        ("mother", "Emma", "biography", "family"),
+        ("father", "Victor", "biography", "family"),
+        ("partner", "Riley", "biography", "family"),
+        ("spouse", "Sam", "biography", "family"),
+        ("friend", "Bob", "social_circle", "friend"),
+        ("colleague", "Dana", "social_circle", "colleague"),
+    ],
+)
+def test_relationship_queries_bridge_family_and_social_taxonomy(settings, relation, target_name, domain, category):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path=f"var/raw/alice-{relation}.md",
+            source_type="note",
+            origin_uri=f"/tmp/alice-{relation}.md",
+            title=f"alice-{relation}",
+            sha256=f"alice-{relation}-sha",
+            parsed_text=f"Alice's {relation} is {target_name}.",
+        )
+        payload = (
+            {"relation": relation, "name": target_name}
+            if domain == "biography"
+            else {"relation": relation, "target_label": target_name, "target_person_id": None, "is_current": True}
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain=domain,
+                category=category,
+                subcategory=relation if domain == "biography" else "",
+                canonical_key=f"alice:{domain}:{category}:{relation}:{target_name.lower()}",
+                payload=payload,
+                summary=f"Alice's {relation} is {target_name}.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text=f"Alice's {relation} is {target_name}.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query=f"Who is Alice's {relation}?",
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert result.answerable is True
+    assert result.unsupported_premise_detected is False
+    assert len(result.hits) == 1
+    target_field = "name" if domain == "biography" else "target_label"
+    assert result.hits[0].payload[target_field] == target_name
+
+
+def test_relationship_named_false_premise_contradicts_family_fact(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-sister-contradiction.md",
+            source_type="note",
+            origin_uri="/tmp/alice-sister-contradiction.md",
+            title="alice-sister-contradiction",
+            sha256="alice-sister-contradiction-sha",
+            parsed_text="Alice's sister is Maria.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="family",
+                subcategory="sister",
+                canonical_key="alice:biography:family:sister:maria",
+                payload={"relation": "sister", "name": "Maria"},
+                summary="Alice's sister is Maria.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice's sister is Maria.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Does Alice have a sister named Olga?",
+            ),
+        )
+
+    assert result.support_level == "contradicted"
+    assert result.answerable is False
+    assert result.must_not_use_as_fact is True
+    assert result.refusal_category == "contradicted_by_memory"
+    assert any("Olga" in item for item in result.unsupported_claims)
+    assert result.safe_known_facts == ["Alice's sister is Maria."]
+
+
+@pytest.mark.parametrize(
+    ("stored_relation", "query"),
+    [
+        ("spouse", "Who is Alice's wife?"),
+        ("wife", "Who is Alice's spouse?"),
+        ("husband", "Who is Alice's spouse?"),
+    ],
+)
+def test_relationship_alias_queries_match_canonical_relation(settings, stored_relation, query):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path=f"var/raw/alice-{stored_relation}-alias.md",
+            source_type="note",
+            origin_uri=f"/tmp/alice-{stored_relation}-alias.md",
+            title=f"alice-{stored_relation}-alias",
+            sha256=f"alice-{stored_relation}-alias-sha",
+            parsed_text=f"Alice's {stored_relation} is Riley.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="family",
+                subcategory=stored_relation,
+                canonical_key=f"alice:biography:family:{stored_relation}:riley",
+                payload={"relation": stored_relation, "name": "Riley"},
+                summary=f"Alice's {stored_relation} is Riley.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text=f"Alice's {stored_relation} is Riley.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query=query,
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert result.answerable is True
+    assert result.unsupported_premise_detected is False
+    assert len(result.hits) == 1
+    assert result.hits[0].payload["name"] == "Riley"
+
+
+def test_relationship_query_filters_to_requested_relation_in_populated_graph(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-family-populated.md",
+            source_type="note",
+            origin_uri="/tmp/alice-family-populated.md",
+            title="alice-family-populated",
+            sha256="alice-family-populated-sha",
+            parsed_text="Alice's sister is Maria. Alice's brother is Noah. Alice's spouse is Riley.",
+        )
+        for relation, target in (("sister", "Maria"), ("brother", "Noah"), ("spouse", "Riley")):
+            consolidation.add_fact(
+                conn,
+                MemoryFactInput(
+                    workspace="default",
+                    person_id=int(person["id"]),
+                    domain="biography",
+                    category="family",
+                    subcategory=relation,
+                    canonical_key=f"alice:biography:family:{relation}:{target.lower()}",
+                    payload={"relation": relation, "name": target},
+                    summary=f"Alice's {relation} is {target}.",
+                    confidence=0.95,
+                    observed_at="2026-04-21T10:00:00Z",
+                    source_id=source_id,
+                    quote_text=f"Alice's {relation} is {target}.",
+                ),
+            )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Who is Alice's sister?",
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert len(result.hits) == 1
+    assert result.hits[0].payload["name"] == "Maria"
+    assert result.safe_known_facts == ["Alice's sister is Maria."]
+
+
+def test_relationship_false_premise_filters_confirmed_fact_to_requested_relation(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-family-populated-contradiction.md",
+            source_type="note",
+            origin_uri="/tmp/alice-family-populated-contradiction.md",
+            title="alice-family-populated-contradiction",
+            sha256="alice-family-populated-contradiction-sha",
+            parsed_text="Alice's sister is Maria. Alice's brother is Noah. Alice's spouse is Riley.",
+        )
+        for relation, target in (("sister", "Maria"), ("brother", "Noah"), ("spouse", "Riley")):
+            consolidation.add_fact(
+                conn,
+                MemoryFactInput(
+                    workspace="default",
+                    person_id=int(person["id"]),
+                    domain="biography",
+                    category="family",
+                    subcategory=relation,
+                    canonical_key=f"alice:biography:family:{relation}:{target.lower()}",
+                    payload={"relation": relation, "name": target},
+                    summary=f"Alice's {relation} is {target}.",
+                    confidence=0.95,
+                    observed_at="2026-04-21T10:00:00Z",
+                    source_id=source_id,
+                    quote_text=f"Alice's {relation} is {target}.",
+                ),
+            )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Does Alice have a sister named Olga?",
+            ),
+        )
+
+    assert result.support_level == "contradicted"
+    assert result.answerable is False
+    assert len(result.hits) == 1
+    assert result.hits[0].payload["name"] == "Maria"
+    assert result.safe_known_facts == ["Alice's sister is Maria."]
+    assert all("Noah" not in fact and "Riley" not in fact for fact in result.safe_known_facts)
 
 
 def test_retrieve_supports_history_queries(settings):
@@ -509,10 +997,73 @@ def test_retrieve_marks_partial_support_for_mixed_claims(settings):
         )
 
     assert result.support_level == "partial"
+    assert result.answerable is False
+    assert result.must_not_use_as_fact is True
+    assert result.refusal_category == "unsupported_no_evidence"
     assert result.unsupported_premise_detected is True
     assert len(result.hits) == 1
     assert result.hits[0].payload["city"] == "Lisbon"
     assert any("Stripe" in item for item in result.unsupported_claims)
+    assert result.safe_known_facts == ["Alice lives in Lisbon."]
+
+
+def test_retrieve_marks_contradicted_support_for_conflicting_employer_fact(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-work-employer.md",
+            source_type="note",
+            origin_uri="/tmp/alice-work-employer.md",
+            title="alice-work-employer",
+            sha256="def459-work",
+            parsed_text="Alice works as a software engineer at Acme Robotics.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="work",
+                category="employment",
+                canonical_key="alice:work:employment:acme-robotics",
+                payload={"role": "software engineer", "org": "Acme Robotics", "is_current": True},
+                summary="Alice works as software engineer at Acme Robotics.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice works as a software engineer at Acme Robotics.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Does Alice work at Stripe?",
+            ),
+        )
+
+    assert result.support_level == "contradicted"
+    assert result.answerable is False
+    assert result.must_not_use_as_fact is True
+    assert result.refusal_category == "contradicted_by_memory"
+    assert result.unsupported_premise_detected is True
+    assert any("Stripe" in item for item in result.unsupported_claims)
+    assert result.safe_known_facts == ["Alice works as software engineer at Acme Robotics."]
 
 
 def test_retrieve_refuses_subject_binding_mismatch(settings):
@@ -574,6 +1125,9 @@ def test_retrieve_refuses_subject_binding_mismatch(settings):
         )
 
     assert result.support_level == "unsupported"
+    assert result.answerable is False
+    assert result.must_not_use_as_fact is True
+    assert result.refusal_category == "subject_mismatch"
     assert result.unsupported_premise_detected is True
     assert result.hits == []
     assert result.fallback_hits == []

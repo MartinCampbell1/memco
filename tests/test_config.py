@@ -206,6 +206,7 @@ def test_settings_file_is_private_when_loaded_or_written(tmp_path):
 def test_ingest_source_types_match_current_repo_local_contract(tmp_path):
     settings = Settings(root=tmp_path / "project")
 
+    assert settings.ingest.attribution_policy == "owner_first_person_fallback"
     assert {"text", "markdown", "chat", "json", "csv", "email", "pdf"} <= set(settings.ingest.source_types)
     assert "whatsapp" not in settings.ingest.source_types
     assert "telegram" not in settings.ingest.source_types

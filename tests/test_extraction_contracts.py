@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
 import pytest
 
 from memco.extractors import ExtractionOrchestrator
@@ -18,6 +20,7 @@ from memco.extractors.psychometrics import extract as extract_psychometrics
 from memco.extractors.social_circle import extract as extract_social_circle
 from memco.extractors.work import extract as extract_work
 from memco.db import get_connection
+from memco.llm import LLMJSONResponse, LLMTextResponse, LLMUsage
 from memco.repositories.fact_repository import FactRepository
 from memco.services.candidate_service import CandidateService
 from memco.services.conversation_ingest_service import ConversationIngestService
@@ -38,6 +41,110 @@ def _context(text: str, *, person_id: int | None = 1, resolve_person_id=None) ->
         occurred_at="2026-04-21T10:00:00Z",
         resolve_person_id=resolve_person_id,
     )
+
+
+class _RecordingExtractionProvider:
+    name = "recording"
+    model = "fixture"
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def count_tokens(self, *, text: str) -> int:
+        return max(1, len(text.split()))
+
+    def estimate_cost(self, *, input_tokens: int, output_tokens: int) -> float | None:
+        return 0.0
+
+    def complete_text(self, *, system_prompt: str, prompt: str, metadata: dict | None = None) -> LLMTextResponse:
+        return LLMTextResponse(
+            text=prompt,
+            usage=LLMUsage(input_tokens=self.count_tokens(text=prompt), output_tokens=1, estimated_cost_usd=0.0),
+            provider=self.name,
+            model=self.model,
+        )
+
+    def complete_json(
+        self,
+        *,
+        system_prompt: str,
+        prompt: str,
+        schema_name: str,
+        metadata: dict | None = None,
+    ) -> LLMJSONResponse:
+        payload = json.loads(prompt)
+        call = {"payload": payload, "metadata": metadata or {}}
+        self.calls.append(call)
+        items: list[dict] = []
+        chunk = payload.get("chunk")
+        if isinstance(chunk, dict) and chunk.get("chunk_kind") == "conversation" and payload["speaker_label"] == "Alice":
+            messages = chunk.get("messages") or []
+            if any("I moved there" in message.get("text", "") for message in messages) and any(
+                "You mean Lisbon" in message.get("text", "") for message in messages
+            ):
+                items.append(
+                    {
+                        "domain": "biography",
+                        "category": "residence",
+                        "subcategory": "city",
+                        "canonical_key": f"{payload['subject_key']}:biography:residence:lisbon",
+                        "payload": {"city": "Lisbon", "valid_from": "2024"},
+                        "summary": "Alice lives in Lisbon.",
+                        "confidence": 0.9,
+                        "reason": "",
+                        "needs_review": False,
+                        "evidence": [
+                            {
+                                "quote": "\n".join(
+                                    f"{message['speaker_label']}: {message['text']}" for message in messages
+                                ),
+                                "message_ids": [str(message["message_id"]) for message in messages],
+                                "source_segment_ids": list(chunk["source_segment_ids"]),
+                                "session_ids": [
+                                    int(message["session_id"])
+                                    for message in messages
+                                    if message.get("session_id") is not None
+                                ],
+                                "chunk_kind": "conversation",
+                            }
+                        ],
+                    }
+                )
+        if isinstance(chunk, dict) and chunk.get("chunk_kind") == "source" and "Alice moved to Lisbon" in payload["text"]:
+            items.append(
+                {
+                    "domain": "biography",
+                    "category": "residence",
+                    "subcategory": "city",
+                    "canonical_key": f"{payload['subject_key']}:biography:residence:lisbon",
+                    "payload": {"city": "Lisbon", "valid_from": "2024"},
+                    "summary": "Alice lives in Lisbon.",
+                    "confidence": 0.9,
+                    "reason": "",
+                    "needs_review": False,
+                    "evidence": [
+                        {
+                            "quote": payload["text"],
+                            "message_ids": [],
+                            "source_segment_ids": list(chunk["source_segment_ids"]),
+                            "session_ids": [],
+                            "chunk_kind": "source",
+                        }
+                    ],
+                }
+            )
+        raw_text = json.dumps({"items": items}, ensure_ascii=False)
+        return LLMJSONResponse(
+            content={"items": items},
+            raw_text=raw_text,
+            usage=LLMUsage(
+                input_tokens=self.count_tokens(text=system_prompt) + self.count_tokens(text=prompt),
+                output_tokens=self.count_tokens(text=raw_text),
+                estimated_cost_usd=0.0,
+            ),
+            provider=self.name,
+            model=self.model,
+        )
 
 
 def test_extraction_prompt_contract_exposes_llm_first_domain_rules():
@@ -215,6 +322,319 @@ def test_work_extractor_returns_employment_and_skill_candidates():
     categories = {(candidate["domain"], candidate["category"]) for candidate in candidates}
     assert ("work", "employment") in categories
     assert ("work", "tool") in categories
+
+
+def test_audit_fixture_deterministic_extraction_keeps_atomic_payloads(settings, tmp_path):
+    source = tmp_path / "audit-fixture.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:00:00Z", "text": "My name is Alice and I moved to Lisbon in 2024."},
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:01:00Z", "text": "I work as a software engineer at Acme Robotics."},
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:02:00Z", "text": "I love sushi and I prefer green tea."},
+                    {"speaker": "Bob", "timestamp": "2026-01-01T10:03:00Z", "text": "I live in Porto and I prefer coffee."},
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:04:00Z", "text": "My sister is Maria."},
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:05:00Z", "text": "I attended PyCon in 2025."},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ingest = IngestService()
+    conversation_service = ConversationIngestService()
+    extraction = ExtractionService.from_settings(settings)
+
+    with get_connection(settings.db_path) as conn:
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Bob",
+            slug="bob",
+            person_type="human",
+            aliases=["Bob"],
+        )
+        imported = ingest.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+        )
+        conversation = conversation_service.import_conversation(
+            settings,
+            conn,
+            workspace_slug="default",
+            source_id=imported.source_id,
+        )
+        candidates = extraction.extract_candidates_from_conversation(
+            conn,
+            conversation_id=conversation.conversation_id,
+        )
+
+    alice_identity = next(
+        candidate for candidate in candidates if candidate["domain"] == "biography" and candidate["category"] == "identity"
+    )
+    alice_residence = next(
+        candidate
+        for candidate in candidates
+        if candidate["domain"] == "biography" and candidate["category"] == "residence" and candidate["speaker_label"] == "Alice"
+    )
+    bob_residence = next(
+        candidate
+        for candidate in candidates
+        if candidate["domain"] == "biography" and candidate["category"] == "residence" and candidate["speaker_label"] == "Bob"
+    )
+    employment = next(candidate for candidate in candidates if candidate["domain"] == "work" and candidate["category"] == "employment")
+    preferences = {
+        (candidate["speaker_label"], candidate["payload"]["value"])
+        for candidate in candidates
+        if candidate["domain"] == "preferences"
+    }
+
+    assert alice_identity["payload"]["name"] == "Alice"
+    assert alice_identity["needs_review"] is False
+    assert alice_residence["payload"] == {"city": "Lisbon", "valid_from": "2024"}
+    assert alice_residence["needs_review"] is False
+    assert bob_residence["payload"]["city"] == "Porto"
+    assert bob_residence["needs_review"] is False
+    assert employment["payload"]["title"] == "software engineer"
+    assert employment["payload"]["role"] == "software engineer"
+    assert employment["payload"]["org"] == "Acme Robotics"
+    assert employment["needs_review"] is False
+    assert ("Alice", "sushi") in preferences
+    assert ("Alice", "green tea") in preferences
+    assert ("Bob", "coffee") in preferences
+
+
+def test_chunk_window_extraction_uses_neighboring_messages(settings, tmp_path):
+    source = tmp_path / "chunk-window.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:00:00Z", "text": "I moved there in 2024."},
+                    {"speaker": "Bob", "timestamp": "2026-01-01T10:01:00Z", "text": "Lisbon, right?"},
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:02:00Z", "text": "Yes."},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ingest = IngestService()
+    conversation_service = ConversationIngestService()
+    extraction = ExtractionService.from_settings(settings)
+
+    with get_connection(settings.db_path) as conn:
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Bob",
+            slug="bob",
+            person_type="human",
+            aliases=["Bob"],
+        )
+        imported = ingest.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+        )
+        conversation = conversation_service.import_conversation(
+            settings,
+            conn,
+            workspace_slug="default",
+            source_id=imported.source_id,
+        )
+        candidates = extraction.extract_candidates_from_conversation(
+            conn,
+            conversation_id=conversation.conversation_id,
+        )
+
+    residences = [
+        candidate
+        for candidate in candidates
+        if candidate["domain"] == "biography" and candidate["category"] == "residence"
+    ]
+    assert len(residences) == 1
+    residence = residences[0]
+    assert residence["payload"] == {"city": "Lisbon", "valid_from": "2024"}
+    assert residence["person_id"] is not None
+    assert residence["chunk_id"] is not None
+    assert residence["message_id"] is not None
+    assert residence["evidence"][0]["message_ids"]
+    assert len(residence["evidence"][0]["source_segment_ids"]) == 3
+
+
+def test_provider_receives_conversation_chunk_payload(settings, tmp_path):
+    source = tmp_path / "provider-chunk-window.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:00:00Z", "text": "I moved there in 2024."},
+                    {"speaker": "Bob", "timestamp": "2026-01-01T10:01:00Z", "text": "You mean Lisbon?"},
+                    {"speaker": "Alice", "timestamp": "2026-01-01T10:02:00Z", "text": "Yes."},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ingest = IngestService()
+    conversation_service = ConversationIngestService()
+    provider = _RecordingExtractionProvider()
+    extraction = ExtractionService(llm_provider=provider)
+
+    with get_connection(settings.db_path) as conn:
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Bob",
+            slug="bob",
+            person_type="human",
+            aliases=["Bob"],
+        )
+        imported = ingest.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="json",
+        )
+        conversation = conversation_service.import_conversation(
+            settings,
+            conn,
+            workspace_slug="default",
+            source_id=imported.source_id,
+        )
+        candidates = extraction.extract_candidates_from_conversation(
+            conn,
+            conversation_id=conversation.conversation_id,
+        )
+
+    alice_calls = [
+        call
+        for call in provider.calls
+        if call["payload"]["speaker_label"] == "Alice" and isinstance(call["payload"].get("chunk"), dict)
+    ]
+    assert alice_calls
+    alice_payload = alice_calls[0]["payload"]
+    alice_metadata = alice_calls[0]["metadata"]
+    assert alice_payload["message_id"] is None
+    assert alice_metadata["message_id"] is None
+    assert alice_payload["chunk"]["chunk_kind"] == "conversation"
+    assert [message["text"] for message in alice_payload["chunk"]["messages"]] == [
+        "I moved there in 2024.",
+        "You mean Lisbon?",
+        "Yes.",
+    ]
+    assert alice_payload["chunk"]["target_message_ids"]
+    assert alice_metadata["target_message_ids"] == alice_payload["chunk"]["target_message_ids"]
+    assert all(call["metadata"]["message_id"] is None for call in provider.calls)
+    residence = next(candidate for candidate in candidates if candidate["domain"] == "biography")
+    assert residence["payload"] == {"city": "Lisbon", "valid_from": "2024"}
+    assert len(residence["evidence"][0]["source_segment_ids"]) == 3
+
+
+def test_extract_candidates_from_source_uses_source_chunk_payload(settings, tmp_path):
+    source = tmp_path / "alice-note.txt"
+    source.write_text("Alice moved to Lisbon in 2024. Alice prefers green tea.", encoding="utf-8")
+    ingest = IngestService()
+    provider = _RecordingExtractionProvider()
+    extraction = ExtractionService(llm_provider=provider)
+
+    with get_connection(settings.db_path) as conn:
+        person = FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        imported = ingest.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="note",
+        )
+        candidates = extraction.extract_candidates_from_source(
+            conn,
+            source_id=imported.source_id,
+            person_id=int(person["id"]),
+            speaker_label="Alice",
+        )
+
+    assert provider.calls
+    payload = provider.calls[0]["payload"]
+    metadata = provider.calls[0]["metadata"]
+    assert payload["message_id"] is None
+    assert payload["source_segment_id"] is not None
+    assert payload["chunk"]["chunk_kind"] == "source"
+    assert payload["chunk"]["messages"] == []
+    assert payload["chunk"]["source_segment_ids"] == [payload["source_segment_id"]]
+    assert metadata["chunk_kind"] == "source"
+    residence = next(candidate for candidate in candidates if candidate["domain"] == "biography")
+    assert residence["chunk_kind"] == "source"
+    assert residence["evidence"][0]["chunk_kind"] == "source"
+    assert residence["evidence"][0]["source_segment_ids"] == payload["chunk"]["source_segment_ids"]
+
+
+def test_provider_overcaptured_payloads_are_forced_to_review(settings):
+    extraction = ExtractionService.from_settings(settings)
+
+    normalized = extraction._normalize_provider_candidate(
+        candidate={
+            "domain": "biography",
+            "category": "residence",
+            "subcategory": "",
+            "canonical_key": "alice:biography:residence:bad",
+            "payload": {"city": "Porto and I prefer coffee"},
+            "summary": "Alice lives in Porto and I prefer coffee.",
+            "confidence": 0.9,
+            "reason": "",
+            "needs_review": False,
+            "evidence": [{"quote": "I live in Porto and I prefer coffee.", "message_ids": [], "source_segment_ids": [1], "chunk_kind": "conversation"}],
+        },
+        text="I live in Porto and I prefer coffee.",
+        subject_display="Alice",
+        person_id=1,
+        message_id=1,
+        source_segment_id=1,
+        session_id=1,
+    )
+
+    assert normalized["needs_review"] is True
+    assert "suspicious_residence_payload" in normalized["reason"]
 
 
 def test_experiences_extractor_returns_event_candidate():
@@ -526,6 +946,129 @@ def test_validate_candidate_payload_rejects_wrong_domain_shape():
         assert "payload.city" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("expected payload validation failure")
+
+
+def test_phase6_schema_docs_and_contracts_include_expanded_taxonomy():
+    docs = (Path(__file__).resolve().parents[1] / "docs" / "SCHEMAS.md").read_text()
+    assert "age_birth" in docs
+    assert "travel_history" in docs
+    assert "linked_projects" in docs
+    assert "Psychometrics is default-off" in docs
+
+    contract = build_extraction_contract(include_style=True, include_psychometrics=True)
+    domains = {item["domain"]: item["categories"] for item in contract["domains"]}
+    biography = domains["biography"]
+    experiences = domains["experiences"]
+    preferences = domains["preferences"]
+    social = domains["social_circle"]
+    work = domains["work"]
+
+    assert {"age_birth", "health", "values", "finances", "legal", "travel_history", "life_milestone", "communication_preference", "other_stable_self_knowledge"} <= set(biography)
+    assert {"location", "intensity", "lesson", "recurrence", "linked_persons", "linked_projects"} <= set(experiences["event"])
+    assert {"preference_domain", "valid_from", "valid_to", "original_phrasing", "context"} <= set(preferences["preference"])
+    assert {"closeness", "trust", "valence", "aliases", "is_private"} <= set(social["friend"])
+    assert {"employment", "engagement", "project"} <= set(work)
+    assert {"outcomes", "team", "constraints", "preferences"} <= set(work["employment"] + work["project"])
+
+
+def test_validate_candidate_payload_accepts_phase6_expanded_shapes():
+    examples = [
+        ("biography", "age_birth", {"birth_year": "1990"}),
+        ("biography", "health", {"health_fact": "gluten sensitivity", "status": "current"}),
+        ("biography", "values", {"value": "independence", "context": "career decisions"}),
+        ("biography", "finances", {"financial_note": "prefers conservative budgets", "caution": "sensitive"}),
+        ("biography", "legal", {"legal_note": "keeps contracts private", "caution": "sensitive"}),
+        ("biography", "travel_history", {"location": "Tokyo", "date_range": "2024"}),
+        ("biography", "life_milestone", {"milestone": "moved to Lisbon", "event_at": "2024"}),
+        ("biography", "communication_preference", {"preference": "short direct updates", "language": "en"}),
+        ("biography", "other_stable_self_knowledge", {"fact": "morning person"}),
+        (
+            "experiences",
+            "event",
+            {
+                "event": "PyCon",
+                "location": "Berlin",
+                "participants": ["Bob"],
+                "valence": "positive",
+                "intensity": 0.8,
+                "outcome": "won the hackathon",
+                "lesson": "ship small demos",
+                "recurrence": "annual",
+                "linked_persons": ["Bob"],
+                "linked_projects": ["Memco"],
+            },
+        ),
+        (
+            "preferences",
+            "preference",
+            {
+                "value": "tea",
+                "preference_domain": "food",
+                "preference_category": "drink",
+                "polarity": "like",
+                "strength": "medium",
+                "is_current": True,
+                "valid_from": "2024",
+                "original_phrasing": "Tea is my go-to drink.",
+                "context": "focus",
+            },
+        ),
+        (
+            "social_circle",
+            "friend",
+            {
+                "relation": "friend",
+                "target_label": "Bob",
+                "target_person_id": 7,
+                "is_current": True,
+                "closeness": 0.7,
+                "trust": 0.8,
+                "valence": "positive",
+                "aliases": ["Bobby"],
+                "is_private": True,
+            },
+        ),
+        (
+            "work",
+            "engagement",
+            {
+                "engagement": "Memco launch",
+                "role": "builder",
+                "org": "FounderOS",
+                "status": "active",
+                "outcomes": ["private memory API"],
+                "team": "solo",
+            },
+        ),
+    ]
+    for domain, category, payload in examples:
+        assert validate_candidate_payload(domain=domain, category=category, payload=payload) == payload
+
+
+def test_sample_extraction_fixtures_validate_across_domains():
+    candidates = []
+    candidates.extend(extract_biography(_context("I'm from Canada. I speak English and Spanish.")))
+    candidates.extend(extract_preferences(_context("Tea is my go-to drink when I need to focus.")))
+    candidates.extend(extract_social_circle(_context("Bob is my friend.", resolve_person_id=lambda label: 7)))
+    candidates.extend(extract_work(_context("I work at OpenAI. I'm a researcher. I use Python.")))
+    candidates.extend(extract_experiences(_context("I attended PyCon with Bob in 2024 and it was great.")))
+    candidates.extend(extract_psychometrics(_context("I am very curious.")))
+
+    domains = {candidate["domain"] for candidate in candidates}
+    assert {"biography", "preferences", "social_circle", "work", "experiences", "psychometrics"} <= domains
+    for candidate in candidates:
+        validate_candidate_payload(
+            domain=candidate["domain"],
+            category=candidate["category"],
+            payload=candidate["payload"],
+        )
+
+
+def test_psychometrics_remains_default_off_in_orchestrator():
+    orchestrator = ExtractionOrchestrator()
+    candidates = orchestrator.extract(_context("I am very curious and I prefer tea."))
+
+    assert "psychometrics" not in {candidate["domain"] for candidate in candidates}
 
 
 def test_validate_candidate_payload_rejects_inconsistent_psychometric_counts():

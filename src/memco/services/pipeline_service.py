@@ -74,6 +74,9 @@ class IngestPipelineService:
             conversation_id=conversation.conversation_id,
             include_style=include_style,
             include_psychometrics=include_psychometrics,
+            owner_person_id=int(person_result["id"]) if person_result is not None else None,
+            owner_display_name=str(person_result["display_name"]) if person_result is not None else "",
+            attribution_policy=settings.ingest.attribution_policy,
         )
 
         published: list[dict] = []

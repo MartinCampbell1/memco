@@ -128,6 +128,27 @@ def test_private_release_gate_points_to_repo_local_status_snapshot():
     assert "2026-04-22_memco_repo_local_status_snapshot.md" in gate
 
 
+def test_private_pilot_runbook_covers_required_agent_memory_sequence():
+    readme = _read("README.md")
+    runbook = _read("docs/PRIVATE_PILOT_RUNBOOK.md")
+
+    assert "docs/PRIVATE_PILOT_RUNBOOK.md" in readme
+    assert "Status: active runbook for private single-user agent-memory pilots." in runbook
+    assert "uv run memco eval personal-memory --goldens eval/personal_memory_goldens --output var/reports/personal-memory-eval-current.json" in runbook
+    assert "Start with synthetic data." in runbook
+    assert "Run extraction with manual review." in runbook
+    assert "Publish only reviewed facts." in runbook
+    assert "Use agents in retrieval-only mode first." in runbook
+    assert "Log all unsupported claims." in runbook
+    assert "Run a weekly audit of wrong or low-confidence facts." in runbook
+    assert "Enable automatic memory injection only after 2-3 clean weeks." in runbook
+    assert "retrieve` or `/v1/retrieve`" in runbook
+    assert "They must not automatically inject memories into prompts" in runbook
+    assert "retrieval-log-list --person-slug alice" in runbook
+    assert "no cross-person contamination" in runbook
+    assert "no unsupported premise answered as fact" in runbook
+
+
 def test_execution_brief_defines_repo_local_precedence():
     brief = _read("docs/synthius_mem_execution_brief.md")
 

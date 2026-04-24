@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,38 @@ def test_simple_file_import_writes_raw_and_db(settings, tmp_path):
         assert row is not None
         assert row["source_type"] == "note"
         assert "Memco remembers" in row["parsed_text"]
+
+
+def test_import_file_uses_token_window_source_chunks(settings, tmp_path):
+    source = tmp_path / "long-note.txt"
+    source.write_text(" ".join(f"word{i}" for i in range(620)), encoding="utf-8")
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="note",
+        )
+        rows = conn.execute(
+            """
+            SELECT token_count, locator_json
+            FROM source_chunks
+            WHERE source_id = ?
+            ORDER BY chunk_index ASC
+            """,
+            (result.source_id,),
+        ).fetchall()
+
+    assert len(rows) == 2
+    first_locator = json.loads(rows[0]["locator_json"])
+    second_locator = json.loads(rows[1]["locator_json"])
+    assert rows[0]["token_count"] == 500
+    assert first_locator["token_window"]["max_tokens"] == 500
+    assert first_locator["token_window"]["overlap_next"] is True
+    assert second_locator["token_window"]["overlap_prev"] is True
 
 
 def test_parse_document_rejects_explicit_unsupported_source_type(tmp_path):

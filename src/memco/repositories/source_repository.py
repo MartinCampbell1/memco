@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from memco.db import get_connection
-from memco.utils import chunk_text, isoformat_z, json_dumps
+from memco.utils import chunk_text_by_tokens, isoformat_z, json_dumps
 
 
 class SourceRepository:
@@ -89,13 +89,31 @@ class SourceRepository:
             (source_id,),
         )
         now = isoformat_z()
-        for index, piece in enumerate(chunk_text(parsed_text), start=0):
+        pieces = chunk_text_by_tokens(parsed_text, max_tokens=500, overlap_tokens=50)
+        for index, piece in enumerate(pieces, start=0):
             cursor = conn.execute(
                 """
                 INSERT INTO source_chunks (source_id, chunk_index, text, token_count, section_title, locator_json)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (source_id, index, piece, max(1, len(piece.split())), section_title, "{}"),
+                (
+                    source_id,
+                    index,
+                    piece,
+                    max(1, len(piece.split())),
+                    section_title,
+                    json.dumps(
+                        {
+                            "token_window": {
+                                "max_tokens": 500,
+                                "overlap_tokens": 50,
+                                "overlap_prev": index > 0,
+                                "overlap_next": index < len(pieces) - 1,
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
             )
             conn.execute(
                 "INSERT INTO source_chunk_fts(rowid, text, section_title) VALUES (?, ?, ?)",

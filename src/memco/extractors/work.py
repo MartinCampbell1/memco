@@ -45,6 +45,28 @@ WORK_SKILL_PATTERNS = (
 )
 
 
+def _split_role_org(raw: str) -> tuple[str, str, list[str]]:
+    value = clean_value(raw)
+    role = value
+    org = ""
+    parts = re.split(r"\s+at\s+", value, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) == 2:
+        role = clean_value(parts[0])
+        org = clean_value(re.split(r"\s+(?:and|but)\s+i\s+", parts[1], maxsplit=1, flags=re.IGNORECASE)[0])
+    reasons: list[str] = []
+    if re.search(r"\s+at\s+", role, re.IGNORECASE):
+        reasons.append("suspicious_work_payload")
+    return role, org, reasons
+
+
+def _with_review_reasons(context: ExtractionContext, *extra_reasons: str) -> list[str]:
+    reasons = review_reasons_for_context(context)
+    for reason in extra_reasons:
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    return reasons
+
+
 def extract(context: ExtractionContext) -> list[dict]:
     candidates: list[dict] = []
     evidence = build_evidence(context)
@@ -53,18 +75,24 @@ def extract(context: ExtractionContext) -> list[dict]:
         match = pattern.search(context.text)
         if not match:
             continue
-        title = clean_value(match.group("value"))
+        title, org, quality_reasons = _split_role_org(match.group("value"))
         if not title:
             continue
-        review_reasons = review_reasons_for_context(context)
+        review_reasons = _with_review_reasons(context, *quality_reasons)
+        payload = {"title": title, "role": title, "is_current": True}
+        if org:
+            payload["org"] = org
+        summary = f"{context.subject_display} works as {title}."
+        if org:
+            summary = f"{context.subject_display} works as {title} at {org}."
         candidates.append(
             {
                 "domain": "work",
                 "category": "employment",
                 "subcategory": "",
-                "canonical_key": f"{context.subject_key}:work:employment:{slugify(title)}",
-                "payload": {"title": title, "is_current": True},
-                "summary": f"{context.subject_display} works as {title}.",
+                "canonical_key": f"{context.subject_key}:work:employment:{slugify(title)}:{slugify(org)}",
+                "payload": payload,
+                "summary": summary,
                 "confidence": 0.82 if context.person_id is not None else 0.58,
                 "reason": ",".join(review_reasons),
                 "needs_review": bool(review_reasons),

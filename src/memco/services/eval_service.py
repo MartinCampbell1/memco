@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from memco.api.deps import build_internal_actor
 from memco.config import load_settings
@@ -15,6 +17,7 @@ from memco.repositories.candidate_repository import CandidateRepository
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.review_repository import ReviewRepository
 from memco.repositories.source_repository import SourceRepository
+from memco.runtime import ensure_runtime
 from memco.services.candidate_service import CandidateService
 from memco.services.consolidation_service import ConsolidationService
 from memco.services.conversation_ingest_service import ConversationIngestService
@@ -219,7 +222,7 @@ class EvalService:
             "partial_support",
             "Does Alice Eval live in Lisbon and work at Stripe?",
             "alice-eval",
-            False,
+            True,
             expected_values=("Lisbon",),
             temporal_mode="auto",
             expected_support_level="partial",
@@ -436,6 +439,24 @@ class EvalService:
         "temporal_set": {"temporal_update"},
         "cross_person_contamination_set": {"cross_person_contamination"},
         "operator_readiness_set": OPERATOR_READINESS_CASE_GROUPS,
+    }
+    PERSONAL_MEMORY_REQUIRED_COUNTS = {
+        "core_fact": 100,
+        "adversarial_false_premise": 50,
+        "social_family": 50,
+        "temporal": 50,
+        "preference": 50,
+        "cross_person_contamination": 30,
+        "speakerless_note": 30,
+        "rollback_update": 20,
+    }
+    PERSONAL_MEMORY_THRESHOLDS = {
+        "core_memory_accuracy": 0.95,
+        "adversarial_robustness": 0.98,
+        "cross_person_contamination": 0,
+        "unsupported_premise_answered_as_fact": 0,
+        "evidence_missing_on_supported_answers": 0,
+        "speakerless_owner_fallback_accuracy": 0.95,
     }
 
     BEHAVIOR_CHECKS = (
@@ -1149,7 +1170,7 @@ class EvalService:
             },
         ]
 
-    def _combined_case_text(self, *, answer: dict, retrieval) -> str:
+    def _combined_case_text(self, *, answer: dict, retrieval, include_answer: bool = True) -> str:
         payload_text = " ".join(
             str(value)
             for hit in retrieval.hits
@@ -1161,7 +1182,8 @@ class EvalService:
             for hit in retrieval.hits
             for evidence in hit.evidence
         )
-        return " ".join([answer["answer"], summary_text, payload_text, evidence_text]).lower()
+        answer_text = answer["answer"] if include_answer else ""
+        return " ".join([answer_text, summary_text, payload_text, evidence_text]).lower()
 
     def _latency_summary(self, values: list[int]) -> dict:
         if not values:
@@ -1237,8 +1259,13 @@ class EvalService:
                 for value in case.expected_values:
                     if value.lower() not in combined_text:
                         failures.append(f"missing_expected_value:{value}")
+                forbidden_text = self._combined_case_text(
+                    answer=answer,
+                    retrieval=retrieval,
+                    include_answer=not answer.get("refused", False),
+                )
                 for value in case.forbidden_values:
-                    if value.lower() in combined_text:
+                    if value.lower() in forbidden_text:
                         failures.append(f"forbidden_value_present:{value}")
                 results.append(
                     {
@@ -1475,6 +1502,279 @@ class EvalService:
             "benchmark_sets": benchmark_sets,
             "operator_readiness_cases": operator_results,
             "domain_reports": self._benchmark_domain_reports(results=results),
+        }
+
+    def _load_personal_goldens(self, goldens_dir: Path) -> list[dict[str, Any]]:
+        if not goldens_dir.exists() or not goldens_dir.is_dir():
+            raise ValueError(f"Personal memory goldens directory does not exist: {goldens_dir}")
+        cases: list[dict[str, Any]] = []
+        for path in sorted(goldens_dir.glob("*.jsonl")):
+            with path.open("r", encoding="utf-8") as handle:
+                for line_number, raw_line in enumerate(handle, start=1):
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    item = json.loads(line)
+                    item["_source_file"] = str(path)
+                    item["_line_number"] = line_number
+                    cases.append(item)
+        if not cases:
+            raise ValueError(f"No personal memory JSONL cases found in {goldens_dir}")
+        required = {"id", "group", "person_slug", "person_display_name", "query", "expect_refused", "expected_values", "seed_facts"}
+        for item in cases:
+            missing = sorted(required - set(item))
+            if missing:
+                raise ValueError(f"Personal golden {item.get('id', '<unknown>')} missing fields: {missing}")
+        return cases
+
+    def _seed_personal_goldens(self, project_root: Path, cases: list[dict[str, Any]]) -> None:
+        settings = ensure_runtime(load_settings(project_root))
+        fact_repo = FactRepository()
+        source_repo = SourceRepository()
+        consolidation = ConsolidationService(fact_repository=fact_repo)
+        with get_connection(settings.db_path) as conn:
+            people: dict[str, dict] = {}
+            for case in cases:
+                person_slug = str(case["person_slug"])
+                if person_slug not in people:
+                    people[person_slug] = self._person(
+                        conn,
+                        fact_repo=fact_repo,
+                        slug=person_slug,
+                        display_name=str(case["person_display_name"]),
+                    )
+                for fact in case.get("seed_facts", []):
+                    fact_person_slug = str(fact.get("person_slug") or person_slug)
+                    if fact_person_slug not in people:
+                        people[fact_person_slug] = self._person(
+                            conn,
+                            fact_repo=fact_repo,
+                            slug=fact_person_slug,
+                            display_name=str(fact.get("person_display_name") or fact_person_slug.replace("-", " ").title()),
+                        )
+                    canonical_key = str(fact["canonical_key"])
+                    source_id = self._record_source(
+                        conn,
+                        source_repo=source_repo,
+                        source_path=f"eval/personal/{canonical_key}.md",
+                        title=f"personal-memory-{canonical_key}",
+                        sha256=f"personal-memory-{canonical_key}",
+                        parsed_text=str(fact.get("quote_text") or fact.get("summary") or ""),
+                    )
+                    seeded = self._ensure_fact(
+                        conn,
+                        consolidation=consolidation,
+                        canonical_key=canonical_key,
+                        payload=dict(fact.get("payload") or {}),
+                        person_id=int(people[fact_person_slug]["id"]),
+                        domain=str(fact["domain"]),
+                        category=str(fact["category"]),
+                        subcategory=str(fact.get("subcategory") or ""),
+                        summary=str(fact["summary"]),
+                        observed_at=str(fact.get("observed_at") or "2026-04-24T00:00:00Z"),
+                        valid_from=str(fact.get("valid_from") or ""),
+                        event_at=str(fact.get("event_at") or ""),
+                        source_id=source_id,
+                        quote_text=str(fact.get("quote_text") or fact["summary"]),
+                    )
+                    status = str(fact.get("status") or "active")
+                    if status != "active" and seeded.get("status") != status:
+                        conn.execute("UPDATE memory_facts SET status = ? WHERE id = ?", (status, int(seeded["id"])))
+
+    def _personal_case_result(self, *, conn, settings, eval_actor, case: dict[str, Any], route_name: str) -> dict:
+        started = time.perf_counter()
+        retrieval = self.retrieval_service.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace=str(case.get("workspace") or "default"),
+                person_slug=str(case["person_slug"]),
+                query=str(case["query"]),
+                domain=case.get("domain"),
+                category=case.get("domain_category"),
+                limit=int(case.get("limit") or 1),
+                include_fallback=True,
+                temporal_mode=str(case.get("temporal_mode") or "auto"),
+                actor=eval_actor,
+            ),
+            settings=settings,
+            route_name=route_name,
+        )
+        latency_ms = max(0, int((time.perf_counter() - started) * 1000))
+        answer = self.refusal_service.build_answer(query=str(case["query"]), retrieval_result=retrieval)
+        combined_text = self._combined_case_text(answer=answer, retrieval=retrieval)
+        forbidden_text = self._combined_case_text(answer=answer, retrieval=retrieval, include_answer=not answer.get("refused", False))
+        evidence_count = sum(len(hit.evidence) for hit in retrieval.hits)
+        answer_evidence_ids = list(answer.get("evidence_ids", []))
+        failures: list[str] = []
+        if bool(answer["refused"]) != bool(case["expect_refused"]):
+            failures.append("refusal_mismatch")
+        expected_support_level = case.get("expected_support_level")
+        if expected_support_level and retrieval.support_level != expected_support_level:
+            failures.append("support_level_mismatch")
+        expected_evidence_count_min = int(case.get("expected_evidence_count_min") or 0)
+        if expected_evidence_count_min and evidence_count < expected_evidence_count_min:
+            failures.append("evidence_count_too_low")
+        for value in case.get("expected_values", []):
+            if str(value).lower() not in combined_text:
+                failures.append(f"missing_expected_value:{value}")
+        for value in case.get("forbidden_values", []):
+            if str(value).lower() in forbidden_text:
+                failures.append(f"forbidden_value_present:{value}")
+        if not answer["refused"] and retrieval.support_level in {"supported", "partial"} and not answer_evidence_ids:
+            failures.append("answer_evidence_ids_missing")
+        return {
+            "id": case["id"],
+            "group": case["group"],
+            "query": case["query"],
+            "person_slug": case["person_slug"],
+            "passed": not failures,
+            "failures": failures,
+            "refused": answer["refused"],
+            "expected_refused": bool(case["expect_refused"]),
+            "support_level": retrieval.support_level,
+            "hit_count": len(retrieval.hits),
+            "fallback_hit_count": len(retrieval.fallback_hits),
+            "evidence_count": evidence_count,
+            "answer_fact_ids": list(answer.get("fact_ids", [])),
+            "answer_evidence_ids": answer_evidence_ids,
+            "latency_ms": latency_ms,
+            "answer": answer["answer"],
+        }
+
+    def _personal_pass_rate(self, *, results: list[dict], group: str) -> float:
+        selected = [item for item in results if item["group"] == group]
+        if not selected:
+            return 0.0
+        return round(sum(1 for item in selected if item["passed"]) / len(selected), 4)
+
+    def _personal_group_counts(self, cases: list[dict[str, Any]]) -> dict[str, int]:
+        return {group: sum(1 for item in cases if item["group"] == group) for group in sorted(self.PERSONAL_MEMORY_REQUIRED_COUNTS)}
+
+    def _personal_count_checks(self, cases: list[dict[str, Any]]) -> dict[str, dict]:
+        counts = self._personal_group_counts(cases)
+        return {
+            group: {"value": counts.get(group, 0), "required": required, "ok": counts.get(group, 0) >= required}
+            for group, required in self.PERSONAL_MEMORY_REQUIRED_COUNTS.items()
+        }
+
+    def _personal_metrics(self, *, cases: list[dict[str, Any]], results: list[dict], start_event_index: int) -> dict:
+        unsupported_premise_answered_as_fact = sum(
+            1
+            for item in results
+            if item["group"] == "adversarial_false_premise" and (not item["refused"] or item["support_level"] == "supported")
+        )
+        evidence_missing_on_supported_answers = sum(
+            1
+            for item in results
+            if not item["refused"] and item["support_level"] in {"supported", "partial"} and not item["answer_evidence_ids"]
+        )
+        cross_person_contamination = sum(
+            1
+            for item in results
+            if item["group"] == "cross_person_contamination" and any("forbidden_value_present" in failure for failure in item["failures"])
+        )
+        metrics = {
+            "core_memory_accuracy": self._personal_pass_rate(results=results, group="core_fact"),
+            "adversarial_robustness": self._personal_pass_rate(results=results, group="adversarial_false_premise"),
+            "cross_person_contamination": cross_person_contamination,
+            "unsupported_premise_answered_as_fact": unsupported_premise_answered_as_fact,
+            "evidence_missing_on_supported_answers": evidence_missing_on_supported_answers,
+            "speakerless_owner_fallback_accuracy": self._personal_pass_rate(results=results, group="speakerless_note"),
+        }
+        checks = {
+            "core_memory_accuracy": {
+                "value": metrics["core_memory_accuracy"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["core_memory_accuracy"],
+                "ok": metrics["core_memory_accuracy"] >= self.PERSONAL_MEMORY_THRESHOLDS["core_memory_accuracy"],
+            },
+            "adversarial_robustness": {
+                "value": metrics["adversarial_robustness"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["adversarial_robustness"],
+                "ok": metrics["adversarial_robustness"] >= self.PERSONAL_MEMORY_THRESHOLDS["adversarial_robustness"],
+            },
+            "cross_person_contamination": {
+                "value": metrics["cross_person_contamination"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["cross_person_contamination"],
+                "ok": metrics["cross_person_contamination"] <= self.PERSONAL_MEMORY_THRESHOLDS["cross_person_contamination"],
+            },
+            "unsupported_premise_answered_as_fact": {
+                "value": metrics["unsupported_premise_answered_as_fact"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["unsupported_premise_answered_as_fact"],
+                "ok": metrics["unsupported_premise_answered_as_fact"]
+                <= self.PERSONAL_MEMORY_THRESHOLDS["unsupported_premise_answered_as_fact"],
+            },
+            "evidence_missing_on_supported_answers": {
+                "value": metrics["evidence_missing_on_supported_answers"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["evidence_missing_on_supported_answers"],
+                "ok": metrics["evidence_missing_on_supported_answers"]
+                <= self.PERSONAL_MEMORY_THRESHOLDS["evidence_missing_on_supported_answers"],
+            },
+            "speakerless_owner_fallback_accuracy": {
+                "value": metrics["speakerless_owner_fallback_accuracy"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["speakerless_owner_fallback_accuracy"],
+                "ok": metrics["speakerless_owner_fallback_accuracy"]
+                >= self.PERSONAL_MEMORY_THRESHOLDS["speakerless_owner_fallback_accuracy"],
+            },
+        }
+        count_checks = self._personal_count_checks(cases)
+        group_reports = []
+        for group in sorted({item["group"] for item in results}):
+            selected = [item for item in results if item["group"] == group]
+            group_reports.append(
+                {
+                    "name": group,
+                    "total": len(selected),
+                    "passed": sum(1 for item in selected if item["passed"]),
+                    "pass_rate": self._personal_pass_rate(results=results, group=group),
+                }
+            )
+        latencies = [int(item["latency_ms"]) for item in results]
+        return {
+            "metrics": metrics,
+            "policy_checks": checks,
+            "dataset_count_checks": count_checks,
+            "groups": group_reports,
+            "retrieval_latency_ms": self._latency_summary(latencies),
+            "token_accounting": self.llm_usage_tracker.summary(start_index=start_event_index),
+        }
+
+    def run_personal_memory(self, *, project_root: Path, goldens_dir: Path) -> dict:
+        cases = self._load_personal_goldens(goldens_dir)
+        self._seed_personal_goldens(project_root, cases)
+        settings = load_settings(project_root)
+        self.llm_usage_tracker.reset()
+        start_event_index = len(self.llm_usage_tracker.events)
+        with get_connection(settings.db_path) as conn:
+            eval_actor = build_internal_actor(settings, actor_id="eval-runner")
+            results = [
+                self._personal_case_result(
+                    conn=conn,
+                    settings=settings,
+                    eval_actor=eval_actor,
+                    case=case,
+                    route_name="personal_memory_eval",
+                )
+                for case in cases
+            ]
+        results.sort(key=lambda item: (item["group"], item["id"]))
+        summary = self._personal_metrics(cases=cases, results=results, start_event_index=start_event_index)
+        failures = [item for item in results if not item["passed"]]
+        ok = (
+            not failures
+            and all(item["ok"] for item in summary["policy_checks"].values())
+            and all(item["ok"] for item in summary["dataset_count_checks"].values())
+        )
+        return {
+            "artifact_type": "personal_memory_eval_artifact",
+            "release_scope": "personal-agent-memory",
+            "goldens_dir": str(goldens_dir),
+            "total": len(results),
+            "passed": sum(1 for item in results if item["passed"]),
+            "failed": len(failures),
+            "ok": ok,
+            **summary,
+            "failures": failures[:50],
+            "cases": results,
         }
 
     def run(self, project_root: Path) -> dict:

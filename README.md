@@ -105,6 +105,8 @@ For manual truth-store edits, `fact-add ... --latest-source` removes the remaini
 
 The documented private-release acceptance checklist lives in [docs/2026-04-21_memco_private_release_gate.md](docs/2026-04-21_memco_private_release_gate.md).
 
+The required private agent-memory pilot sequence lives in [docs/PRIVATE_PILOT_RUNBOOK.md](docs/PRIVATE_PILOT_RUNBOOK.md).
+
 The top-level readiness split between `private release` and `strict original execution-brief readiness` lives in [docs/2026-04-21_memco_release_readiness_gate.md](docs/2026-04-21_memco_release_readiness_gate.md).
 
 The canonical repo-local remediation plan now lives in [docs/plans/2026-04-21_memco_full_fix_plan.md](docs/plans/2026-04-21_memco_full_fix_plan.md).

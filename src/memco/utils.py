@@ -60,3 +60,21 @@ def chunk_text(text: str, max_chars: int = 2200) -> list[str]:
     if current:
         chunks.append("\n\n".join(current))
     return chunks
+
+
+def chunk_text_by_tokens(text: str, *, max_tokens: int = 500, overlap_tokens: int = 50) -> list[str]:
+    normalized = text.strip()
+    if not normalized:
+        return []
+    words = normalized.split()
+    budget = max(1, int(max_tokens))
+    overlap = max(0, min(int(overlap_tokens), budget - 1))
+    chunks: list[str] = []
+    start = 0
+    while start < len(words):
+        end = min(len(words), start + budget)
+        chunks.append(" ".join(words[start:end]))
+        if end >= len(words):
+            break
+        start = max(end - overlap, start + 1)
+    return chunks

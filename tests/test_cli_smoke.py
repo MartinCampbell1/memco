@@ -640,6 +640,8 @@ def test_cli_operator_flow_supports_supersede_rollback(settings, tmp_path):
         ["chat", "Does Alice work at Stripe?", "alice", "--root", str(settings.root)]
     )
     assert false_premise_chat["refused"] is True
+    assert false_premise_chat["answerable"] is False
+    assert false_premise_chat["must_not_use_as_fact"] is True
     assert false_premise_chat["answer"] == "I don't have confirmed memory evidence for that."
 
     core_only_retrieve = invoke_json(

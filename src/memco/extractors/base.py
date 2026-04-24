@@ -36,10 +36,19 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "education": ("institution", "field"),
             "family": ("relation", "name"),
             "pets": ("pet_type", "pet_name"),
+            "age_birth": ("age", "birth_date", "birth_year"),
+            "health": ("health_fact", "status"),
             "languages": ("languages",),
             "habits": ("habit",),
             "goals": ("goal",),
             "constraints": ("constraint",),
+            "values": ("value", "context"),
+            "finances": ("financial_note", "caution"),
+            "legal": ("legal_note", "caution"),
+            "travel_history": ("location", "event_at", "date_range"),
+            "life_milestone": ("milestone", "event_at"),
+            "communication_preference": ("preference", "language", "context"),
+            "other_stable_self_knowledge": ("fact", "context"),
         },
         ambiguity_rules=(
             "Do not turn tentative relocation plans into current residence facts.",
@@ -62,7 +71,21 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "Extract likes, dislikes, and preferences with polarity and current-vs-past handling.",
             "Indirect preference phrasing is allowed when the favorite/go-to choice is explicit.",
         ),
-        categories={"preference": ("value", "polarity", "strength", "reason", "is_current")},
+        categories={
+            "preference": (
+                "value",
+                "preference_domain",
+                "preference_category",
+                "polarity",
+                "strength",
+                "is_current",
+                "valid_from",
+                "valid_to",
+                "original_phrasing",
+                "reason",
+                "context",
+            )
+        },
         ambiguity_rules=(
             "Keep hypothetical or uncertain tastes out of the result set.",
             "Self-corrections should prefer the current statement over the superseded one.",
@@ -85,21 +108,22 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         ),
         categories={
             "relationship_event": ("target_label", "target_person_id", "event", "context"),
-            "friend": ("relation", "target_label", "target_person_id", "is_current"),
-            "brother": ("relation", "target_label", "target_person_id", "is_current"),
-            "sister": ("relation", "target_label", "target_person_id", "is_current"),
-            "wife": ("relation", "target_label", "target_person_id", "is_current"),
-            "husband": ("relation", "target_label", "target_person_id", "is_current"),
-            "partner": ("relation", "target_label", "target_person_id", "is_current"),
-            "mother": ("relation", "target_label", "target_person_id", "is_current"),
-            "father": ("relation", "target_label", "target_person_id", "is_current"),
-            "son": ("relation", "target_label", "target_person_id", "is_current"),
-            "daughter": ("relation", "target_label", "target_person_id", "is_current"),
-            "colleague": ("relation", "target_label", "target_person_id", "is_current"),
-            "boss": ("relation", "target_label", "target_person_id", "is_current"),
-            "manager": ("relation", "target_label", "target_person_id", "is_current"),
-            "roommate": ("relation", "target_label", "target_person_id", "is_current"),
-            "neighbor": ("relation", "target_label", "target_person_id", "is_current"),
+            "friend": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "brother": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "sister": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "wife": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "husband": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "partner": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "spouse": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "mother": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "father": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "son": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "daughter": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "colleague": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "boss": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "manager": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "roommate": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "neighbor": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
         },
         ambiguity_rules=(
             "Do not infer a relationship from weak co-occurrence or event-only evidence.",
@@ -121,10 +145,11 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "Current-vs-past work state must be preserved.",
         ),
         categories={
-            "employment": ("title", "is_current"),
-            "role": ("role", "is_current"),
-            "org": ("org", "is_current"),
-            "project": ("project",),
+            "employment": ("title", "role", "org", "client", "status", "is_current", "start_date", "end_date", "team", "constraints", "preferences"),
+            "engagement": ("engagement", "role", "org", "client", "status", "start_date", "end_date", "outcomes", "team"),
+            "role": ("role", "is_current", "status", "start_date", "end_date"),
+            "org": ("org", "client", "is_current", "status"),
+            "project": ("project", "role", "org", "outcomes", "status", "start_date", "end_date", "team"),
             "skill": ("skill",),
             "tool": ("tool",),
         },
@@ -147,7 +172,24 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "Extract lived events with summary, participants, outcome, and temporal cues when stated.",
             "Use event_at only for explicit event dates; use temporal_anchor for approximate or relative timing.",
         ),
-        categories={"event": ("event", "summary", "participants", "event_at", "temporal_anchor", "outcome", "valence")},
+        categories={
+            "event": (
+                "event",
+                "summary",
+                "event_at",
+                "date_range",
+                "location",
+                "participants",
+                "valence",
+                "intensity",
+                "outcome",
+                "lesson",
+                "recurrence",
+                "linked_persons",
+                "linked_projects",
+                "temporal_anchor",
+            )
+        },
         ambiguity_rules=(
             "Keep approximate timing separate from exact event dates.",
         ),
@@ -393,6 +435,27 @@ def _require_list_of_strings(payload: dict[str, Any], key: str) -> None:
         raise ValueError(f"payload.{key} must be a list of non-empty strings")
 
 
+def _require_any_string(payload: dict[str, Any], keys: tuple[str, ...]) -> None:
+    if not any(isinstance(payload.get(key), str) and payload.get(key).strip() for key in keys):
+        joined = ", ".join(f"payload.{key}" for key in keys)
+        raise ValueError(f"one of {joined} must be a non-empty string")
+
+
+def _optional_string(payload: dict[str, Any], key: str) -> None:
+    if key in payload and not isinstance(payload.get(key), str):
+        raise ValueError(f"payload.{key} must be a string")
+
+
+def _optional_number(payload: dict[str, Any], key: str) -> None:
+    if key in payload and not isinstance(payload.get(key), (int, float)):
+        raise ValueError(f"payload.{key} must be numeric")
+
+
+def _optional_list_of_strings(payload: dict[str, Any], key: str) -> None:
+    if key in payload:
+        _require_list_of_strings(payload, key)
+
+
 def validate_candidate_payload(*, domain: str, category: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("candidate payload must be a dict")
@@ -413,6 +476,10 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
         elif category == "pets":
             _require_string(payload, "pet_type")
             _require_string(payload, "pet_name")
+        elif category == "age_birth":
+            _require_any_string(payload, ("age", "birth_date", "birth_year"))
+        elif category == "health":
+            _require_string(payload, "health_fact")
         elif category == "languages":
             _require_list_of_strings(payload, "languages")
         elif category == "habits":
@@ -421,6 +488,28 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_string(payload, "goal")
         elif category == "constraints":
             _require_string(payload, "constraint")
+        elif category == "values":
+            _require_string(payload, "value")
+        elif category == "finances":
+            _require_string(payload, "financial_note")
+            _optional_string(payload, "caution")
+        elif category == "legal":
+            _require_string(payload, "legal_note")
+            _optional_string(payload, "caution")
+        elif category == "travel_history":
+            _require_string(payload, "location")
+            _optional_string(payload, "event_at")
+            _optional_string(payload, "date_range")
+        elif category == "life_milestone":
+            _require_string(payload, "milestone")
+            _optional_string(payload, "event_at")
+        elif category == "communication_preference":
+            _require_string(payload, "preference")
+            _optional_string(payload, "language")
+            _optional_string(payload, "context")
+        elif category == "other_stable_self_knowledge":
+            _require_string(payload, "fact")
+            _optional_string(payload, "context")
         else:
             raise ValueError(f"unsupported biography category: {category}")
         return payload
@@ -433,6 +522,8 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_string(payload, "polarity")
         if "strength" in payload:
             _require_string(payload, "strength")
+        for key in ("preference_domain", "preference_category", "valid_from", "valid_to", "original_phrasing", "context"):
+            _optional_string(payload, key)
         if "reason" in payload and not isinstance(payload.get("reason"), str):
             raise ValueError("payload.reason must be a string")
         if "is_current" in payload:
@@ -445,6 +536,13 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_string(payload, "event")
             if "context" in payload and not isinstance(payload.get("context", ""), str):
                 raise ValueError("payload.context must be a string")
+            for key in ("valence", "sensitivity", "related_person_name", "relation_type"):
+                _optional_string(payload, key)
+            for key in ("closeness", "trust"):
+                _optional_number(payload, key)
+            _optional_list_of_strings(payload, "aliases")
+            if "is_private" in payload:
+                _require_bool(payload, "is_private")
             return payload
         _require_string(payload, "relation")
         _require_string(payload, "target_label")
@@ -452,6 +550,13 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             raise ValueError("payload.target_person_id must be an int or null")
         if "is_current" in payload:
             _require_bool(payload, "is_current")
+        for key in ("closeness", "trust"):
+            _optional_number(payload, key)
+        for key in ("valence", "sensitivity", "relation_type", "related_person_name"):
+            _optional_string(payload, key)
+        _optional_list_of_strings(payload, "aliases")
+        if "is_private" in payload:
+            _require_bool(payload, "is_private")
         return payload
 
     if domain == "work":
@@ -459,16 +564,30 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_string(payload, "title")
             if "is_current" in payload:
                 _require_bool(payload, "is_current")
+            for key in ("role", "org", "client", "status", "start_date", "end_date", "team", "constraints", "preferences"):
+                _optional_string(payload, key)
+        elif category == "engagement":
+            _require_string(payload, "engagement")
+            for key in ("role", "org", "client", "status", "start_date", "end_date", "team"):
+                _optional_string(payload, key)
+            _optional_list_of_strings(payload, "outcomes")
         elif category == "role":
             _require_string(payload, "role")
             if "is_current" in payload:
                 _require_bool(payload, "is_current")
+            for key in ("status", "start_date", "end_date"):
+                _optional_string(payload, key)
         elif category == "org":
             _require_string(payload, "org")
             if "is_current" in payload:
                 _require_bool(payload, "is_current")
+            for key in ("client", "status"):
+                _optional_string(payload, key)
         elif category == "project":
             _require_string(payload, "project")
+            for key in ("role", "org", "status", "start_date", "end_date", "team"):
+                _optional_string(payload, key)
+            _optional_list_of_strings(payload, "outcomes")
         elif category == "skill":
             _require_string(payload, "skill")
         elif category == "tool":
@@ -485,14 +604,19 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_string(payload, "summary")
         if "participants" in payload:
             _require_list_of_strings(payload, "participants")
+        _optional_list_of_strings(payload, "linked_persons")
+        _optional_list_of_strings(payload, "linked_projects")
         if "event_at" in payload and not isinstance(payload.get("event_at", ""), str):
             raise ValueError("payload.event_at must be a string")
+        for key in ("date_range", "location", "lesson", "recurrence"):
+            _optional_string(payload, key)
         if "temporal_anchor" in payload and not isinstance(payload.get("temporal_anchor", ""), str):
             raise ValueError("payload.temporal_anchor must be a string")
         if "outcome" in payload and not isinstance(payload.get("outcome", ""), str):
             raise ValueError("payload.outcome must be a string")
         if "valence" in payload:
             _require_string(payload, "valence")
+        _optional_number(payload, "intensity")
         return payload
 
     if domain == "psychometrics":

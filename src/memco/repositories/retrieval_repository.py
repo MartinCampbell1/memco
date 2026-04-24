@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 
+from memco.models.relationships import canonical_relation_type
+
 
 SEARCH_TERM_RE = re.compile(r"[^\W_]+", re.UNICODE)
 YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
@@ -16,34 +18,65 @@ FIELD_BOOSTS = {
         "education": ("institution", "field"),
         "family": ("relation", "name"),
         "pets": ("pet_type", "pet_name"),
+        "age_birth": ("age", "birth_date", "birth_year"),
+        "health": ("health_fact", "status"),
         "languages": ("languages",),
         "habits": ("habit",),
         "goals": ("goal",),
         "constraints": ("constraint",),
+        "values": ("value", "context"),
+        "finances": ("financial_note", "caution"),
+        "legal": ("legal_note", "caution"),
+        "travel_history": ("location", "event_at", "date_range"),
+        "life_milestone": ("milestone", "event_at"),
+        "communication_preference": ("preference", "language", "context"),
+        "other_stable_self_knowledge": ("fact", "context"),
     },
     "preferences": {
-        "preference": ("value", "polarity", "reason"),
+        "preference": ("value", "preference_domain", "preference_category", "polarity", "strength", "reason", "context", "original_phrasing"),
     },
     "social_circle": {
-        "friend": ("target_label", "relation"),
-        "manager": ("target_label", "relation"),
-        "relationship_event": ("target_label", "event", "context"),
+        "friend": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "sister": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "brother": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "mother": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "father": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "partner": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "spouse": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "wife": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "husband": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "colleague": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "manager": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "relationship_event": ("target_label", "event", "context", "valence", "relation_type", "related_person_name"),
     },
     "work": {
-        "employment": ("title",),
-        "role": ("role",),
-        "org": ("org",),
-        "project": ("project",),
+        "employment": ("title", "role", "org", "client", "status", "team"),
+        "engagement": ("engagement", "role", "org", "client", "status", "team", "outcomes"),
+        "role": ("role", "status"),
+        "org": ("org", "client", "status"),
+        "project": ("project", "role", "org", "outcomes", "status", "team"),
         "skill": ("skill",),
         "tool": ("tool",),
     },
     "experiences": {
-        "event": ("event", "summary", "participants", "outcome", "event_at", "valence"),
+        "event": ("event", "summary", "participants", "outcome", "lesson", "event_at", "date_range", "location", "valence", "intensity", "recurrence", "linked_persons", "linked_projects"),
     },
 }
 
 
 class RetrievalRepository:
+    def _expanded_terms(self, query: str) -> list[str]:
+        terms = [term.lower() for term in SEARCH_TERM_RE.findall(query)]
+        expanded: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            for value in (term, canonical_relation_type(term)):
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                expanded.append(value)
+        return expanded
+
     def ensure_workspace(self, conn, slug: str) -> int:
         row = conn.execute("SELECT id FROM workspaces WHERE slug = ?", (slug,)).fetchone()
         if row is None:
@@ -83,7 +116,7 @@ class RetrievalRepository:
             sql += " AND status = 'active'"
         sql += " ORDER BY observed_at DESC, id DESC"
         rows = conn.execute(sql, params).fetchall()
-        terms = [term.lower() for term in SEARCH_TERM_RE.findall(query)]
+        terms = self._expanded_terms(query)
         hits: list[dict] = []
         for row in rows:
             item = dict(row)
@@ -147,7 +180,7 @@ class RetrievalRepository:
         limit: int = 5,
     ) -> list[dict]:
         workspace_id = self.ensure_workspace(conn, workspace_slug)
-        terms = [term.lower() for term in SEARCH_TERM_RE.findall(query)]
+        terms = self._expanded_terms(query)
         if not terms:
             return []
         rows = conn.execute(
@@ -221,6 +254,10 @@ class RetrievalRepository:
                 field_values.extend(str(item).lower() for item in value)
             elif value is not None:
                 field_values.append(str(value).lower())
+        if domain == "social_circle" or (domain == "biography" and category == "family"):
+            relation = payload.get("relation") or fact.get("subcategory") or category
+            if relation:
+                field_values.append(canonical_relation_type(str(relation)))
 
         for term in terms:
             if term in field_values:

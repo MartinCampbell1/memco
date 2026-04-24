@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 PRIMARY_STORAGE_ENGINE = "postgres"
 SQLITE_FALLBACK_ENGINE = "sqlite"
 SUPPORTED_STORAGE_ENGINES = {PRIMARY_STORAGE_ENGINE, SQLITE_FALLBACK_ENGINE}
+AttributionPolicy = Literal["strict_speaker_only", "owner_first_person_fallback", "manual_review_only"]
 
 
 class ApiActorPolicy(BaseModel):
@@ -70,6 +71,7 @@ class IngestSettings(BaseModel):
     max_tokens_per_chunk: int = 400
     overlap_tokens: int = 40
     session_gap_minutes: int = 240
+    attribution_policy: AttributionPolicy = "owner_first_person_fallback"
     source_types: list[str] = Field(
         default_factory=lambda: ["note", "chat", "json", "csv", "markdown", "text", "email", "pdf"]
     )

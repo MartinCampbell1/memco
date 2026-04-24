@@ -69,6 +69,46 @@ CONSTRAINT_PATTERNS = (
 )
 
 
+def _with_review_reasons(context: ExtractionContext, *extra_reasons: str) -> list[str]:
+    reasons = review_reasons_for_context(context)
+    for reason in extra_reasons:
+        if reason and reason not in reasons:
+            reasons.append(reason)
+    return reasons
+
+
+def _clean_residence_value(raw: str) -> tuple[str, str, list[str]]:
+    value = clean_value(raw)
+    reasons: list[str] = []
+    value = re.split(r"\s+(?:and|but)\s+i\s+", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    value = re.split(r"\s+(?:because|where)\s+", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    valid_from = ""
+    year_match = re.search(r"\s+(?:in|since)\s+((?:19|20)\d{2})\b.*$", value, re.IGNORECASE)
+    if year_match:
+        valid_from = year_match.group(1)
+        value = value[: year_match.start()]
+    city = clean_value(value)
+    lowered = city.lower()
+    if re.search(r"\b(?:and|prefer|work|moved|since|in\s+(?:19|20)\d{2})\b", lowered):
+        reasons.append("suspicious_residence_payload")
+    if len(city.split()) > 4:
+        reasons.append("suspicious_residence_payload")
+    return city, valid_from, reasons
+
+
+def _clean_identity_name(raw: str) -> tuple[str, list[str]]:
+    value = clean_value(raw)
+    value = re.split(r"\s+(?:and|but)\s+i\s+", value, maxsplit=1, flags=re.IGNORECASE)[0]
+    name = clean_value(value).title()
+    lowered = name.lower()
+    reasons: list[str] = []
+    if re.search(r"\b(?:moved|work|works|love|prefer|live|based)\b", lowered):
+        reasons.append("suspicious_identity_payload")
+    if len(name.split()) > 4:
+        reasons.append("suspicious_identity_payload")
+    return name, reasons
+
+
 def extract(context: ExtractionContext) -> list[dict]:
     candidates: list[dict] = []
     evidence = build_evidence(context)
@@ -79,17 +119,20 @@ def extract(context: ExtractionContext) -> list[dict]:
             continue
         if residence_is_uncertain:
             break
-        city = clean_value(match.group("value"))
+        city, valid_from, quality_reasons = _clean_residence_value(match.group("value"))
         if not city:
             continue
-        review_reasons = review_reasons_for_context(context)
+        review_reasons = _with_review_reasons(context, *quality_reasons)
+        payload = {"city": city}
+        if valid_from:
+            payload["valid_from"] = valid_from
         candidates.append(
             {
                 "domain": "biography",
                 "category": "residence",
                 "subcategory": "",
                 "canonical_key": f"{context.subject_key}:biography:residence:{slugify(city)}",
-                "payload": {"city": city},
+                "payload": payload,
                 "summary": f"{context.subject_display} lives in {city}.",
                 "confidence": 0.9 if context.person_id is not None else 0.65,
                 "reason": ",".join(review_reasons),
@@ -199,10 +242,10 @@ def extract(context: ExtractionContext) -> list[dict]:
         match = pattern.search(context.text)
         if not match:
             continue
-        name = clean_value(match.group("value")).title()
+        name, quality_reasons = _clean_identity_name(match.group("value"))
         if not name:
             continue
-        review_reasons = review_reasons_for_context(context)
+        review_reasons = _with_review_reasons(context, *quality_reasons)
         candidates.append(
             {
                 "domain": "biography",

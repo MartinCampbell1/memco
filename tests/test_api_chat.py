@@ -176,7 +176,14 @@ def test_chat_supports_core_only_detail_policy(monkeypatch, settings):
     ]
 
 
-def test_chat_returns_partial_support_without_hallucinating(monkeypatch, settings):
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Does Alice live in Lisbon and work at Stripe?",
+        "What do you know about Alice living in Lisbon and working at Stripe?",
+    ],
+)
+def test_chat_refuses_partial_false_premise(monkeypatch, settings, query):
     fact_repo = FactRepository()
     source_repo = SourceRepository()
     consolidation = ConsolidationService()
@@ -224,17 +231,29 @@ def test_chat_returns_partial_support_without_hallucinating(monkeypatch, setting
         json={
             "workspace": "default",
             "person_slug": "alice",
-            "query": "Does Alice live in Lisbon and work at Stripe?",
+            "query": query,
             "actor": _actor(settings),
         },
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["refused"] is False
+    assert payload["refused"] is True
+    assert payload["answerable"] is False
+    assert payload["must_not_use_as_fact"] is True
     assert "Lisbon" in payload["answer"]
-    assert "Stripe" in payload["answer"]
     assert payload["retrieval"]["support_level"] == "partial"
+    assert payload["retrieval"]["answerable"] is False
+    assert payload["retrieval"]["must_not_use_as_fact"] is True
+    assert payload["safe_known_facts"] == ["Alice lives in Lisbon."]
+    assert payload["confirmed_facts"] == ["Alice lives in Lisbon."]
+    assert payload["agent_response"]["answerable"] is False
+    assert payload["agent_response"]["query"] == query
+    assert payload["agent_response"]["target_person"]["slug"] == "alice"
+    assert payload["agent_response"]["safe_known_facts"] == ["Alice lives in Lisbon."]
+    assert payload["agent_response"]["confirmed_facts"][0]["summary"] == "Alice lives in Lisbon."
+    assert payload["agent_response"]["evidence"][0]["evidence_id"] in payload["evidence_ids"]
+    assert payload["agent_response"]["must_not_use_as_fact"] is True
 
 
 def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
@@ -300,6 +319,93 @@ def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
     assert payload["retrieval"]["hits"] == []
     assert payload["retrieval"]["fallback_hits"] == []
     assert payload["retrieval"]["unsupported_claims"] == ["Query subject does not match requested person."]
+    assert payload["retrieval"]["refusal_category"] == "subject_mismatch"
+
+
+def test_chat_answers_biography_family_relationship_bridge(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-family-chat.md",
+            source_type="note",
+            origin_uri="/tmp/alice-family-chat.md",
+            title="alice-family-chat",
+            sha256="alice-family-chat-sha",
+            parsed_text="Alice's sister is Maria.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="family",
+                subcategory="sister",
+                canonical_key="alice:biography:family:sister:maria",
+                payload={"relation": "sister", "name": "Maria"},
+                summary="Alice's sister is Maria.",
+                source_kind="explicit",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice's sister is Maria.",
+            ),
+        )
+        for relation, target in (("brother", "Noah"), ("spouse", "Riley")):
+            consolidation.add_fact(
+                conn,
+                MemoryFactInput(
+                    workspace="default",
+                    person_id=int(person["id"]),
+                    domain="biography",
+                    category="family",
+                    subcategory=relation,
+                    canonical_key=f"alice:biography:family:{relation}:{target.lower()}",
+                    payload={"relation": relation, "name": target},
+                    summary=f"Alice's {relation} is {target}.",
+                    source_kind="explicit",
+                    confidence=0.95,
+                    observed_at="2026-04-21T10:00:00Z",
+                    source_id=source_id,
+                    quote_text=f"Alice's {relation} is {target}.",
+                ),
+            )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={
+            "workspace": "default",
+            "person_slug": "alice",
+            "query": "Who is Alice's sister?",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refused"] is False
+    assert payload["answerable"] is True
+    assert "Maria" in payload["answer"]
+    assert "Noah" not in payload["answer"]
+    assert "Riley" not in payload["answer"]
+    assert payload["retrieval"]["support_level"] == "supported"
+    assert len(payload["retrieval"]["hits"]) == 1
+    assert payload["retrieval"]["hits"][0]["domain"] == "biography"
+    assert payload["retrieval"]["hits"][0]["category"] == "family"
 
 
 @pytest.mark.parametrize(
@@ -314,7 +420,7 @@ def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
             "Alice lives in Lisbon.",
             "Alice lives in Lisbon.",
             "contradicted",
-            "conflicts with that claim",
+            "I do not have evidence",
         ),
         (
             "Does Alice prefer coffee?",
@@ -325,7 +431,7 @@ def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
             "Alice prefers tea.",
             "Alice prefers tea.",
             "contradicted",
-            "conflicts with that claim",
+            "I do not have evidence",
         ),
         (
             "Did Alice attend JSConf?",
@@ -336,7 +442,7 @@ def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
             "Alice attended PyCon.",
             "Alice attended PyCon in 2026.",
             "contradicted",
-            "conflicts with that claim",
+            "I do not have evidence",
         ),
         (
             "Did Alice attend PyCon in 2025?",
@@ -347,7 +453,7 @@ def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
             "Alice attended PyCon.",
             "Alice attended PyCon in 2026.",
             "contradicted",
-            "conflicts with that claim",
+            "I do not have evidence",
         ),
         (
             "Is Bob Alice's brother?",
@@ -358,7 +464,7 @@ def test_chat_refuses_subject_binding_mismatch(monkeypatch, settings):
             "Alice says Bob is their friend.",
             "Bob is my friend.",
             "contradicted",
-            "conflicts with that claim",
+            "I do not have evidence",
         ),
     ],
 )
@@ -425,10 +531,14 @@ def test_chat_refuses_false_premise_claims_across_classes(
     assert response.status_code == 200
     payload = response.json()
     assert payload["refused"] is True
+    assert payload["answerable"] is False
+    assert payload["must_not_use_as_fact"] is True
     assert expected_fragment in payload["answer"]
     assert payload["retrieval"]["support_level"] == expected_support_level
+    assert payload["retrieval"]["refusal_category"] == "contradicted_by_memory"
     assert payload["retrieval"]["unsupported_premise_detected"] is True
     assert len(payload["retrieval"]["hits"]) == 1
+    assert payload["agent_response"]["answerable"] is False
 
 
 def test_chat_ignores_style_and_psychometrics_for_factual_answers(monkeypatch, settings):

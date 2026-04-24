@@ -11,7 +11,19 @@ from memco.services.retrieval_service import RetrievalService
 from memco.models.retrieval import RetrievalRequest
 
 
-def _seed_candidate(conn, *, person_id=None, candidate_status="validated_candidate"):
+def _seed_candidate(
+    conn,
+    *,
+    person_id=None,
+    candidate_status="validated_candidate",
+    domain="biography",
+    category="residence",
+    subcategory="",
+    canonical_key="alice:biography:residence:lisbon",
+    payload=None,
+    summary="Alice lives in Lisbon.",
+    parsed_text="Alice lives in Lisbon.",
+):
     fact_repo = FactRepository()
     source_repo = SourceRepository()
     candidate_repo = CandidateRepository()
@@ -33,9 +45,9 @@ def _seed_candidate(conn, *, person_id=None, candidate_status="validated_candida
         origin_uri="/tmp/publish-source.md",
         title="publish-source",
         sha256="publish-source-sha",
-        parsed_text="Alice lives in Lisbon.",
+        parsed_text=parsed_text,
     )
-    source_repo.replace_chunks(conn, source_id=source_id, parsed_text="Alice lives in Lisbon.")
+    source_repo.replace_chunks(conn, source_id=source_id, parsed_text=parsed_text)
     chunk_id = conn.execute(
         "SELECT id FROM source_chunks WHERE source_id = ? ORDER BY chunk_index ASC LIMIT 1",
         (source_id,),
@@ -49,12 +61,12 @@ def _seed_candidate(conn, *, person_id=None, candidate_status="validated_candida
         conversation_id=None,
         chunk_kind="conversation",
         chunk_id=int(chunk_id),
-        domain="biography",
-        category="residence",
-        subcategory="",
-        canonical_key="alice:biography:residence:lisbon",
-        payload={"city": "Lisbon"},
-        summary="Alice lives in Lisbon.",
+        domain=domain,
+        category=category,
+        subcategory=subcategory,
+        canonical_key=canonical_key,
+        payload=payload or {"city": "Lisbon"},
+        summary=summary,
         confidence=0.91,
     )
     candidate = candidate_repo.update_candidate_evidence(
@@ -62,7 +74,7 @@ def _seed_candidate(conn, *, person_id=None, candidate_status="validated_candida
         candidate_id=int(candidate["id"]),
         evidence=[
             {
-                "quote": "Alice lives in Lisbon.",
+                "quote": parsed_text,
                 "message_ids": ["8"],
                 "source_segment_ids": [int(source_segment_id)],
                 "chunk_kind": "conversation",
@@ -100,6 +112,66 @@ def test_publish_candidate_creates_active_fact_with_evidence_and_marks_candidate
     assert result["fact"]["evidence"][0]["quote_text"] == "Alice lives in Lisbon."
     assert result["fact"]["evidence"][0]["locator_json"]["message_ids"] == ["8"]
     assert result["fact"]["evidence"][0]["source_segment_id"] is not None
+
+
+def test_publish_candidate_promotes_extracted_valid_from(settings):
+    service = PublishService()
+
+    with get_connection(settings.db_path) as conn:
+        candidate = _seed_candidate(conn, payload={"city": "Lisbon", "valid_from": "2024"})
+        result = service.publish_candidate(
+            conn,
+            workspace_slug="default",
+            candidate_id=int(candidate["id"]),
+        )
+
+    assert result["fact"]["payload"]["city"] == "Lisbon"
+    assert result["fact"]["valid_from"] == "2024"
+
+
+def test_publish_family_candidate_creates_social_relationship_mirror(settings):
+    service = PublishService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        candidate = _seed_candidate(
+            conn,
+            domain="biography",
+            category="family",
+            subcategory="sister",
+            canonical_key="alice:biography:family:sister:maria",
+            payload={"relation": "sister", "name": "Maria"},
+            summary="Alice's sister is Maria.",
+            parsed_text="Alice's sister is Maria.",
+        )
+        result = service.publish_candidate(
+            conn,
+            workspace_slug="default",
+            candidate_id=int(candidate["id"]),
+        )
+        mirrored = result["mirrored_fact"]
+        retrieved = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Who is Alice's sister?",
+            ),
+        )
+
+    assert result["fact"]["domain"] == "biography"
+    assert result["fact"]["category"] == "family"
+    assert mirrored["domain"] == "social_circle"
+    assert mirrored["category"] == "sister"
+    assert mirrored["canonical_key"] == "alice:social_circle:sister:maria"
+    assert mirrored["payload"]["target_label"] == "Maria"
+    assert mirrored["payload"]["mirrored_from_fact_id"] == result["fact"]["id"]
+    assert mirrored["evidence"][0]["locator_json"]["mirror_kind"] == "biography_family_to_social_circle"
+    assert retrieved.support_level == "supported"
+    assert len(retrieved.hits) == 1
+    assert retrieved.hits[0].domain == "biography"
+    assert retrieved.hits[0].category == "family"
+    assert retrieved.hits[0].payload["name"] == "Maria"
 
 
 def test_publish_candidate_is_idempotent_for_already_published_candidate(settings):

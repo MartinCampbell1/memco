@@ -101,6 +101,9 @@ def test_run_live_operator_smoke_emits_compact_artifact(monkeypatch, tmp_path):
                 "answer": "Alice lives in Lisbon.",
                 "fact_ids": [1],
                 "evidence_ids": [10],
+                "used_fact_ids": [1],
+                "used_evidence_ids": [10],
+                "retrieval": {"planner": {"plan_version": "v2_llm"}},
             }
         if url.endswith("/v1/chat") and payload["query"] in {
             "Is Bob Alice's brother?",
@@ -193,7 +196,15 @@ def test_run_live_operator_smoke_uses_project_config_when_env_is_absent(monkeypa
         if url.endswith("/v1/retrieve"):
             return {"hits": [{"fact_id": 1, "evidence": [{"evidence_id": 10}]}]}
         if url.endswith("/v1/chat") and payload["query"] == "Where does Alice live?":
-            return {"refused": False, "answer": "Alice lives in Lisbon.", "fact_ids": [1], "evidence_ids": [10]}
+            return {
+                "refused": False,
+                "answer": "Alice lives in Lisbon.",
+                "fact_ids": [1],
+                "evidence_ids": [10],
+                "used_fact_ids": [1],
+                "used_evidence_ids": [10],
+                "retrieval": {"planner": {"plan_version": "v2_llm"}},
+            }
         if url.endswith("/v1/chat"):
             return {"refused": True, "answer": "I don't have confirmed memory evidence for that.", "fact_ids": [], "evidence_ids": []}
         raise AssertionError(f"Unexpected request: {method} {url} {payload}")

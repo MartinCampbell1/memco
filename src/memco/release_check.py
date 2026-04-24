@@ -55,21 +55,45 @@ def resolve_repo_project_root(start: Path) -> Path:
 
 
 def _run_pytest_gate(*, project_root: Path) -> dict:
-    command = [sys.executable, "-m", "pytest", "-q", *ACTIVE_GATE_TEST_FILES]
-    completed = subprocess.run(
-        command,
+    dependency_command = [sys.executable, "-m", "pip", "check"]
+    dependency_completed = subprocess.run(
+        dependency_command,
         cwd=project_root,
         capture_output=True,
         text=True,
         check=False,
     )
+    command = [sys.executable, "-m", "pytest", "-q", *ACTIVE_GATE_TEST_FILES]
+    if dependency_completed.returncode == 0:
+        completed = subprocess.run(
+            command,
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    else:
+        completed = subprocess.CompletedProcess(
+            args=command,
+            returncode=1,
+            stdout="",
+            stderr="pytest skipped because pip check failed\n",
+        )
     return {
         "name": "pytest_gate",
-        "ok": completed.returncode == 0,
+        "ok": dependency_completed.returncode == 0 and completed.returncode == 0,
         "returncode": completed.returncode,
         "command": command,
         "stdout": completed.stdout,
         "stderr": completed.stderr,
+        "dependency_check": {
+            "name": "pip_check",
+            "ok": dependency_completed.returncode == 0,
+            "returncode": dependency_completed.returncode,
+            "command": dependency_command,
+            "stdout": dependency_completed.stdout,
+            "stderr": dependency_completed.stderr,
+        },
     }
 
 

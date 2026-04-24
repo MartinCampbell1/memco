@@ -16,10 +16,12 @@ def test_refusal_service_refuses_when_no_hits():
         ),
     )
     assert result["refused"] is True
+    assert result["answerable"] is False
+    assert result["must_not_use_as_fact"] is True
     assert "confirmed memory evidence" in result["answer"]
 
 
-def test_refusal_service_returns_partial_answer_when_claim_is_mixed():
+def test_refusal_service_refuses_yes_no_partial_false_premise():
     service = RefusalService()
     result = service.build_answer(
         query="Does Alice live in Lisbon and work at Stripe?",
@@ -42,6 +44,8 @@ def test_refusal_service_returns_partial_answer_when_claim_is_mixed():
             ],
         ),
     )
-    assert result["refused"] is False
+    assert result["refused"] is True
+    assert result["answerable"] is False
+    assert result["must_not_use_as_fact"] is True
     assert "Alice lives in Lisbon." in result["answer"]
-    assert "Stripe" in result["answer"]
+    assert result["unsupported_claims"] == ["No evidence for named entity in the premise: Stripe."]

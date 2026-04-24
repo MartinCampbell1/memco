@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from memco.config import Settings
@@ -16,6 +17,19 @@ from memco.extractors.base import (
 )
 from memco.llm import LLMProvider, build_llm_provider
 from memco.llm_usage import LLMUsageEvent, LLMUsageFileLogger, LLMUsageTracker
+from memco.models.conversation import ExtractionChunk, MessageView
+from memco.utils import slugify
+
+
+FIRST_PERSON_RE = re.compile(
+    r"\b(?:i|i'm|i’m|i've|i’ve|i'd|i’d|i'll|i’ll|me|my|mine)\b",
+    re.IGNORECASE,
+)
+THIRD_PERSON_AMBIGUITY_RE = re.compile(
+    r"(?i:\b(?:he|she|they|his|her|their)\b)|"
+    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+"
+    r"(?:lives|works|prefers|likes|loves|moved|has)\b"
+)
 
 
 class ExtractionService:
@@ -72,25 +86,36 @@ class ExtractionService:
         occurred_at: str,
         include_style: bool,
         include_psychometrics: bool,
+        chunk: ExtractionChunk | None = None,
+        target_message_ids: list[int] | None = None,
     ) -> str:
-        return json.dumps(
-            build_prompt_payload(
-                ExtractionContext(
-                    text=text,
-                    subject_key=subject_key,
-                    subject_display=subject_display,
-                    speaker_label=speaker_label,
-                    person_id=person_id,
-                    message_id=message_id,
-                    source_segment_id=source_segment_id,
-                    session_id=session_id,
-                    occurred_at=occurred_at,
-                ),
-                include_style=include_style,
-                include_psychometrics=include_psychometrics,
+        payload = build_prompt_payload(
+            ExtractionContext(
+                text=text,
+                subject_key=subject_key,
+                subject_display=subject_display,
+                speaker_label=speaker_label,
+                person_id=person_id,
+                message_id=message_id,
+                source_segment_id=source_segment_id,
+                session_id=session_id,
+                occurred_at=occurred_at,
             ),
-            ensure_ascii=False,
+            include_style=include_style,
+            include_psychometrics=include_psychometrics,
         )
+        if chunk is not None:
+            payload["chunk"] = {
+                "chunk_id": chunk.chunk_id,
+                "chunk_kind": chunk.chunk_kind,
+                "text": chunk.text,
+                "source_segment_ids": chunk.source_segment_ids,
+                "overlap_prev": chunk.overlap_prev,
+                "overlap_next": chunk.overlap_next,
+                "target_message_ids": target_message_ids or [],
+                "messages": [message.model_dump(mode="json") for message in chunk.messages],
+            }
+        return json.dumps(payload, ensure_ascii=False)
 
     def _mock_complete_json(
         self,
@@ -102,6 +127,8 @@ class ExtractionService:
     ) -> list[dict]:
         if schema_name != EXTRACTION_SCHEMA_NAME:
             raise ValueError(f"Unsupported mock JSON schema: {schema_name}")
+        if metadata.get("chunk_kind") == "conversation" and metadata.get("chunk_id") is not None:
+            return self._mock_extract_from_chunk(metadata)
         return self._extract_from_text(
             text=metadata["text"],
             subject_key=metadata["subject_key"],
@@ -134,6 +161,7 @@ class ExtractionService:
                 "stage": "extraction",
                 "schema_name": metadata.get("schema_name"),
                 "message_id": metadata.get("message_id"),
+                "chunk_id": metadata.get("chunk_id"),
                 "workspace_id": metadata.get("workspace_id"),
                 "has_person_id": metadata.get("person_id") is not None,
                 "include_style": bool(metadata.get("include_style")),
@@ -151,14 +179,23 @@ class ExtractionService:
         message_id: int | None,
         source_segment_id: int | None,
         session_id: int | None,
+        chunk_kind: str = "conversation",
+        attribution_method: str = "",
+        attribution_confidence: float | None = None,
+        source_type: str = "",
     ) -> dict[str, Any]:
-        return {
+        item = {
             "quote": quote.strip(),
             "message_ids": [str(message_id)] if message_id is not None else [],
             "source_segment_ids": [int(source_segment_id)] if source_segment_id is not None else [],
             "session_ids": [int(session_id)] if session_id is not None else [],
-            "chunk_kind": "conversation",
+            "chunk_kind": chunk_kind,
         }
+        if attribution_method:
+            item["attribution_method"] = attribution_method
+            item["attribution_confidence"] = attribution_confidence
+            item["source_type"] = source_type
+        return item
 
     def _normalize_provider_evidence(
         self,
@@ -168,12 +205,20 @@ class ExtractionService:
         message_id: int | None,
         source_segment_id: int | None,
         session_id: int | None,
+        chunk_kind: str = "conversation",
+        attribution_method: str = "",
+        attribution_confidence: float | None = None,
+        source_type: str = "",
     ) -> list[dict[str, Any]]:
         default_item = self._default_evidence_item(
             quote=fallback_quote,
             message_id=message_id,
             source_segment_id=source_segment_id,
             session_id=session_id,
+            chunk_kind=chunk_kind,
+            attribution_method=attribution_method,
+            attribution_confidence=attribution_confidence,
+            source_type=source_type,
         )
         if evidence is None:
             return []
@@ -184,6 +229,10 @@ class ExtractionService:
                     message_id=message_id,
                     source_segment_id=source_segment_id,
                     session_id=session_id,
+                    chunk_kind=chunk_kind,
+                    attribution_method=attribution_method,
+                    attribution_confidence=attribution_confidence,
+                    source_type=source_type,
                 )
             ]
         if isinstance(evidence, list):
@@ -198,6 +247,10 @@ class ExtractionService:
                             message_id=message_id,
                             source_segment_id=source_segment_id,
                             session_id=session_id,
+                            chunk_kind=chunk_kind,
+                            attribution_method=attribution_method,
+                            attribution_confidence=attribution_confidence,
+                            source_type=source_type,
                         )
                     )
                     continue
@@ -206,23 +259,26 @@ class ExtractionService:
                 quote = item.get("quote")
                 if not isinstance(quote, str) or not quote.strip():
                     quote = fallback_quote
-                normalized.append(
-                    {
-                        "quote": quote.strip(),
-                        "message_ids": item.get("message_ids")
-                        if isinstance(item.get("message_ids"), list)
-                        else list(default_item["message_ids"]),
-                        "source_segment_ids": item.get("source_segment_ids")
-                        if isinstance(item.get("source_segment_ids"), list)
-                        else list(default_item["source_segment_ids"]),
-                        "session_ids": item.get("session_ids")
-                        if isinstance(item.get("session_ids"), list)
-                        else list(default_item["session_ids"]),
-                        "chunk_kind": item.get("chunk_kind")
-                        if isinstance(item.get("chunk_kind"), str) and item.get("chunk_kind", "").strip()
-                        else default_item["chunk_kind"],
-                    }
-                )
+                evidence_item = {
+                    "quote": quote.strip(),
+                    "message_ids": item.get("message_ids")
+                    if isinstance(item.get("message_ids"), list)
+                    else list(default_item["message_ids"]),
+                    "source_segment_ids": item.get("source_segment_ids")
+                    if isinstance(item.get("source_segment_ids"), list)
+                    else list(default_item["source_segment_ids"]),
+                    "session_ids": item.get("session_ids")
+                    if isinstance(item.get("session_ids"), list)
+                    else list(default_item["session_ids"]),
+                    "chunk_kind": item.get("chunk_kind")
+                    if isinstance(item.get("chunk_kind"), str) and item.get("chunk_kind", "").strip()
+                    else default_item["chunk_kind"],
+                }
+                if attribution_method:
+                    evidence_item["attribution_method"] = attribution_method
+                    evidence_item["attribution_confidence"] = attribution_confidence
+                    evidence_item["source_type"] = source_type
+                normalized.append(evidence_item)
             if normalized:
                 return normalized
         return []
@@ -237,6 +293,10 @@ class ExtractionService:
         message_id: int | None,
         source_segment_id: int | None,
         session_id: int | None,
+        chunk_kind: str = "conversation",
+        attribution_method: str = "",
+        attribution_confidence: float | None = None,
+        source_type: str = "",
     ) -> dict[str, Any]:
         normalized = dict(candidate)
         domain = str(normalized.get("domain") or "")
@@ -272,7 +332,10 @@ class ExtractionService:
         if domain == "biography" and residence_value and any(marker in f" {lowered_text} " for marker in residence_markers):
             normalized["category"] = "residence"
             normalized["subcategory"] = "city"
-            normalized["payload"] = {"city": residence_value}
+            normalized_payload = {"city": residence_value}
+            if isinstance(payload.get("valid_from"), str) and payload["valid_from"].strip():
+                normalized_payload["valid_from"] = payload["valid_from"].strip()
+            normalized["payload"] = normalized_payload
             payload = normalized["payload"]
         if domain == "biography" and category == "city" and isinstance(payload.get("city"), str):
             normalized["category"] = "residence"
@@ -292,8 +355,22 @@ class ExtractionService:
             message_id=message_id,
             source_segment_id=source_segment_id,
             session_id=session_id,
+            chunk_kind=chunk_kind,
+            attribution_method=attribution_method,
+            attribution_confidence=attribution_confidence,
+            source_type=source_type,
         )
-        review_reason_codes = {"speaker_unresolved", "relation_target_unresolved"}
+        if attribution_method:
+            payload["attribution_method"] = attribution_method
+            payload["attribution_confidence"] = attribution_confidence
+            payload["source_type"] = source_type
+        review_reason_codes = {
+            "speaker_unresolved",
+            "relation_target_unresolved",
+            "suspicious_identity_payload",
+            "suspicious_residence_payload",
+            "suspicious_work_payload",
+        }
         review_reasons: list[str] = []
         existing_reason = normalized.get("reason")
         if isinstance(existing_reason, str):
@@ -312,10 +389,36 @@ class ExtractionService:
             and "relation_target_unresolved" not in review_reasons
         ):
             review_reasons.append("relation_target_unresolved")
+        for reason in self._candidate_quality_review_reasons(
+            domain=domain,
+            category=str(normalized.get("category") or ""),
+            payload=payload,
+        ):
+            if reason not in review_reasons:
+                review_reasons.append(reason)
         normalized["needs_review"] = bool(review_reasons)
         if review_reasons:
             normalized["reason"] = ",".join(review_reasons)
         return normalized
+
+    def _candidate_quality_review_reasons(self, *, domain: str, category: str, payload: dict[str, Any]) -> list[str]:
+        reasons: list[str] = []
+        if domain == "biography" and category == "residence":
+            city = str(payload.get("city") or "").strip()
+            lowered = city.lower()
+            if len(city.split()) > 4 or re.search(r"\b(?:and|prefer|work|moved|since|in\s+(?:19|20)\d{2})\b", lowered):
+                reasons.append("suspicious_residence_payload")
+        if domain == "biography" and category == "identity":
+            name = str(payload.get("name") or "").strip()
+            lowered = name.lower()
+            if len(name.split()) > 4 or re.search(r"\b(?:moved|work|works|love|prefer|live|based)\b", lowered):
+                reasons.append("suspicious_identity_payload")
+        if domain == "work" and category == "employment":
+            title = str(payload.get("title") or payload.get("role") or "").strip()
+            org = str(payload.get("org") or "").strip()
+            if re.search(r"\s+at\s+", title, re.IGNORECASE) and not org:
+                reasons.append("suspicious_work_payload")
+        return reasons
 
     def _normalize_provider_summary(
         self,
@@ -343,6 +446,8 @@ class ExtractionService:
                 return f"{subject_display} {payload['event'].strip()} {target}."
             return f"{subject_display} says {target} is their {relation}."
         if domain == "work" and category == "employment" and isinstance(payload.get("title"), str):
+            if isinstance(payload.get("org"), str) and payload.get("org", "").strip():
+                return f"{subject_display} works as {payload['title'].strip()} at {payload['org'].strip()}."
             return f"{subject_display} works as {payload['title'].strip()}."
         if domain == "work" and category == "role" and isinstance(payload.get("role"), str):
             return f"{subject_display} works as {payload['role'].strip()}."
@@ -368,7 +473,13 @@ class ExtractionService:
         occurred_at: str = "",
         include_style: bool = False,
         include_psychometrics: bool = False,
+        chunk: ExtractionChunk | None = None,
+        target_messages: list[MessageView] | None = None,
+        attribution_method: str = "",
+        attribution_confidence: float | None = None,
+        source_type: str = "",
     ) -> list[dict]:
+        target_messages = target_messages or []
         metadata = {
             "text": text,
             "subject_key": subject_key,
@@ -383,6 +494,16 @@ class ExtractionService:
             "occurred_at": occurred_at,
             "include_style": include_style,
             "include_psychometrics": include_psychometrics,
+            "chunk_id": chunk.chunk_id if chunk is not None else None,
+            "chunk_kind": chunk.chunk_kind if chunk is not None else None,
+            "chunk_messages": [message.model_dump(mode="json") for message in chunk.messages] if chunk is not None else [],
+            "chunk_source_segment_ids": list(chunk.source_segment_ids) if chunk is not None else [],
+            "chunk_overlap_prev": chunk.overlap_prev if chunk is not None else False,
+            "chunk_overlap_next": chunk.overlap_next if chunk is not None else False,
+            "target_message_ids": [message.message_id for message in target_messages],
+            "attribution_method": attribution_method,
+            "attribution_confidence": attribution_confidence,
+            "source_type": source_type,
         }
         response = self.llm_provider.complete_json(
             system_prompt=self._extraction_system_prompt(
@@ -401,6 +522,8 @@ class ExtractionService:
                 occurred_at=occurred_at,
                 include_style=include_style,
                 include_psychometrics=include_psychometrics,
+                chunk=chunk,
+                target_message_ids=[message.message_id for message in target_messages],
             ),
             schema_name=EXTRACTION_SCHEMA_NAME,
             metadata=metadata,
@@ -425,10 +548,66 @@ class ExtractionService:
                     message_id=message_id,
                     source_segment_id=source_segment_id,
                     session_id=session_id,
+                    chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
+                    attribution_method=attribution_method,
+                    attribution_confidence=attribution_confidence,
+                    source_type=source_type,
                 )
             )
             for candidate in content
         ]
+
+    def _mock_extract_from_chunk(self, metadata: dict) -> list[dict]:
+        target_person_id = metadata.get("person_id")
+        target_speaker = str(metadata.get("speaker_label") or "")
+        chunk = ExtractionChunk(
+            chunk_id=int(metadata["chunk_id"]),
+            chunk_kind="conversation",
+            messages=[MessageView.model_validate(item) for item in metadata.get("chunk_messages", [])],
+            text=str(metadata.get("text") or ""),
+            source_segment_ids=[int(item) for item in metadata.get("chunk_source_segment_ids", [])],
+            overlap_prev=bool(metadata.get("chunk_overlap_prev")),
+            overlap_next=bool(metadata.get("chunk_overlap_next")),
+        )
+        candidates: list[dict] = []
+        for message in chunk.messages:
+            use_owner_fallback_message = (
+                metadata.get("attribution_method") == "owner_first_person_fallback"
+                and message.person_id is None
+                and not message.speaker_label.strip()
+            )
+            if target_person_id is not None:
+                if message.person_id != target_person_id and not use_owner_fallback_message:
+                    continue
+            elif message.speaker_label != target_speaker:
+                continue
+            effective_person_id = target_person_id if use_owner_fallback_message else message.person_id
+            effective_speaker = target_speaker if use_owner_fallback_message else message.speaker_label
+            candidates.extend(
+                self._extract_from_text(
+                    text=message.text,
+                    subject_key=metadata["subject_key"],
+                    subject_display=metadata["subject_display"],
+                    speaker_label=effective_speaker,
+                    person_id=effective_person_id,
+                    conn=metadata["conn"],
+                    workspace_id=metadata["workspace_id"],
+                    message_id=message.message_id,
+                    source_segment_id=message.source_segment_id,
+                    session_id=message.session_id,
+                    occurred_at=message.occurred_at,
+                    include_style=metadata["include_style"],
+                    include_psychometrics=metadata["include_psychometrics"],
+                )
+            )
+        candidates.extend(
+            self._chunk_window_candidate_payloads(
+                chunk=chunk,
+                target_person_id=target_person_id,
+                target_speaker=target_speaker,
+            )
+        )
+        return candidates
 
     def extract_candidates(self, *, source_text: str, person_hint: str | None = None) -> list[dict]:
         text = source_text.strip()
@@ -501,69 +680,350 @@ class ExtractionService:
             include_psychometrics=include_psychometrics,
         )
 
-    def extract_candidates_from_conversation(self, conn, *, conversation_id: int, include_style: bool = False, include_psychometrics: bool = False) -> list[dict]:
-        rows = conn.execute(
+    def _conversation_chunks(self, conn, *, conversation_id: int) -> list[ExtractionChunk]:
+        message_rows = conn.execute(
             """
             SELECT
-              c.id AS conversation_id,
-              c.workspace_id,
-              c.source_id,
-              cm.session_id,
               cm.id AS message_id,
               cm.message_index,
-              cm.occurred_at,
-              cm.text,
               cm.speaker_label,
               cm.speaker_person_id AS person_id,
-              cc.id AS chunk_id,
+              cm.text,
+              cm.occurred_at,
+              cm.session_id,
               ss.id AS source_segment_id
-            FROM conversations c
-            JOIN conversation_messages cm
-              ON cm.conversation_id = c.id
-            LEFT JOIN conversation_chunks cc
-              ON cc.conversation_id = c.id
-             AND cm.message_index BETWEEN cc.start_message_index AND cc.end_message_index
+            FROM conversation_messages cm
             LEFT JOIN source_segments ss
               ON ss.message_id = cm.id
              AND ss.segment_type = 'message'
-            WHERE c.id = ?
+            WHERE cm.conversation_id = ?
             ORDER BY cm.message_index ASC
             """,
             (conversation_id,),
         ).fetchall()
+        messages_by_index = {
+            int(row["message_index"]): MessageView(
+                message_id=int(row["message_id"]),
+                message_index=int(row["message_index"]),
+                speaker_label=row["speaker_label"] or "",
+                person_id=int(row["person_id"]) if row["person_id"] is not None else None,
+                text=row["text"] or "",
+                occurred_at=row["occurred_at"] or "",
+                source_segment_id=int(row["source_segment_id"]) if row["source_segment_id"] is not None else None,
+                session_id=int(row["session_id"]) if row["session_id"] is not None else None,
+            )
+            for row in message_rows
+        }
+        chunk_rows = conn.execute(
+            """
+            SELECT id, text, locator_json
+            FROM conversation_chunks
+            WHERE conversation_id = ?
+            ORDER BY chunk_index ASC
+            """,
+            (conversation_id,),
+        ).fetchall()
+        overlap_by_chunk: list[bool] = []
+        chunk_indexes: list[list[int]] = []
+        for row in chunk_rows:
+            locator = json.loads(row["locator_json"] or "{}")
+            indexes = [int(index) for index in locator.get("message_indexes", [])]
+            chunk_indexes.append(indexes)
+            overlap_by_chunk.append(bool(locator.get("overlap_message_indexes")))
+
+        chunks: list[ExtractionChunk] = []
+        for position, row in enumerate(chunk_rows):
+            indexes = chunk_indexes[position]
+            messages = [messages_by_index[index] for index in indexes if index in messages_by_index]
+            source_segment_ids = [
+                int(message.source_segment_id)
+                for message in messages
+                if message.source_segment_id is not None
+            ]
+            chunks.append(
+                ExtractionChunk(
+                    chunk_id=int(row["id"]),
+                    chunk_kind="conversation",
+                    messages=messages,
+                    text=row["text"] or "",
+                    source_segment_ids=source_segment_ids,
+                    overlap_prev=overlap_by_chunk[position],
+                    overlap_next=position + 1 < len(overlap_by_chunk) and overlap_by_chunk[position + 1],
+                )
+            )
+        return chunks
+
+    def _chunk_window_candidate_payloads(
+        self,
+        *,
+        chunk: ExtractionChunk,
+        target_person_id: int | None,
+        target_speaker: str,
+    ) -> list[dict]:
         candidates: list[dict] = []
+        moved_there_re = re.compile(r"\bi\s+moved\s+there(?:\s+in\s+((?:19|20)\d{2}))?\b", re.IGNORECASE)
+        city_confirm_re = re.compile(
+            r"\b(?:you\s+mean\s+(?P<city_you_mean>[A-Z][A-Za-z0-9&.\-]*(?:\s+[A-Z][A-Za-z0-9&.\-]*)?)|(?P<city_right>[A-Z][A-Za-z0-9&.\-]*(?:\s+[A-Z][A-Za-z0-9&.\-]*)?),?\s+right)\??\s*$",
+            re.IGNORECASE,
+        )
+        yes_re = re.compile(r"^\s*(?:yes|yeah|yep|correct|right|that's right)\b", re.IGNORECASE)
+        messages = chunk.messages
+        for index, message in enumerate(messages[:-2]):
+            moved_match = moved_there_re.search(message.text)
+            if moved_match is None:
+                continue
+            if target_person_id is not None:
+                if message.person_id != target_person_id:
+                    continue
+            elif message.speaker_label != target_speaker:
+                continue
+            confirmation = messages[index + 1]
+            yes_message = messages[index + 2]
+            city_match = city_confirm_re.search(confirmation.text)
+            if city_match is None or yes_re.search(yes_message.text) is None:
+                continue
+            if yes_message.person_id != message.person_id or yes_message.speaker_label != message.speaker_label:
+                continue
+            city = (city_match.group("city_you_mean") or city_match.group("city_right") or "").strip()
+            if not city:
+                continue
+            valid_from = moved_match.group(1) or ""
+            evidence_messages = [message, confirmation, yes_message]
+            evidence = [
+                {
+                    "quote": "\n".join(
+                        f"{item.speaker_label}: {item.text}" if item.speaker_label else item.text
+                        for item in evidence_messages
+                    ),
+                    "message_ids": [str(item.message_id) for item in evidence_messages],
+                    "source_segment_ids": [
+                        int(item.source_segment_id)
+                        for item in evidence_messages
+                        if item.source_segment_id is not None
+                    ],
+                    "session_ids": [
+                        int(item.session_id)
+                        for item in evidence_messages
+                        if item.session_id is not None
+                    ],
+                    "chunk_kind": "conversation",
+                }
+            ]
+            review_reasons = ["speaker_unresolved"] if message.person_id is None else []
+            payload = {"city": city}
+            if valid_from:
+                payload["valid_from"] = valid_from
+            candidates.append(
+                {
+                    "domain": "biography",
+                    "category": "residence",
+                    "subcategory": "",
+                    "canonical_key": f"{subject_key(message.person_id, message.speaker_label)}:biography:residence:{slugify(city)}",
+                    "payload": payload,
+                    "summary": f"{display_subject(message.speaker_label, message.person_id)} lives in {city}.",
+                    "confidence": 0.86 if message.person_id is not None else 0.6,
+                    "reason": ",".join(review_reasons),
+                    "needs_review": bool(review_reasons),
+                    "evidence": evidence,
+                }
+            )
+        return candidates
+
+    def _owner_first_person_fallback_allowed(self, chunk: ExtractionChunk) -> bool:
+        if not chunk.messages:
+            return False
+        if any(message.person_id is not None or message.speaker_label.strip() for message in chunk.messages):
+            return False
+        text = chunk.text.strip()
+        return bool(FIRST_PERSON_RE.search(text)) and THIRD_PERSON_AMBIGUITY_RE.search(text) is None
+
+    def extract_candidates_from_conversation(
+        self,
+        conn,
+        *,
+        conversation_id: int,
+        include_style: bool = False,
+        include_psychometrics: bool = False,
+        owner_person_id: int | None = None,
+        owner_display_name: str = "",
+        attribution_policy: str = "strict_speaker_only",
+    ) -> list[dict]:
+        meta_row = conn.execute(
+            """
+            SELECT c.id AS conversation_id, c.workspace_id, c.source_id, s.source_type
+            FROM conversations c
+            JOIN sources s
+              ON s.id = c.source_id
+            WHERE c.id = ?
+            """,
+            (conversation_id,),
+        ).fetchone()
+        if meta_row is None:
+            return []
+        chunks = self._conversation_chunks(conn, conversation_id=conversation_id)
+        candidates: list[dict] = []
+        for chunk in chunks:
+            targets: list[tuple[int | None, str, list[MessageView]]] = []
+            seen_targets: set[tuple[int | None, str]] = set()
+            for message in chunk.messages:
+                target_key = (message.person_id, message.speaker_label)
+                if target_key not in seen_targets:
+                    seen_targets.add(target_key)
+                    targets.append((message.person_id, message.speaker_label, []))
+                for index, existing in enumerate(targets):
+                    if (existing[0], existing[1]) == target_key:
+                        targets[index] = (existing[0], existing[1], [*existing[2], message])
+                        break
+            for person_id, speaker_label, target_messages in targets:
+                if not target_messages:
+                    continue
+                primary = target_messages[0]
+                use_message_fallback = len(chunk.messages) == 1
+                provider_text = primary.text if use_message_fallback else chunk.text
+                provider_chunk = None if use_message_fallback else chunk
+                provider_target_messages = [] if use_message_fallback else target_messages
+                effective_person_id = person_id
+                effective_speaker_label = speaker_label
+                attribution_method = ""
+                attribution_confidence = None
+                if (
+                    attribution_policy == "owner_first_person_fallback"
+                    and person_id is None
+                    and not speaker_label.strip()
+                    and owner_person_id is not None
+                    and self._owner_first_person_fallback_allowed(chunk)
+                ):
+                    effective_person_id = owner_person_id
+                    effective_speaker_label = owner_display_name
+                    attribution_method = "owner_first_person_fallback"
+                    attribution_confidence = 0.96
+                extracted = self._extract_candidates_via_provider(
+                    text=provider_text,
+                    subject_key=subject_key(effective_person_id, effective_speaker_label),
+                    subject_display=display_subject(effective_speaker_label, effective_person_id),
+                    speaker_label=effective_speaker_label,
+                    person_id=effective_person_id,
+                    conn=conn,
+                    workspace_id=int(meta_row["workspace_id"]),
+                    message_id=primary.message_id if use_message_fallback else None,
+                    source_segment_id=primary.source_segment_id if use_message_fallback else None,
+                    session_id=primary.session_id,
+                    occurred_at=primary.occurred_at,
+                    include_style=include_style,
+                    include_psychometrics=include_psychometrics,
+                    chunk=provider_chunk,
+                    target_messages=provider_target_messages,
+                    attribution_method=attribution_method,
+                    attribution_confidence=attribution_confidence,
+                    source_type=str(meta_row["source_type"] or ""),
+                )
+                for candidate in extracted:
+                    candidates.append(
+                        {
+                            "conversation_id": int(meta_row["conversation_id"]),
+                            "source_id": int(meta_row["source_id"]),
+                            "chunk_kind": "conversation",
+                            "chunk_id": chunk.chunk_id,
+                            "session_id": primary.session_id,
+                            "person_id": effective_person_id,
+                            "speaker_label": effective_speaker_label,
+                            "text": provider_text,
+                            "occurred_at": primary.occurred_at,
+                            "message_id": primary.message_id,
+                            **candidate,
+                        }
+                    )
+        return candidates
+
+    def _source_chunks(self, conn, *, source_id: int) -> list[ExtractionChunk]:
+        rows = conn.execute(
+            """
+            SELECT
+              sc.id AS chunk_id,
+              sc.text,
+              sc.locator_json,
+              ss.id AS source_segment_id
+            FROM source_chunks sc
+            LEFT JOIN source_segments ss
+              ON ss.chunk_id = sc.id
+             AND ss.segment_type = 'source_chunk'
+            WHERE sc.source_id = ?
+            ORDER BY sc.chunk_index ASC
+            """,
+            (source_id,),
+        ).fetchall()
+        chunks: list[ExtractionChunk] = []
         for row in rows:
-            item = dict(row)
-            speaker_label = item.get("speaker_label") or ""
-            person_id = item.get("person_id")
+            locator = json.loads(row["locator_json"] or "{}")
+            token_window = locator.get("token_window") if isinstance(locator, dict) else {}
+            if not isinstance(token_window, dict):
+                token_window = {}
+            source_segment_ids = []
+            if row["source_segment_id"] is not None:
+                source_segment_ids.append(int(row["source_segment_id"]))
+            chunks.append(
+                ExtractionChunk(
+                    chunk_id=int(row["chunk_id"]),
+                    chunk_kind="source",
+                    text=row["text"] or "",
+                    source_segment_ids=source_segment_ids,
+                    overlap_prev=bool(token_window.get("overlap_prev")),
+                    overlap_next=bool(token_window.get("overlap_next")),
+                )
+            )
+        return chunks
+
+    def extract_candidates_from_source(
+        self,
+        conn,
+        *,
+        source_id: int,
+        person_id: int | None = None,
+        speaker_label: str = "",
+        attribution_method: str = "",
+        attribution_confidence: float | None = None,
+        include_style: bool = False,
+        include_psychometrics: bool = False,
+    ) -> list[dict]:
+        source_row = conn.execute(
+            "SELECT id, workspace_id, source_type FROM sources WHERE id = ?",
+            (source_id,),
+        ).fetchone()
+        if source_row is None:
+            return []
+        candidates: list[dict] = []
+        for chunk in self._source_chunks(conn, source_id=source_id):
+            source_segment_id = chunk.source_segment_ids[0] if chunk.source_segment_ids else None
             extracted = self._extract_candidates_via_provider(
-                text=item.get("text") or "",
+                text=chunk.text,
                 subject_key=subject_key(person_id, speaker_label),
                 subject_display=display_subject(speaker_label, person_id),
                 speaker_label=speaker_label,
                 person_id=person_id,
                 conn=conn,
-                workspace_id=int(item["workspace_id"]),
-                message_id=int(item["message_id"]),
-                source_segment_id=int(item["source_segment_id"]) if item.get("source_segment_id") is not None else None,
-                session_id=int(item["session_id"]) if item.get("session_id") is not None else None,
-                occurred_at=item.get("occurred_at") or "",
+                workspace_id=int(source_row["workspace_id"]),
+                source_segment_id=source_segment_id,
                 include_style=include_style,
                 include_psychometrics=include_psychometrics,
+                chunk=chunk,
+                target_messages=[],
+                attribution_method=attribution_method,
+                attribution_confidence=attribution_confidence,
+                source_type=str(source_row["source_type"] or ""),
             )
             for candidate in extracted:
                 candidates.append(
                     {
-                        "conversation_id": int(item["conversation_id"]),
-                        "source_id": int(item["source_id"]),
-                        "chunk_kind": "conversation",
-                        "chunk_id": int(item["chunk_id"]) if item.get("chunk_id") is not None else None,
-                        "session_id": int(item["session_id"]) if item.get("session_id") is not None else None,
+                        "conversation_id": None,
+                        "source_id": int(source_row["id"]),
+                        "chunk_kind": "source",
+                        "chunk_id": chunk.chunk_id,
+                        "session_id": None,
                         "person_id": person_id,
                         "speaker_label": speaker_label,
-                        "text": item.get("text") or "",
-                        "occurred_at": item.get("occurred_at") or "",
-                        "message_id": int(item["message_id"]),
+                        "text": chunk.text,
+                        "occurred_at": "",
+                        "message_id": None,
                         **candidate,
                     }
                 )

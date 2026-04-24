@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header
 from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.retrieval import RetrievalRequest
-from memco.services.retrieval_service import RetrievalService
+from memco.services.chat_runtime import build_chat_services
 
 router = APIRouter()
 
@@ -25,7 +25,7 @@ def retrieve_memory(
         allowed_actor_types={"owner", "system"},
         require_actor=True,
     )
-    service = RetrievalService()
+    service, _answer_service = build_chat_services(settings)
     with get_connection(settings.db_path) as conn:
         result = service.retrieve(
             conn,

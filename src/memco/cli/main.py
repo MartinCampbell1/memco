@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import typer
 
@@ -26,11 +27,10 @@ from memco.services.consolidation_service import ConsolidationService
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.ingest_service import IngestService
 from memco.services.extraction_service import ExtractionService
-from memco.services.answer_service import AnswerService
 from memco.services.publish_service import PublishService
 from memco.services.eval_service import EvalService
 from memco.services.export_service import ExportService
-from memco.services.retrieval_service import RetrievalService
+from memco.services.chat_runtime import build_chat_services
 from memco.services.review_service import ReviewService
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
@@ -42,6 +42,8 @@ from memco.release_check import resolve_repo_project_root, run_release_check, ru
 from memco.services.pipeline_service import IngestPipelineService
 
 app = typer.Typer(help="Memco structured persona-memory CLI.")
+eval_app = typer.Typer(help="Evaluation commands.")
+app.add_typer(eval_app, name="eval")
 
 
 def _settings(root: str | None) -> Settings:
@@ -516,7 +518,7 @@ def retrieve_command(
     root: str | None = typer.Option(None, help="Project root."),
 ) -> None:
     settings = _settings(root)
-    service = RetrievalService()
+    service, _answer_service = build_chat_services(settings)
     actor = build_internal_actor(settings, actor_id="dev-owner")
     payload = RetrievalRequest(
         workspace=workspace,
@@ -544,8 +546,7 @@ def chat_command(
     root: str | None = typer.Option(None, help="Project root."),
 ) -> None:
     settings = _settings(root)
-    retrieval_service = RetrievalService()
-    answer_service = AnswerService()
+    retrieval_service, answer_service = build_chat_services(settings)
     actor = build_internal_actor(settings, actor_id="dev-owner")
     payload = RetrievalRequest(
         workspace=workspace,
@@ -1235,6 +1236,27 @@ def eval_run_command(
         service.seed_fixture_data(settings.root)
     result = service.run(settings.root)
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@eval_app.command("personal-memory", help="Run the personal-memory golden eval gate.")
+def eval_personal_memory_command(
+    goldens: str = typer.Option("eval/personal_memory_goldens", help="Directory containing personal-memory JSONL goldens."),
+    output: str | None = typer.Option(None, help="Optional JSON artifact output path."),
+    root: str | None = typer.Option(None, help="Optional isolated fixture runtime root. Defaults to a temporary root."),
+) -> None:
+    goldens_dir = Path(goldens).expanduser().resolve()
+    service = EvalService()
+    if root:
+        settings = _eval_settings(root)
+        result = service.run_personal_memory(project_root=settings.root, goldens_dir=goldens_dir)
+        _emit_json_artifact(result, output=output)
+    else:
+        with TemporaryDirectory(prefix="memco-personal-memory-eval-") as tmpdir:
+            settings = _eval_settings(tmpdir)
+            result = service.run_personal_memory(project_root=settings.root, goldens_dir=goldens_dir)
+            _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(1)
 
 
 @app.command(

@@ -5,8 +5,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from memco.api.deps import get_settings, require_api_auth, resolve_actor_context
 from memco.db import get_connection
 from memco.models.retrieval import RetrievalRequest
-from memco.services.answer_service import AnswerService
-from memco.services.retrieval_service import RetrievalService
+from memco.services.chat_runtime import build_chat_services
 
 router = APIRouter()
 
@@ -26,8 +25,7 @@ def chat_with_memory(
         allowed_actor_types={"owner", "system"},
         require_actor=True,
     )
-    retrieval_service = RetrievalService()
-    answer_service = AnswerService()
+    retrieval_service, answer_service = build_chat_services(settings)
     with get_connection(settings.db_path) as conn:
         retrieval_result = retrieval_service.retrieve(
             conn,

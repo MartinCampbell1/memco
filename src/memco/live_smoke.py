@@ -342,6 +342,10 @@ def run_live_operator_smoke(
             "supported_chat_has_fact_ids": not supported_chat.get("refused", True)
             and bool(supported_chat.get("fact_ids"))
             and bool(supported_chat.get("evidence_ids")),
+            "supported_chat_used_llm_planner": supported_chat.get("retrieval", {}).get("planner", {}).get("plan_version") == "v2_llm",
+            "supported_chat_used_llm_answer_ids": not supported_chat.get("refused", True)
+            and bool(supported_chat.get("used_fact_ids"))
+            and bool(supported_chat.get("used_evidence_ids")),
             "unsupported_premise_refused": bool(unsupported_chat.get("refused")),
             "contradicted_premise_refused": bool(contradicted_chat.get("refused")),
             "subject_isolation_refused": bool(isolation_chat.get("refused")),
@@ -354,6 +358,9 @@ def run_live_operator_smoke(
                 alice_answer=supported_chat.get("answer"),
                 alice_fact_ids=supported_chat.get("fact_ids", []),
                 alice_evidence_ids=supported_chat.get("evidence_ids", []),
+                alice_used_fact_ids=supported_chat.get("used_fact_ids", []),
+                alice_used_evidence_ids=supported_chat.get("used_evidence_ids", []),
+                alice_planner_version=supported_chat.get("retrieval", {}).get("planner", {}).get("plan_version", ""),
             )
         )
 

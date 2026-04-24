@@ -29,12 +29,18 @@ class CandidateService:
         conversation_id: int,
         include_style: bool = False,
         include_psychometrics: bool = False,
+        owner_person_id: int | None = None,
+        owner_display_name: str = "",
+        attribution_policy: str = "strict_speaker_only",
     ) -> list[dict]:
         extracted = self._require_extraction_service().extract_candidates_from_conversation(
             conn,
             conversation_id=conversation_id,
             include_style=include_style,
             include_psychometrics=include_psychometrics,
+            owner_person_id=owner_person_id,
+            owner_display_name=owner_display_name,
+            attribution_policy=attribution_policy,
         )
         persisted: list[dict] = []
         for item in extracted:

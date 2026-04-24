@@ -6,6 +6,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 DetailPolicy = Literal["core_only", "balanced", "exhaustive"]
+RefusalCategory = Literal[
+    "",
+    "unsupported_no_evidence",
+    "contradicted_by_memory",
+    "subject_mismatch",
+    "ambiguous_relationship",
+    "insufficient_evidence",
+]
 
 
 class RetrievalDomainPlan(BaseModel):
@@ -102,10 +110,15 @@ class RetrievalResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str
+    answerable: bool = True
     unsupported_premise_detected: bool = False
     support_level: str = "unsupported"
+    refusal_category: RefusalCategory = ""
+    must_not_use_as_fact: bool = False
     detail_policy: DetailPolicy = "balanced"
     unsupported_claims: list[str] = Field(default_factory=list)
+    safe_known_facts: list[str] = Field(default_factory=list)
+    target_person: dict[str, Any] = Field(default_factory=dict)
     hits: list[RetrievalHit] = Field(default_factory=list)
     fallback_hits: list[RetrievalFallbackHit] = Field(default_factory=list)
     planner: RetrievalPlan | None = None
