@@ -227,7 +227,7 @@ def test_current_contract_explicitly_scopes_out_whatsapp_and_telegram():
     brief = _read("docs/synthius_mem_execution_brief.md")
 
     assert "WhatsApp or Telegram export parsers are already part of the current repo-local ingestion contract" in readme
-    assert "implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`" in readme
+    assert "implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`" in readme
     assert "`WhatsApp` / `Telegram` remain roadmap/reference-track parser targets" in readme
     assert "`WhatsApp` and `Telegram` parser support remain roadmap/reference-track items" in notes
     assert "not part of the current repo-local contract: `WhatsApp`, `Telegram`" in brief

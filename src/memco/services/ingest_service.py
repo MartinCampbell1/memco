@@ -6,7 +6,9 @@ from memco.models.source import ImportResult
 from memco.parsers.base import ParsedDocument
 from memco.parsers.delimited_parser import DelimitedParser
 from memco.parsers.email_parser import EmailParser
+from memco.parsers.html_parser import HtmlParser
 from memco.parsers.json_parser import JsonParser
+from memco.parsers.markdown_parser import MarkdownParser
 from memco.parsers.pdf_parser import PdfParser
 from memco.parsers.text_parser import TextParser
 from memco.repositories.source_repository import SourceRepository
@@ -14,24 +16,28 @@ from memco.utils import sha256_file, sha256_text, slugify
 
 
 DEFAULT_PARSERS = {
-    ".md": TextParser(),
+    ".md": MarkdownParser(),
+    ".markdown": MarkdownParser(),
     ".txt": TextParser(),
     ".json": JsonParser(),
     ".csv": DelimitedParser(delimiter=","),
     ".eml": EmailParser(),
     ".mbox": EmailParser(),
     ".pdf": PdfParser(),
+    ".html": HtmlParser(),
+    ".htm": HtmlParser(),
 }
 
 SOURCE_TYPE_PARSERS = {
     "note": TextParser(),
     "text": TextParser(),
-    "markdown": TextParser(),
+    "markdown": MarkdownParser(),
     "chat": TextParser(),
     "json": JsonParser(),
     "csv": DelimitedParser(delimiter=","),
     "email": EmailParser(),
     "pdf": PdfParser(),
+    "html": HtmlParser(),
 }
 
 

@@ -27,7 +27,7 @@ No release claim in this repository should be read as a universal memory substra
 
 Current repo-local ingestion scope:
 
-- implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`
+- implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`
 - explicitly not part of the current repo-local contract: `WhatsApp`, `Telegram`
 - `WhatsApp` / `Telegram` remain roadmap/reference-track parser targets and should not be implied as currently shipped support
 

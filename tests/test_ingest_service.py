@@ -125,6 +125,94 @@ def test_import_file_normalizes_supported_source_type(settings, tmp_path):
     assert row["source_type"] == "note"
 
 
+def test_markdown_import_extracts_frontmatter_metadata(settings, tmp_path):
+    source = tmp_path / "profile.md"
+    source.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Alice Profile",
+                "date: 2026-04-24",
+                "tags:",
+                "  - memory",
+                "---",
+                "",
+                "Alice lives in Lisbon.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="markdown",
+        )
+        row = conn.execute(
+            "SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert row["source_type"] == "markdown"
+    assert "Alice lives in Lisbon." in row["parsed_text"]
+    assert "title: Alice Profile" not in row["parsed_text"]
+    assert meta["parser_name"] == "markdown"
+    assert meta["frontmatter"]["title"] == "Alice Profile"
+    assert meta["frontmatter"]["date"] == "2026-04-24"
+    assert meta["frontmatter"]["tags"] == ["memory"]
+
+
+def test_html_import_extracts_visible_text_and_title(settings, tmp_path):
+    source = tmp_path / "page.html"
+    source.write_text(
+        """
+        <html>
+          <head>
+            <title>Alice Page</title>
+            <style>.secret { display: none; }</style>
+            <script>console.log("ignore me")</script>
+          </head>
+          <body>
+            <main>
+              <h1>Alice</h1>
+              <p>Alice moved to Lisbon.</p>
+            </main>
+          </body>
+        </html>
+        """,
+        encoding="utf-8",
+    )
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="html",
+        )
+        row = conn.execute(
+            "SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert row["source_type"] == "html"
+    assert "# Alice Page" in row["parsed_text"]
+    assert "Alice moved to Lisbon." in row["parsed_text"]
+    assert "console.log" not in row["parsed_text"]
+    assert meta["parser_name"] == "html"
+    assert meta["title"] == "Alice Page"
+
+
 def test_import_text_uses_title_and_writes_inside_runtime(settings):
     service = IngestService()
     with get_connection(settings.db_path) as conn:
@@ -297,6 +385,82 @@ def test_pdf_import_extracts_page_text(settings, tmp_path):
     assert row["source_type"] == "pdf"
     assert "Hello PDF world" in row["parsed_text"]
     assert "## Page 1" in row["parsed_text"]
+
+
+def test_pdf_import_records_page_quality_metadata(settings, tmp_path):
+    try:
+        from pypdf import PdfReader, PdfWriter
+        from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
+    except ImportError:
+        pytest.skip("pypdf optional dependency not available")
+
+    def add_text_page(writer: PdfWriter, text_stream: bytes):
+        page = writer.add_blank_page(width=300, height=144)
+        content = DecodedStreamObject()
+        content.set_data(text_stream)
+        content_ref = writer._add_object(content)
+        page[NameObject("/Contents")] = content_ref
+        font_dict = writer._add_object(
+            DictionaryObject(
+                {
+                    NameObject("/Type"): NameObject("/Font"),
+                    NameObject("/Subtype"): NameObject("/Type1"),
+                    NameObject("/BaseFont"): NameObject("/Helvetica"),
+                }
+            )
+        )
+        page[NameObject("/Resources")] = writer._add_object(
+            DictionaryObject(
+                {
+                    NameObject("/Font"): DictionaryObject(
+                        {
+                            NameObject("/F1"): font_dict,
+                        }
+                    )
+                }
+            )
+        )
+        return page
+
+    source = tmp_path / "quality.pdf"
+    writer = PdfWriter()
+    add_text_page(writer, b"BT /F1 12 Tf 14 TL 36 110 Td (First    PDF line) Tj T* (Second PDF line) Tj ET")
+    writer.add_blank_page(width=300, height=144)
+    add_text_page(writer, b"BT /F1 12 Tf 36 100 Td (Third page text) Tj ET")
+    with source.open("wb") as handle:
+        writer.write(handle)
+
+    reader = PdfReader(str(source))
+    extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
+    if "First" not in extracted or "Third page text" not in extracted:
+        pytest.skip("local pypdf build could not extract generated PDF fixture text")
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="pdf",
+        )
+        row = conn.execute(
+            "SELECT parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert "First PDF line" in row["parsed_text"]
+    assert "Second PDF line" in row["parsed_text"]
+    assert "Third page text" in row["parsed_text"]
+    assert "## Page 2" not in row["parsed_text"]
+    assert meta["parser_name"] == "pdf"
+    assert meta["parser_confidence"] == 0.85
+    assert meta["page_count"] == 3
+    assert meta["extracted_page_count"] == 2
+    assert meta["empty_page_numbers"] == [2]
+    assert meta["pages"][1] == {"page_number": 2, "extracted_chars": 0, "empty": True}
 
 
 def test_import_persists_parser_confidence(settings, tmp_path):

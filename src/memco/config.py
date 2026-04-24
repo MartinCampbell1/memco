@@ -73,7 +73,7 @@ class IngestSettings(BaseModel):
     session_gap_minutes: int = 240
     attribution_policy: AttributionPolicy = "owner_first_person_fallback"
     source_types: list[str] = Field(
-        default_factory=lambda: ["note", "chat", "json", "csv", "markdown", "text", "email", "pdf"]
+        default_factory=lambda: ["note", "chat", "json", "csv", "markdown", "text", "email", "pdf", "html"]
     )
 
 

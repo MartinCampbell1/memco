@@ -58,7 +58,9 @@ That means:
 - The current `sources` table remains the underlying storage table for the shipped slice, with `source_documents` as the explicit source-document contract surface.
 - Conversation tables remain an indexed/convenience projection on top of that source-document/source-segment layer.
 - This materially closes the generic source-layer gap for the current architecture, even though broader future ingestion formats may still add more segment types later.
-- Current implemented ingestion sources for the accepted repo-local contract are `text`, `markdown`, `chat`, `json`, `csv`, `email`, and `pdf`.
+- Current implemented ingestion sources for the accepted repo-local contract are `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, and `html`.
+- Markdown parsing stores YAML frontmatter in source metadata while keeping only the body in searchable parsed text.
+- HTML parsing stores page title metadata and searchable visible text while dropping script/style-like noise.
 - `WhatsApp` and `Telegram` parser support remain roadmap/reference-track items, not current repo-local contract claims.
 
 ### LLM / Provider Architecture

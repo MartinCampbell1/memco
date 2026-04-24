@@ -73,7 +73,7 @@ Stage A requires:
 
 Stage A ingestion scope:
 
-- supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`
+- supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`
 - not part of the current repo-local contract: `WhatsApp`, `Telegram`
 - those messenger-specific parsers remain roadmap/reference-track work unless explicitly pulled into scope
 
