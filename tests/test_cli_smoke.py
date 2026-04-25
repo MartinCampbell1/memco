@@ -153,6 +153,243 @@ def test_cli_local_artifacts_refresh_command_returns_nonzero_on_failure(monkeypa
     assert "local artifact refresh failed" in result.output
 
 
+def test_cli_verify_current_status_reports_pytest_count_drift(monkeypatch, settings):
+    docs_dir = settings.root / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "CURRENT_STATUS.md").write_text(
+        "\n".join(
+            [
+                "# Current Status",
+                "Current reproduction path: LOCAL_REPRODUCTION.md.",
+                "Fresh gate evidence for this checkout:",
+                "- `uv run pytest -q`: 605 passed.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    command = get_command(app)
+    monkeypatch.setattr("memco.cli.main._project_root", lambda project_root: settings.root.resolve())
+
+    result = runner.invoke(
+        command,
+        ["verify-current-status", "--project-root", str(settings.root), "--pytest-passed", "606"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    count_check = next(check for check in payload["checks"] if check["name"] == "pytest_count_matches_fresh_input")
+    assert count_check == {
+        "name": "pytest_count_matches_fresh_input",
+        "ok": False,
+        "documented": 605,
+        "fresh": 606,
+        "skipped": False,
+    }
+
+
+def test_cli_verify_current_status_rejects_stale_green_release_artifacts(monkeypatch, settings):
+    docs_dir = settings.root / "docs"
+    reports_dir = settings.root / "var" / "reports"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "CURRENT_STATUS.md").write_text(
+        "\n".join(
+            [
+                "# Current Status",
+                "Current reproduction path: LOCAL_REPRODUCTION.md.",
+                "Fresh gate evidence for this checkout:",
+                "- `uv run pytest -q`: 614 passed.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "personal-memory-eval-current.json",
+        "release-check-current.json",
+        "local-artifacts-refresh-current.json",
+        "release-readiness-check-current.json",
+        "live-operator-smoke-current.json",
+    ):
+        (reports_dir / name).write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    def fake_freshness(payload, *, project_root):
+        _ = payload, project_root
+        return {"status": "stale", "current_for_checkout_config": False}
+
+    runner = CliRunner()
+    command = get_command(app)
+    monkeypatch.setattr("memco.cli.main._project_root", lambda project_root: settings.root.resolve())
+    monkeypatch.setattr("memco.cli.main.evaluate_artifact_freshness", fake_freshness)
+
+    result = runner.invoke(
+        command,
+        ["verify-current-status", "--project-root", str(settings.root), "--pytest-passed", "614"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    artifact_check = next(check for check in payload["checks"] if check["name"] == "current_artifacts_are_fresh")
+    assert artifact_check["ok"] is False
+    assert all(item["exists"] is True for item in artifact_check["artifacts"])
+    assert all(item["ok"] is False for item in artifact_check["artifacts"])
+
+
+def test_cli_verify_current_status_rejects_artifact_count_drift(monkeypatch, settings):
+    docs_dir = settings.root / "docs"
+    reports_dir = settings.root / "var" / "reports"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "CURRENT_STATUS.md").write_text(
+        "\n".join(
+            [
+                "# Current Status",
+                "Current reproduction path: LOCAL_REPRODUCTION.md.",
+                "Fresh gate evidence for this checkout:",
+                "- `uv run pytest -q`: 615 passed.",
+                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this dirty checkout; 839/840 passed.",
+                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this dirty checkout; acceptance 27/27.",
+                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this dirty checkout; full suite 615 passed, contract stack 104 passed, release-check acceptance 27/27.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "personal-memory-eval-current.json").write_text(
+        json.dumps({"ok": True, "passed": 840, "total": 840}),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-check-current.json").write_text(
+        json.dumps({"ok": True, "steps": [{"name": "acceptance_artifact", "artifact_summary": {"passed": 27, "total": 27}}]}),
+        encoding="utf-8",
+    )
+    (reports_dir / "local-artifacts-refresh-current.json").write_text(
+        json.dumps(
+            {
+                "summaries": {
+                    "full_suite": "615 passed in 21.94s",
+                    "contract_stack": "105 passed in 5.10s",
+                    "release_check_acceptance": "27/27",
+                    "release_check_postgres_gate_type": None,
+                    "strict_release_check_gate_type": None,
+                    "live_operator_smoke_current": None,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-readiness-check-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    (reports_dir / "live-operator-smoke-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    runner = CliRunner()
+    command = get_command(app)
+    monkeypatch.setattr("memco.cli.main._project_root", lambda project_root: settings.root.resolve())
+    monkeypatch.setattr(
+        "memco.cli.main.evaluate_artifact_freshness",
+        lambda payload, *, project_root: {"status": "current", "current_for_checkout_config": True},
+    )
+
+    result = runner.invoke(
+        command,
+        ["verify-current-status", "--project-root", str(settings.root), "--pytest-passed", "615"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    personal_check = next(check for check in payload["checks"] if check["name"] == "personal_eval_count_matches_status")
+    local_refresh_check = next(
+        check for check in payload["checks"] if check["name"] == "local_artifacts_refresh_summary_matches_status"
+    )
+    assert personal_check["ok"] is False
+    assert local_refresh_check["ok"] is False
+
+
+def test_cli_verify_current_status_rejects_missing_token_latency_accounting(monkeypatch, settings):
+    docs_dir = settings.root / "docs"
+    reports_dir = settings.root / "var" / "reports"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "CURRENT_STATUS.md").write_text(
+        "\n".join(
+            [
+                "# Current Status",
+                "Current reproduction path: LOCAL_REPRODUCTION.md.",
+                "Fresh gate evidence for this checkout:",
+                "- `uv run pytest -q`: 615 passed.",
+                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this dirty checkout; 840/840 passed.",
+                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this dirty checkout; acceptance 27/27.",
+                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this dirty checkout; full suite 615 passed, contract stack 105 passed, release-check acceptance 27/27.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "personal-memory-eval-current.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "passed": 840,
+                "total": 840,
+                "token_accounting": {"implemented": False, "status": "missing"},
+                "retrieval_latency_ms": {"p50": None, "p95": None},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-check-current.json").write_text(
+        json.dumps({"ok": True, "steps": [{"name": "acceptance_artifact", "artifact_summary": {"passed": 27, "total": 27}}]}),
+        encoding="utf-8",
+    )
+    (reports_dir / "local-artifacts-refresh-current.json").write_text(
+        json.dumps(
+            {
+                "summaries": {
+                    "full_suite": "615 passed in 21.94s",
+                    "contract_stack": "105 passed in 5.10s",
+                    "release_check_acceptance": "27/27",
+                    "release_check_postgres_gate_type": None,
+                    "strict_release_check_gate_type": None,
+                    "live_operator_smoke_current": None,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-readiness-check-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    (reports_dir / "live-operator-smoke-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    runner = CliRunner()
+    command = get_command(app)
+    monkeypatch.setattr("memco.cli.main._project_root", lambda project_root: settings.root.resolve())
+    monkeypatch.setattr(
+        "memco.cli.main.evaluate_artifact_freshness",
+        lambda payload, *, project_root: {"status": "current", "current_for_checkout_config": True},
+    )
+
+    result = runner.invoke(
+        command,
+        ["verify-current-status", "--project-root", str(settings.root), "--pytest-passed", "615"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    token_latency_check = next(
+        check for check in payload["checks"] if check["name"] == "personal_eval_token_latency_accounting_present"
+    )
+    assert token_latency_check == {
+        "name": "personal_eval_token_latency_accounting_present",
+        "ok": False,
+        "artifact": {
+            "token_accounting_implemented": False,
+            "token_accounting_status": "missing",
+            "retrieval_latency_p50": None,
+            "retrieval_latency_p95": None,
+        },
+    }
+
+
 def test_cli_ingest_pipeline_happy_path(settings, tmp_path):
     runner = CliRunner()
     command = get_command(app)
@@ -379,6 +616,115 @@ def test_cli_fact_list_delete_restore(settings):
     assert result.exit_code == 0, result.output
     rolled_back = json.loads(result.output)
     assert rolled_back["status"] == "active"
+
+
+def test_cli_build_life_timeline_returns_active_experience_events(settings):
+    runner = CliRunner()
+    command = get_command(app)
+    source_repo = SourceRepository()
+
+    result = runner.invoke(
+        command,
+        ["person-upsert", "Timeline Alice", "--root", str(settings.root), "--alias", "Alice", "--slug", "timeline-alice"],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+
+    with get_connection(settings.db_path) as conn:
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/timeline-alice.md",
+            source_type="note",
+            origin_uri="/tmp/timeline-alice.md",
+            title="timeline-alice",
+            sha256="timeline-alice-sha",
+            parsed_text="Alice attended PyCon with Bob in May 2024.",
+        )
+
+    result = runner.invoke(
+        command,
+        [
+            "fact-add",
+            "timeline-alice",
+            "experiences",
+            "event",
+            "timeline-alice:experiences:event:pycon-2024",
+            "2026-04-21T10:00:00Z",
+            str(source_id),
+            "--root",
+            str(settings.root),
+            "--payload-json",
+            json.dumps(
+                {
+                    "event": "PyCon",
+                    "event_type": "conference",
+                    "temporal_anchor": "May 2024",
+                    "participants": ["Bob"],
+                    "outcome": "learned to plan rehearsals",
+                    "salience": 0.6,
+                }
+            ),
+            "--summary",
+            "Alice attended PyCon with Bob in May 2024 and learned to plan rehearsals.",
+            "--quote-text",
+            "Alice attended PyCon with Bob in May 2024.",
+        ],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+    pycon_fact = json.loads(result.output)
+
+    result = runner.invoke(
+        command,
+        [
+            "fact-add",
+            "timeline-alice",
+            "experiences",
+            "event",
+            "timeline-alice:experiences:event:accident-2023",
+            "2026-04-21T10:05:00Z",
+            str(source_id),
+            "--root",
+            str(settings.root),
+            "--payload-json",
+            json.dumps(
+                {
+                    "event": "serious car accident",
+                    "event_type": "accident",
+                    "temporal_anchor": "October 2023",
+                    "location": "Grand Canyon",
+                    "outcome": "paused hiking for two months",
+                    "salience": 0.85,
+                }
+            ),
+            "--summary",
+            "Alice had a serious car accident at the Grand Canyon in October 2023 and paused hiking for two months.",
+            "--quote-text",
+            "Alice had a serious car accident at the Grand Canyon in October 2023.",
+        ],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+    accident_fact = json.loads(result.output)
+
+    result = runner.invoke(
+        command,
+        ["build-life-timeline", "timeline-alice", "--root", str(settings.root)],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "life_timeline"
+    assert payload["person_slug"] == "timeline-alice"
+    assert payload["event_count"] == 2
+    assert [event["fact_id"] for event in payload["events"]] == [accident_fact["id"], pycon_fact["id"]]
+    assert [event["temporal_anchor"] for event in payload["events"]] == ["October 2023", "May 2024"]
+    assert payload["events"][0]["event_type"] == "accident"
+    assert payload["events"][1]["event_type"] == "conference"
+    assert payload["events"][1]["participants"] == ["Bob"]
+    assert payload["events"][0]["evidence_ids"] != []
 
 
 def test_cli_conversation_speaker_resolution(settings, tmp_path):

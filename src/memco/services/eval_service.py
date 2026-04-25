@@ -468,6 +468,42 @@ class EvalService:
         "experience_event_retrieval_pass_rate": 0.90,
         "source_hard_case_failures": 0,
     }
+    P1_8_PRIVATE_EVAL_TARGET_COUNTS = {
+        "core_biography": 100,
+        "preference_current_state": 100,
+        "social_graph": 100,
+        "work_project_tool": 100,
+        "experiences_temporal": 150,
+        "adversarial_false_premise": 150,
+        "cross_person_contamination": 50,
+        "update_supersession": 50,
+        "multi_hop": 50,
+    }
+    P1_8_PRIVATE_EVAL_THRESHOLDS = {
+        "overall_accuracy": 0.92,
+        "core_biography_accuracy": 0.96,
+        "preference_current_state_accuracy": 0.95,
+        "work_project_tool_accuracy": 0.95,
+        "social_graph_accuracy": 0.93,
+        "experiences_single_hop_accuracy": 0.93,
+        "temporal_accuracy": 0.90,
+        "adversarial_refusal_accuracy": 0.98,
+        "cross_person_contamination": 0,
+        "unsupported_personal_claims_answered_as_fact": 0,
+    }
+    P2_3_LONG_CORPUS_TARGET_MESSAGE_COUNTS = (50_000, 500_000)
+    P2_3_LONG_CORPUS_REQUIRED_DIMENSIONS = (
+        "mixed_sources",
+        "old_and_new_contradictions",
+        "multiple_people",
+        "repeated_updates",
+        "extraction_cost",
+        "candidate_volume",
+        "fact_growth",
+        "retrieval_latency",
+        "false_positive_retrieval",
+        "refusal_quality",
+    )
     PERSONAL_MEMORY_COVERAGE_GROUPS = {
         "single_hop": {"core_fact", "preference", "speakerless_note"},
         "multi_hop": {"social_family"},
@@ -2100,7 +2136,10 @@ class EvalService:
             failures.append("answer_evidence_ids_missing")
         return {
             "id": case["id"],
+            "conversation_id": case.get("conversation_id"),
             "group": case["group"],
+            "domain": case.get("domain"),
+            "domain_category": case.get("domain_category"),
             "query": case["query"],
             "person_slug": case["person_slug"],
             "passed": not failures,
@@ -2129,6 +2168,150 @@ class EvalService:
         if not selected:
             return 0.0
         return round(sum(1 for item in selected if item["passed"]) / len(selected), 4)
+
+    def _personal_case_count(self, *, cases: list[dict[str, Any]], predicate) -> int:
+        return sum(1 for item in cases if predicate(item))
+
+    def _p1_8_private_eval_target_report(
+        self,
+        *,
+        cases: list[dict[str, Any]],
+        results: list[dict],
+        metrics: dict[str, Any],
+    ) -> dict[str, Any]:
+        def is_core_biography(item: dict[str, Any]) -> bool:
+            return item.get("domain") == "biography" and item.get("group") == "core_fact"
+
+        def is_preference_current_state(item: dict[str, Any]) -> bool:
+            return (
+                item.get("domain") == "preferences"
+                and item.get("domain_category") == "preference"
+                and item.get("group") == "preference"
+            )
+
+        def is_social_graph(item: dict[str, Any]) -> bool:
+            return item.get("domain") == "social_circle" or item.get("group") == "social_family"
+
+        def is_work_project_tool(item: dict[str, Any]) -> bool:
+            return item.get("domain") == "work" and item.get("domain_category") in {"project", "tool"}
+
+        def is_experiences_temporal(item: dict[str, Any]) -> bool:
+            return item.get("domain") == "experiences" or item.get("group") in {"temporal", "rollback_update"}
+
+        def is_experience_single_hop(item: dict[str, Any]) -> bool:
+            return item.get("domain") == "experiences" and item.get("group") == "core_fact"
+
+        def is_multi_hop(item: dict[str, Any]) -> bool:
+            return item.get("group") == "social_family"
+
+        count_predicates = {
+            "core_biography": is_core_biography,
+            "preference_current_state": is_preference_current_state,
+            "social_graph": is_social_graph,
+            "work_project_tool": is_work_project_tool,
+            "experiences_temporal": is_experiences_temporal,
+            "adversarial_false_premise": lambda item: item.get("group") == "adversarial_false_premise",
+            "cross_person_contamination": lambda item: item.get("group") == "cross_person_contamination",
+            "update_supersession": lambda item: item.get("group") == "rollback_update",
+            "multi_hop": is_multi_hop,
+        }
+        count_checks = {
+            name: {
+                "value": self._personal_case_count(cases=cases, predicate=predicate),
+                "required": required,
+                "ok": self._personal_case_count(cases=cases, predicate=predicate) >= required,
+            }
+            for name, required in self.P1_8_PRIVATE_EVAL_TARGET_COUNTS.items()
+            for predicate in (count_predicates[name],)
+        }
+        threshold_values = {
+            "overall_accuracy": metrics["overall_accuracy"],
+            "core_biography_accuracy": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=is_core_biography,
+            ),
+            "preference_current_state_accuracy": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=is_preference_current_state,
+            ),
+            "work_project_tool_accuracy": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=is_work_project_tool,
+            ),
+            "social_graph_accuracy": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=is_social_graph,
+            ),
+            "experiences_single_hop_accuracy": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=is_experience_single_hop,
+            ),
+            "temporal_accuracy": metrics["temporal_accuracy"],
+            "adversarial_refusal_accuracy": metrics["adversarial_robustness"],
+            "cross_person_contamination": metrics["cross_person_contamination"],
+            "unsupported_personal_claims_answered_as_fact": metrics["unsupported_premise_answered_as_fact"],
+        }
+        zero_or_lower = {
+            "cross_person_contamination",
+            "unsupported_personal_claims_answered_as_fact",
+        }
+        threshold_checks = {
+            name: {
+                "value": threshold_values[name],
+                "threshold": threshold,
+                "ok": threshold_values[name] <= threshold if name in zero_or_lower else threshold_values[name] >= threshold,
+            }
+            for name, threshold in self.P1_8_PRIVATE_EVAL_THRESHOLDS.items()
+        }
+        missing_count_targets = [name for name, item in count_checks.items() if not item["ok"]]
+        failed_thresholds = [name for name, item in threshold_checks.items() if not item["ok"]]
+        all_target_counts_met = not missing_count_targets
+        all_thresholds_met = not failed_thresholds
+        return {
+            "scope": "P1.8 private realistic eval target tracking",
+            "benchmark_disclaimer": (
+                "Internal private eval target report from the audit remediation plan; "
+                "not paper-equivalent and not a full P1.8 closure unless ok_for_full_p1_8_claim is true."
+            ),
+            "target_counts": self.P1_8_PRIVATE_EVAL_TARGET_COUNTS,
+            "thresholds": self.P1_8_PRIVATE_EVAL_THRESHOLDS,
+            "count_checks": count_checks,
+            "threshold_checks": threshold_checks,
+            "missing_count_targets": missing_count_targets,
+            "failed_thresholds": failed_thresholds,
+            "all_target_counts_met": all_target_counts_met,
+            "all_thresholds_met": all_thresholds_met,
+            "ok_for_full_p1_8_claim": all_target_counts_met and all_thresholds_met,
+        }
+
+    def _p2_1_external_benchmark_report(self) -> dict[str, Any]:
+        return {
+            "scope": "P2.1 external LoCoMO-like benchmark tracking",
+            "benchmark_disclaimer": (
+                "No public/external LoCoMO benchmark was run in this artifact; "
+                "internal LoCoMO-like fixtures are not paper-equivalent."
+            ),
+            "external_dataset": "not_run",
+            "judge_protocol": "not_run",
+            "compared_systems": {
+                "full_context": "not_run",
+                "embedding_rag": "not_run",
+                "memco_structured_memory": "not_run",
+            },
+            "reported_dimensions": {
+                "single_hop": "internal_only",
+                "multi_hop": "internal_only",
+                "temporal": "internal_only",
+                "open_domain": "internal_only",
+                "adversarial": "internal_only",
+            },
+            "ok_for_pdf_score_claim": False,
+        }
 
     def _source_hard_context(self, case: dict[str, Any]) -> ExtractionContext:
         return ExtractionContext(
@@ -2505,6 +2688,401 @@ class EvalService:
             "ok": ok,
         }
 
+    def _long_corpus_stress_messages(self, *, message_count: int) -> list[dict[str, Any]]:
+        templates = (
+            ("Stress Alice", "I live in Lisbon."),
+            ("Stress Bob", "I live in Porto."),
+            ("Stress Alice", "I prefer coffee."),
+            ("Stress Alice", "I used to prefer tea, but now I prefer coffee."),
+            ("Stress Alice", "In October 2023 I had an accident at the Grand Canyon."),
+            ("Stress Alice", "I worked on Project Atlas with Stress Bob and launched it in March."),
+            ("Stress Carla", "I live in Berlin."),
+            ("Stress Dana", "I prefer sushi."),
+            ("Stress Alice", "My sister is Stress Carla and my best friend is Stress Bob."),
+            ("Stress Evan", "I attended PyCon in 2024."),
+        )
+        messages: list[dict[str, Any]] = []
+        for index in range(max(1, message_count)):
+            speaker, text = templates[index % len(templates)]
+            day = (index % 28) + 1
+            minute = index % 60
+            messages.append(
+                {
+                    "role": "user",
+                    "speaker": speaker,
+                    "timestamp": f"2024-01-{day:02d}T10:{minute:02d}:00Z",
+                    "text": text,
+                    "meta": {"session_uid": f"long-corpus-stress-{index // 25:03d}"},
+                }
+            )
+        return messages
+
+    def _count_workspace_rows(self, conn, *, workspace_id: int, table: str) -> int:
+        if table not in {"memory_facts", "fact_candidates"}:
+            raise ValueError(f"Unsupported stress counter table: {table}")
+        row = conn.execute(f"SELECT COUNT(*) AS count FROM {table} WHERE workspace_id = ?", (workspace_id,)).fetchone()
+        return int(row["count"]) if row is not None else 0
+
+    def _long_corpus_probe_result(self, *, conn, settings, eval_actor, probe: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
+        retrieval = self.retrieval_service.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="long-corpus-stress",
+                person_slug=str(probe["person_slug"]),
+                query=str(probe["query"]),
+                domain=probe.get("domain"),
+                category=probe.get("category"),
+                limit=int(probe.get("limit") or 3),
+                include_fallback=True,
+                temporal_mode=str(probe.get("temporal_mode") or "auto"),
+                actor=eval_actor,
+            ),
+            settings=settings,
+            route_name="long_corpus_stress",
+        )
+        latency_ms = max(0, int((time.perf_counter() - started) * 1000))
+        answer = self.refusal_service.build_answer(query=str(probe["query"]), retrieval_result=retrieval)
+        combined_text = self._combined_case_text(answer=answer, retrieval=retrieval)
+        forbidden_text = self._combined_case_text(answer=answer, retrieval=retrieval, include_answer=not answer.get("refused", False))
+        failures: list[str] = []
+        if bool(answer["refused"]) != bool(probe["expect_refused"]):
+            failures.append("refusal_mismatch")
+        expected_support_level = probe.get("expected_support_level")
+        if expected_support_level and retrieval.support_level != expected_support_level:
+            failures.append("support_level_mismatch")
+        for value in probe.get("expected_values", []):
+            if str(value).lower() not in combined_text:
+                failures.append(f"missing_expected_value:{value}")
+        for value in probe.get("forbidden_values", []):
+            if str(value).lower() in forbidden_text:
+                failures.append(f"forbidden_value_present:{value}")
+        return {
+            "name": str(probe["name"]),
+            "query": str(probe["query"]),
+            "passed": not failures,
+            "failures": failures,
+            "refused": bool(answer["refused"]),
+            "support_level": retrieval.support_level,
+            "hit_count": len(retrieval.hits),
+            "fallback_hit_count": len(retrieval.fallback_hits),
+            "latency_ms": latency_ms,
+            "answer": answer["answer"],
+        }
+
+    def _p2_3_long_corpus_target_report(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        source_types: list[str],
+        person_count: int,
+        extraction_accounting: dict[str, Any],
+        candidates_extracted: int,
+        facts_delta: int,
+        probe_results: list[dict[str, Any]],
+        false_positive_failures: int,
+        refusal_mismatches: int,
+    ) -> dict[str, Any]:
+        message_count = len(messages)
+        message_text = "\n".join(str(item.get("text") or "").lower() for item in messages)
+        extraction_usage = extraction_accounting["production_accounting"]["by_stage"]["extraction"]
+        dimension_checks = {
+            "mixed_sources": {
+                "value": sorted(set(source_types)),
+                "required": "two_or_more_source_types",
+                "ok": len(set(source_types)) >= 2,
+            },
+            "old_and_new_contradictions": {
+                "value": "used to prefer" in message_text and "now i prefer" in message_text,
+                "required": True,
+                "ok": "used to prefer" in message_text and "now i prefer" in message_text,
+            },
+            "multiple_people": {
+                "value": person_count,
+                "required": 2,
+                "ok": person_count >= 2,
+            },
+            "repeated_updates": {
+                "value": sum(1 for item in messages if "used to prefer" in str(item.get("text") or "").lower()),
+                "required": 2,
+                "ok": sum(1 for item in messages if "used to prefer" in str(item.get("text") or "").lower()) >= 2,
+            },
+            "extraction_cost": {
+                "value": extraction_usage["operation_count"],
+                "required": "measured_nonzero",
+                "ok": extraction_usage["operation_count"] > 0,
+            },
+            "candidate_volume": {
+                "value": candidates_extracted,
+                "required": "measured_nonzero",
+                "ok": candidates_extracted > 0,
+            },
+            "fact_growth": {
+                "value": facts_delta,
+                "required": "measured_positive_delta",
+                "ok": facts_delta > 0,
+            },
+            "retrieval_latency": {
+                "value": self._latency_summary([int(item["latency_ms"]) for item in probe_results]),
+                "required": "measured_for_probe_set",
+                "ok": bool(probe_results),
+            },
+            "false_positive_retrieval": {
+                "value": false_positive_failures,
+                "required": 0,
+                "ok": false_positive_failures == 0,
+            },
+            "refusal_quality": {
+                "value": refusal_mismatches,
+                "required": 0,
+                "ok": refusal_mismatches == 0,
+            },
+        }
+        volume_checks = {
+            f"{target}_messages": {
+                "value": message_count,
+                "required": target,
+                "ok": message_count >= target,
+            }
+            for target in self.P2_3_LONG_CORPUS_TARGET_MESSAGE_COUNTS
+        }
+        missing_volume_targets = [name for name, item in volume_checks.items() if not item["ok"]]
+        missing_dimensions = [name for name, item in dimension_checks.items() if not item["ok"]]
+        return {
+            "scope": "P2.3 long-corpus audit target tracking",
+            "benchmark_disclaimer": (
+                "Internal synthetic stress target report; not a full P2.3 closure unless "
+                "ok_for_full_p2_3_claim is true."
+            ),
+            "target_message_counts": list(self.P2_3_LONG_CORPUS_TARGET_MESSAGE_COUNTS),
+            "required_dimensions": list(self.P2_3_LONG_CORPUS_REQUIRED_DIMENSIONS),
+            "volume_checks": volume_checks,
+            "dimension_checks": dimension_checks,
+            "missing_volume_targets": missing_volume_targets,
+            "missing_dimensions": missing_dimensions,
+            "all_volume_targets_met": not missing_volume_targets,
+            "all_dimensions_met": not missing_dimensions,
+            "ok_for_full_p2_3_claim": not missing_volume_targets and not missing_dimensions,
+        }
+
+    def _long_corpus_stress_report(self, project_root: Path, *, message_count: int = 120) -> dict[str, Any]:
+        settings = load_settings(project_root)
+        if settings.is_fixture_runtime:
+            settings.llm.provider = "mock"
+            settings.llm.model = "fixture"
+            settings.llm.allow_mock_provider = True
+        workspace_slug = "long-corpus-stress"
+        person_specs = (
+            ("stress-alice", "Stress Alice"),
+            ("stress-bob", "Stress Bob"),
+            ("stress-carla", "Stress Carla"),
+            ("stress-dana", "Stress Dana"),
+            ("stress-evan", "Stress Evan"),
+        )
+        fact_repo = FactRepository()
+        ingest_service = IngestService()
+        conversation_service = ConversationIngestService()
+        candidate_service = CandidateService(
+            extraction_service=ExtractionService.from_settings(settings, usage_tracker=self.llm_usage_tracker)
+        )
+        publish_service = PublishService()
+        messages = self._long_corpus_stress_messages(message_count=message_count)
+        extraction_start_index = len(self.llm_usage_tracker.events)
+        with get_connection(settings.db_path) as conn:
+            workspace_id = fact_repo.ensure_workspace(conn, workspace_slug)
+            for slug, display_name in person_specs:
+                fact_repo.upsert_person(
+                    conn,
+                    workspace_slug=workspace_slug,
+                    display_name=display_name,
+                    slug=slug,
+                    person_type="human",
+                    aliases=[display_name],
+                )
+            facts_before = self._count_workspace_rows(conn, workspace_id=workspace_id, table="memory_facts")
+            candidates_before = self._count_workspace_rows(conn, workspace_id=workspace_id, table="fact_candidates")
+            imported = ingest_service.import_text(
+                settings,
+                conn,
+                workspace_slug=workspace_slug,
+                text=json.dumps(messages, ensure_ascii=False),
+                title="long-corpus-stress-json",
+                source_type="json",
+            )
+            conversation = conversation_service.import_conversation(
+                settings,
+                conn,
+                workspace_slug=workspace_slug,
+                source_id=imported.source_id,
+                conversation_uid="long-corpus-stress",
+                title="Long corpus stress fixture",
+            )
+            candidates = candidate_service.extract_from_conversation(
+                conn,
+                workspace_slug=workspace_slug,
+                conversation_id=conversation.conversation_id,
+                attribution_policy=settings.ingest.attribution_policy,
+            )
+            published: list[dict[str, Any]] = []
+            publish_errors: list[dict[str, Any]] = []
+            for candidate in candidates:
+                if candidate["candidate_status"] != "validated_candidate":
+                    continue
+                try:
+                    published.append(
+                        publish_service.publish_candidate(
+                            conn,
+                            workspace_slug=workspace_slug,
+                            candidate_id=int(candidate["id"]),
+                        )
+                    )
+                except ValueError as exc:
+                    publish_errors.append({"candidate_id": int(candidate["id"]), "error": str(exc)})
+            facts_after = self._count_workspace_rows(conn, workspace_id=workspace_id, table="memory_facts")
+            candidates_after = self._count_workspace_rows(conn, workspace_id=workspace_id, table="fact_candidates")
+            extraction_accounting = self.llm_usage_tracker.summary(start_index=extraction_start_index)
+            retrieval_start_index = len(self.llm_usage_tracker.events)
+            eval_actor = build_internal_actor(settings, actor_id="eval-runner")
+            probes = [
+                {
+                    "name": "supported_current_residence",
+                    "person_slug": "stress-alice",
+                    "query": "Where does Stress Alice live?",
+                    "domain": "biography",
+                    "category": "residence",
+                    "expected_values": ["Lisbon"],
+                    "forbidden_values": ["Berlin"],
+                    "expect_refused": False,
+                    "expected_support_level": "supported",
+                },
+                {
+                    "name": "false_premise_cross_person_residence",
+                    "person_slug": "stress-alice",
+                    "query": "Does Stress Alice live in Berlin?",
+                    "domain": "biography",
+                    "category": "residence",
+                    "expected_values": ["do not"],
+                    "forbidden_values": ["yes", "Stress Alice lives in Berlin"],
+                    "expect_refused": True,
+                },
+                {
+                    "name": "experience_location",
+                    "person_slug": "stress-alice",
+                    "query": "Where did Stress Alice have the accident?",
+                    "domain": "experiences",
+                    "category": "event",
+                    "expected_values": ["Grand Canyon"],
+                    "expect_refused": False,
+                    "expected_support_level": "supported",
+                },
+                {
+                    "name": "work_outcome",
+                    "person_slug": "stress-alice",
+                    "query": "What did Stress Alice accomplish?",
+                    "domain": "work",
+                    "expected_values": ["Project Atlas", "launched"],
+                    "expect_refused": False,
+                    "expected_support_level": "supported",
+                },
+                {
+                    "name": "social_relation",
+                    "person_slug": "stress-alice",
+                    "query": "Who is Stress Alice's best friend?",
+                    "domain": "social_circle",
+                    "expected_values": ["Stress Bob"],
+                    "expect_refused": False,
+                    "expected_support_level": "supported",
+                },
+            ]
+            probe_results = [
+                self._long_corpus_probe_result(
+                    conn=conn,
+                    settings=settings,
+                    eval_actor=eval_actor,
+                    probe=probe,
+                )
+                for probe in probes
+            ]
+            retrieval_accounting = self.llm_usage_tracker.summary(start_index=retrieval_start_index)
+        extraction_usage = extraction_accounting["production_accounting"]["by_stage"]["extraction"]
+        candidate_status_counts = {
+            status: sum(1 for item in candidates if item["candidate_status"] == status)
+            for status in sorted({str(item["candidate_status"]) for item in candidates})
+        }
+        false_positive_failures = sum(
+            1
+            for item in probe_results
+            if any(str(failure).startswith("forbidden_value_present:") for failure in item["failures"])
+        )
+        refusal_mismatches = sum(1 for item in probe_results if "refusal_mismatch" in item["failures"])
+        ok = (
+            conversation.message_count == len(messages)
+            and conversation.chunk_count > 1
+            and len(candidates) > 0
+            and facts_after > facts_before
+            and not publish_errors
+            and all(item["passed"] for item in probe_results)
+            and extraction_usage["operation_count"] > 0
+        )
+        return {
+            "scope": "internal synthetic long-corpus stress smoke",
+            "benchmark_disclaimer": "Internal synthetic stress; not LoCoMo paper-equivalent and not a 50k/500k-message claim.",
+            "ok": ok,
+            "limits": {
+                "messages_tested": len(messages),
+                "full_50k_or_500k_corpus_tested": False,
+                "storage_engine": settings.storage.engine,
+                "runtime_profile": settings.runtime.profile,
+            },
+            "source_volume": {
+                "source_count": 1,
+                "source_types": ["json"],
+                "person_count": len(person_specs),
+                "message_count": conversation.message_count,
+                "chunk_count": conversation.chunk_count,
+                "session_count": conversation.session_count,
+            },
+            "candidate_volume": {
+                "before": candidates_before,
+                "after": candidates_after,
+                "delta": candidates_after - candidates_before,
+                "extracted_total": len(candidates),
+                "status_counts": candidate_status_counts,
+                "published_count": len(published),
+                "publish_error_count": len(publish_errors),
+                "publish_errors": publish_errors[:10],
+            },
+            "fact_growth": {
+                "before": facts_before,
+                "after": facts_after,
+                "delta": facts_after - facts_before,
+            },
+            "extraction_cost": {
+                "token_accounting": extraction_accounting,
+                "candidate_count": extraction_accounting["production_accounting"]["amortized_extraction"]["candidate_count"],
+            },
+            "retrieval_probe_quality": {
+                "total": len(probe_results),
+                "passed": sum(1 for item in probe_results if item["passed"]),
+                "false_positive_retrieval_failures": false_positive_failures,
+                "refusal_mismatches": refusal_mismatches,
+                "latency_ms": self._latency_summary([int(item["latency_ms"]) for item in probe_results]),
+                "token_accounting": retrieval_accounting,
+                "probes": probe_results,
+            },
+            "p2_3_target_report": self._p2_3_long_corpus_target_report(
+                messages=messages,
+                source_types=["json"],
+                person_count=len(person_specs),
+                extraction_accounting=extraction_accounting,
+                candidates_extracted=len(candidates),
+                facts_delta=facts_after - facts_before,
+                probe_results=probe_results,
+                false_positive_failures=false_positive_failures,
+                refusal_mismatches=refusal_mismatches,
+            ),
+        }
+
     def _personal_metrics(
         self,
         *,
@@ -2513,6 +3091,7 @@ class EvalService:
         results: list[dict],
         source_hard_checks: list[dict],
         start_event_index: int,
+        long_corpus_stress: dict[str, Any],
     ) -> dict:
         unsupported_premise_answered_as_fact = sum(
             1
@@ -2678,6 +3257,11 @@ class EvalService:
                     "required": locomo_like_suite["total_case_count"],
                     "ok": locomo_like_suite["all_cases_linked_to_conversations"],
                 },
+                "long_corpus_stress_smoke": {
+                    "value": long_corpus_stress["source_volume"]["message_count"],
+                    "required": long_corpus_stress["limits"]["messages_tested"],
+                    "ok": bool(long_corpus_stress["ok"]),
+                },
             }
         )
         latencies = [int(item["latency_ms"]) for item in results]
@@ -2685,6 +3269,11 @@ class EvalService:
             "metrics": metrics,
             "policy_checks": checks,
             "dataset_count_checks": count_checks,
+            "p1_8_private_eval_target_report": self._p1_8_private_eval_target_report(
+                cases=cases,
+                results=results,
+                metrics=metrics,
+            ),
             "coverage": coverage,
             "locomo_like_scope": {
                 "benchmark_disclaimer": "Internal LoCoMo-like personal-memory eval; not paper-equivalent.",
@@ -2702,6 +3291,8 @@ class EvalService:
                     ],
                 },
             },
+            "p2_1_external_benchmark_report": self._p2_1_external_benchmark_report(),
+            "long_corpus_stress": long_corpus_stress,
             "source_hard_checks_total": len(source_hard_checks),
             "source_hard_checks_passed": sum(1 for item in source_hard_checks if item["passed"]),
             "source_hard_checks": source_hard_checks,
@@ -2729,6 +3320,7 @@ class EvalService:
                 for case in cases
             ]
         results.sort(key=lambda item: (item["group"], item["id"]))
+        long_corpus_stress = self._long_corpus_stress_report(project_root)
         memory_evolution_checks = self._personal_memory_evolution_report(project_root)
         source_hard_checks = self._personal_source_hard_checks(cases)
         summary = self._personal_metrics(
@@ -2737,6 +3329,7 @@ class EvalService:
             results=results,
             source_hard_checks=source_hard_checks,
             start_event_index=start_event_index,
+            long_corpus_stress=long_corpus_stress,
         )
         summary["policy_checks"]["memory_evolution_update_fidelity"] = {
             "value": memory_evolution_checks["passed"],

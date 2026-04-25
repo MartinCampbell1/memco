@@ -45,8 +45,11 @@ FIELD_BOOSTS = {
         "spouse": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
         "wife": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
         "husband": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "best_friend": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
         "colleague": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
         "manager": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "client": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
+        "acquaintance": ("target_label", "relation", "aliases", "valence", "relation_type", "related_person_name"),
         "relationship_event": ("target_label", "event", "context", "valence", "relation_type", "related_person_name"),
     },
     "work": {
@@ -54,12 +57,30 @@ FIELD_BOOSTS = {
         "engagement": ("engagement", "role", "org", "client", "status", "team", "outcomes"),
         "role": ("role", "status"),
         "org": ("org", "client", "status"),
-        "project": ("project", "role", "org", "outcomes", "status", "team"),
+        "project": ("project", "role", "org", "outcomes", "tasks", "collaborators", "status", "team"),
         "skill": ("skill",),
         "tool": ("tool",),
     },
     "experiences": {
-        "event": ("event", "summary", "participants", "outcome", "lesson", "event_at", "date_range", "location", "valence", "intensity", "recurrence", "linked_persons", "linked_projects"),
+        "event": (
+            "event",
+            "event_type",
+            "summary",
+            "participants",
+            "outcome",
+            "lesson",
+            "event_at",
+            "date_range",
+            "temporal_anchor",
+            "location",
+            "valence",
+            "intensity",
+            "salience",
+            "recurrence",
+            "linked_persons",
+            "linked_projects",
+            "event_hierarchy",
+        ),
     },
 }
 
@@ -121,6 +142,8 @@ class RetrievalRepository:
         for row in rows:
             item = dict(row)
             payload = json.loads(item.pop("payload_json") or "{}")
+            if temporal_mode == "current" and payload.get("is_current") is False:
+                continue
             evidence_rows = conn.execute(
                 """
                 SELECT id AS evidence_id, source_id, chunk_id, source_segment_id, session_id, quote_text, locator_json, support_type, source_confidence

@@ -76,13 +76,73 @@ def validate_source_type(source_type: str | None, *, supported_types: set[str] |
     return normalized
 
 
+def _message_locator(*, path: Path, message: dict, index: int, parsed_text: str, search_from: int) -> tuple[dict, int]:
+    meta = dict(message.get("meta") or {})
+    message_id = str(meta.get("message_id") or "").strip()
+    source_segment = f"message:{message_id or index}"
+    locator = dict(meta.get("locator") or {})
+    locator.update(
+        {
+            "file": str(path),
+            "message_index": index,
+        }
+    )
+    if message_id:
+        locator["message_id"] = message_id
+    text = str(message.get("text") or "")
+    if text:
+        start = parsed_text.find(text, search_from)
+        if start < 0:
+            start = parsed_text.find(text)
+        if start >= 0:
+            locator["char_start"] = start
+            locator["char_end"] = start + len(text)
+            search_from = locator["char_end"]
+    meta.update(
+        {
+            "source_document": str(path),
+            "source_segment": source_segment,
+            "locator": locator,
+        }
+    )
+    return {**message, "meta": meta}, search_from
+
+
+def _attach_source_metadata(parsed: ParsedDocument, *, path: Path) -> ParsedDocument:
+    metadata = dict(parsed.metadata)
+    metadata["source_document"] = str(path)
+    messages = metadata.get("messages")
+    if isinstance(messages, list):
+        enriched_messages = []
+        search_from = 0
+        for index, item in enumerate(messages):
+            if not isinstance(item, dict):
+                enriched_messages.append(item)
+                continue
+            enriched, search_from = _message_locator(
+                path=path,
+                message=item,
+                index=index,
+                parsed_text=parsed.text,
+                search_from=search_from,
+            )
+            enriched_messages.append(enriched)
+        metadata["messages"] = enriched_messages
+    return ParsedDocument(
+        text=parsed.text,
+        parser_name=parsed.parser_name,
+        confidence=parsed.confidence,
+        metadata=metadata,
+    )
+
+
 def parse_document(path: Path, *, source_type: str | None = None) -> ParsedDocument:
     if source_type is not None:
         normalized_type = validate_source_type(source_type)
         parser = SOURCE_TYPE_PARSERS[normalized_type]
     else:
         parser = DEFAULT_PARSERS.get(path.suffix.lower(), TextParser())
-    return parser.parse(path)
+    return _attach_source_metadata(parser.parse(path), path=path)
 
 
 def parse_document_for_settings(settings, path: Path, *, source_type: str) -> ParsedDocument:
@@ -92,10 +152,10 @@ def parse_document_for_settings(settings, path: Path, *, source_type: str) -> Pa
             date_order=str(getattr(settings.ingest, "whatsapp_date_order", "DMY")),
             tz=_timezone_from_settings(settings),
         )
-        return parser.parse(path)
+        return _attach_source_metadata(parser.parse(path), path=path)
     if normalized_type == "pdf":
         parser = PdfParser(ocr_enabled=bool(getattr(settings.ingest, "pdf_ocr_enabled", False)))
-        return parser.parse(path)
+        return _attach_source_metadata(parser.parse(path), path=path)
     return parse_document(path, source_type=normalized_type)
 
 
@@ -142,11 +202,14 @@ class IngestService:
             },
         )
         page_segments = parsed.metadata.get("page_segments") if isinstance(parsed.metadata.get("page_segments"), list) else None
+        document_segments = (
+            parsed.metadata.get("document_segments") if isinstance(parsed.metadata.get("document_segments"), list) else None
+        )
         self.source_repository.replace_chunks(
             conn,
             source_id=source_id,
             parsed_text=parsed_text,
-            segments=page_segments,
+            segments=page_segments or document_segments,
         )
         return ImportResult(
             source_id=source_id,
@@ -165,17 +228,36 @@ class IngestService:
         copied = raw_dir / filename
         copied.write_text(text, encoding="utf-8")
         parsed_text = text
+        origin_uri = f"inline://{slugify(safe_title)}"
         normalized_path = copied.with_name(f"{copied.stem}-normalized.md")
         normalized_path.write_text(
             render_normalized_markdown(source_type, copied, parsed_text),
             encoding="utf-8",
+        )
+        document_segments = (
+            [
+                {
+                    "segment_type": "inline_note",
+                    "segment_index": 0,
+                    "section_title": safe_title,
+                    "text": parsed_text,
+                    "locator": {
+                        "file": str(copied),
+                        "origin_uri": origin_uri,
+                        "char_start": 0,
+                        "char_end": len(parsed_text),
+                    },
+                }
+            ]
+            if parsed_text
+            else None
         )
         source_id = self.source_repository.record_source(
             conn,
             workspace_slug=workspace_slug,
             source_path=str(copied),
             source_type=source_type,
-            origin_uri=f"inline://{slugify(safe_title)}",
+            origin_uri=origin_uri,
             title=safe_title,
             sha256=sha256_file(copied),
             parsed_text=parsed_text,
@@ -183,9 +265,16 @@ class IngestService:
                 "normalized_path": str(normalized_path),
                 "parser_name": "inline",
                 "parser_confidence": 1.0,
+                "source_document": str(copied),
+                "document_segments": document_segments or [],
             },
         )
-        self.source_repository.replace_chunks(conn, source_id=source_id, parsed_text=parsed_text)
+        self.source_repository.replace_chunks(
+            conn,
+            source_id=source_id,
+            parsed_text=parsed_text,
+            segments=document_segments,
+        )
         return ImportResult(
             source_id=source_id,
             source_path=str(copied),

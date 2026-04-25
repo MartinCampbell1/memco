@@ -40,9 +40,9 @@ class RetrievalService:
     NON_FACTUAL_DOMAINS = {"style", "psychometrics"}
     RESIDENCE_FIELDS = ("city", "place")
     ORG_FIELDS = ("org", "company", "employer")
-    WORK_VALUE_FIELDS = ("tool", "skill", "project", "engagement", "org", "title", "role")
+    WORK_VALUE_FIELDS = ("tool", "skill", "project", "engagement", "org", "title", "role", "collaborators", "tasks", "outcomes")
     PREFERENCE_FIELDS = ("value",)
-    EVENT_FIELDS = ("event",)
+    EVENT_FIELDS = ("event", "event_type")
     YES_NO_PREFIXES = (
         "do",
         "does",
@@ -466,11 +466,17 @@ class RetrievalService:
             deduped_hits.append(hit)
         deduped_hits = self._filter_sensitive_hits(actor=actor, hits=deduped_hits)
         if planner.temporal_mode == "history":
-            historical_hits = [hit for hit in deduped_hits if hit.get("status") == "superseded"]
+            historical_hits = [
+                hit
+                for hit in deduped_hits
+                if hit.get("status") == "superseded" or hit.get("payload", {}).get("is_current") is False
+            ]
             if historical_hits:
                 deduped_hits = historical_hits
+        deduped_hits = self._filter_event_hits_for_requested_event(planner=planner, hits=deduped_hits)
         hits = deduped_hits[: payload.limit]
         hits = self._filter_relationship_hits_for_requested_relation(planner=planner, hits=hits)
+        hits = self._filter_close_people_hits(query=payload.query, hits=hits)
         hits = self._dedupe_relationship_mirror_hits(hits=hits)
         hits, multi_hop_unsupported_claims = self._augment_relationship_residence_hits(
             conn,
@@ -671,6 +677,55 @@ class RetrievalService:
             if target_label and target_label in requested_targets:
                 filtered.append(hit)
         return filtered
+
+    def _close_people_requested(self, query: str) -> bool:
+        return re.search(r"\bclose\s+people\b|\bclose\s+friend(?:s)?\b", query, re.IGNORECASE) is not None
+
+    def _is_close_relationship_hit(self, hit: dict) -> bool:
+        if hit.get("domain") != "social_circle":
+            return False
+        payload = hit.get("payload", {})
+        relation = str(payload.get("relation") or hit.get("category") or "").lower().replace("-", "_")
+        if relation == "best_friend":
+            return True
+        closeness = payload.get("closeness")
+        if isinstance(closeness, (int, float)) and closeness >= 0.7:
+            return True
+        summary = str(hit.get("summary") or "").lower()
+        return "close friend" in summary or "best friend" in summary
+
+    def _filter_close_people_hits(self, *, query: str, hits: list[dict]) -> list[dict]:
+        if not self._close_people_requested(query):
+            return hits
+        close_hits = [hit for hit in hits if self._is_close_relationship_hit(hit)]
+        return close_hits or hits
+
+    def _filter_event_hits_for_requested_event(self, *, planner: RetrievalPlan, hits: list[dict]) -> list[dict]:
+        event_checks = [
+            self._normalize_person_label(check.value)
+            for check in planner.claim_checks
+            if check.claim_type == "event" and self._normalize_person_label(check.value)
+        ]
+        if not event_checks:
+            return hits
+        if not any(domain_query.domain == "experiences" for domain_query in planner.domain_queries):
+            return hits
+        matched: list[dict] = []
+        for hit in hits:
+            if hit.get("domain") != "experiences" or hit.get("category") != "event":
+                matched.append(hit)
+                continue
+            haystack = self._normalize_person_label(
+                " ".join(
+                    [
+                        str(hit.get("summary") or ""),
+                        " ".join(str(value) for value in hit.get("payload", {}).values()),
+                    ]
+                )
+            )
+            if any(event_check in haystack for event_check in event_checks):
+                matched.append(hit)
+        return matched or hits
 
     def _relationship_hit_target(self, hit: dict) -> str:
         payload = hit.get("payload", {})

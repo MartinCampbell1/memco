@@ -262,6 +262,52 @@ def test_planner_uses_provider_structured_output_for_multi_domain_question():
     assert "must_not_answer_without_evidence" in seen["prompt"]
 
 
+def test_planner_hybrid_skips_provider_for_high_confidence_single_hop_question():
+    def handler(**_kwargs):
+        raise AssertionError("provider should not be called for high-confidence single-hop planning")
+
+    planner = PlannerService(llm_provider=MockLLMProvider(json_handler=handler))
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"))
+
+    assert plan.plan_version == "v2"
+    assert [(item.domain, item.category) for item in plan.domain_queries] == [("biography", "residence")]
+
+
+def test_planner_hybrid_uses_provider_for_low_confidence_question():
+    seen: dict[str, str] = {}
+
+    def handler(**kwargs):
+        seen["prompt"] = kwargs["prompt"]
+        return {
+            "target_person": "alice",
+            "domains": [
+                {
+                    "domain": "biography",
+                    "categories": ["residence"],
+                    "field_query": "Tell me Alice's home base",
+                    "reason": "provider resolved vague home-base wording to residence",
+                    "priority": 1,
+                }
+            ],
+            "claim_checks": [],
+            "temporal_mode": "current",
+            "false_premise_risk": "low",
+            "requires_temporal_reasoning": False,
+            "requires_cross_domain_synthesis": False,
+            "must_not_answer_without_evidence": True,
+            "question_type": "single_hop",
+        }
+
+    planner = PlannerService(llm_provider=MockLLMProvider(json_handler=handler))
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Tell me Alice's home base"))
+
+    assert plan.plan_version == "v2_llm"
+    assert [(item.domain, item.category) for item in plan.domain_queries] == [("biography", "residence")]
+    assert "available_domains" in seen["prompt"]
+
+
 def test_planner_drops_provider_question_phrase_claim_checks():
     planner = PlannerService(
         llm_provider=MockLLMProvider(
@@ -284,7 +330,8 @@ def test_planner_drops_provider_question_phrase_claim_checks():
                 "must_not_answer_without_evidence": True,
                 "question_type": "single_hop",
             }
-        )
+        ),
+        llm_mode="always",
     )
 
     plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"))
@@ -315,7 +362,8 @@ def test_planner_drops_provider_answer_slot_claim_checks():
                 "must_not_answer_without_evidence": True,
                 "question_type": "single_hop",
             }
-        )
+        ),
+        llm_mode="always",
     )
 
     plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"))
@@ -346,7 +394,8 @@ def test_planner_guards_obvious_single_hop_domain_when_provider_misroutes():
                 "must_not_answer_without_evidence": True,
                 "question_type": "single_hop",
             }
-        )
+        ),
+        llm_mode="always",
     )
 
     plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"))
@@ -366,7 +415,8 @@ def test_planner_bad_provider_output_fails_closed_by_default():
                 "temporal_mode": "auto",
                 "must_not_answer_without_evidence": True,
             }
-        )
+        ),
+        llm_mode="always",
     )
 
     plan = planner.plan(
@@ -448,6 +498,7 @@ def test_planner_extracts_tool_false_premise_claim_check():
         "What event happened to Alice in October 2023?",
         "When did Alice have the accident?",
         "Why did Alice pause pottery?",
+        "What did Alice learn from PyCon?",
         "Was Alice in a ski accident?",
     ],
 )

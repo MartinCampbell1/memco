@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from shlex import quote
 from tempfile import TemporaryDirectory
@@ -10,7 +11,7 @@ from urllib.parse import urlsplit, urlunsplit
 import typer
 
 from memco.api.deps import build_internal_actor
-from memco.artifact_semantics import attach_artifact_context
+from memco.artifact_semantics import attach_artifact_context, evaluate_artifact_freshness
 from memco.config import SQLITE_FALLBACK_ENGINE, Settings, load_settings, write_settings
 from memco.db import get_connection
 from memco.models.candidate import CandidateListRequest
@@ -397,6 +398,206 @@ def doctor_command(
 ) -> None:
     resolved_project_root = _project_root(project_root)
     result = _doctor_report(resolved_project_root)
+    _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
+
+
+@app.command(
+    "verify-current-status",
+    help="Validate docs/CURRENT_STATUS.md against fresh local proof and current artifact freshness.",
+)
+def verify_current_status_command(
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    pytest_passed: int | None = typer.Option(None, help="Fresh pytest passed count to compare with docs/CURRENT_STATUS.md."),
+    output: str | None = typer.Option(None, help="Optional file path to save the verification artifact JSON."),
+) -> None:
+    resolved_project_root = _project_root(project_root)
+    status_path = resolved_project_root / "docs" / "CURRENT_STATUS.md"
+    reports_dir = resolved_project_root / "var" / "reports"
+    status_text = status_path.read_text(encoding="utf-8") if status_path.exists() else ""
+    checks: list[dict] = [
+        {"name": "current_status_exists", "ok": status_path.exists(), "path": str(status_path)},
+        {
+            "name": "current_status_points_to_reproduction",
+            "ok": all(marker in status_text for marker in ("LOCAL_REPRODUCTION.md", "Fresh gate evidence", "uv run pytest -q")),
+        },
+    ]
+    pytest_match = re.search(r"`uv run pytest -q`:\s*(?P<count>\d+)\s+passed", status_text)
+    documented_pytest_passed = int(pytest_match.group("count")) if pytest_match else None
+    checks.append(
+        {
+            "name": "pytest_count_matches_fresh_input",
+            "ok": pytest_passed is None or documented_pytest_passed == pytest_passed,
+            "documented": documented_pytest_passed,
+            "fresh": pytest_passed,
+            "skipped": pytest_passed is None,
+        }
+    )
+    artifact_reports = []
+    artifact_payloads: dict[str, dict] = {}
+    for name in (
+        "personal-memory-eval-current.json",
+        "release-check-current.json",
+        "local-artifacts-refresh-current.json",
+        "release-readiness-check-current.json",
+        "live-operator-smoke-current.json",
+    ):
+        path = reports_dir / name
+        if not path.exists():
+            artifact_reports.append({"name": name, "exists": False, "ok": False, "freshness": {"status": "missing"}})
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            artifact_payloads[name] = payload
+            freshness = evaluate_artifact_freshness(payload, project_root=resolved_project_root)
+        except Exception as exc:
+            freshness = {"status": "invalid", "reason": str(exc)}
+        artifact_reports.append(
+            {
+                "name": name,
+                "exists": True,
+                "ok": freshness.get("current_for_checkout_config") is True,
+                "freshness": freshness,
+            }
+        )
+    checks.append(
+        {
+            "name": "current_artifacts_are_fresh",
+            "ok": all(item.get("ok") is True for item in artifact_reports),
+            "artifacts": artifact_reports,
+        }
+    )
+    personal_eval_match = re.search(
+        r"personal-memory-eval-current\.json`:[^\n]*?(?P<passed>\d+)\s*/\s*(?P<total>\d+)\s+passed",
+        status_text,
+    )
+    personal_payload = artifact_payloads.get("personal-memory-eval-current.json", {})
+    checks.append(
+        {
+            "name": "personal_eval_count_matches_status",
+            "ok": personal_eval_match is not None
+            and personal_payload.get("passed") == int(personal_eval_match.group("passed"))
+            and personal_payload.get("total") == int(personal_eval_match.group("total")),
+            "documented": (
+                {
+                    "passed": int(personal_eval_match.group("passed")),
+                    "total": int(personal_eval_match.group("total")),
+                }
+                if personal_eval_match
+                else None
+            ),
+            "artifact": {
+                "passed": personal_payload.get("passed"),
+                "total": personal_payload.get("total"),
+            },
+        }
+    )
+    token_accounting = personal_payload.get("token_accounting", {})
+    retrieval_latency = personal_payload.get("retrieval_latency_ms", {})
+    checks.append(
+        {
+            "name": "personal_eval_token_latency_accounting_present",
+            "ok": token_accounting.get("implemented") is True
+            and token_accounting.get("status") == "tracked"
+            and isinstance(retrieval_latency.get("p50"), (int, float))
+            and isinstance(retrieval_latency.get("p95"), (int, float)),
+            "artifact": {
+                "token_accounting_implemented": token_accounting.get("implemented"),
+                "token_accounting_status": token_accounting.get("status"),
+                "retrieval_latency_p50": retrieval_latency.get("p50"),
+                "retrieval_latency_p95": retrieval_latency.get("p95"),
+            },
+        }
+    )
+    release_payload = artifact_payloads.get("release-check-current.json", {})
+    release_acceptance = None
+    for step in release_payload.get("steps", []):
+        if step.get("name") == "acceptance_artifact":
+            summary = step.get("artifact_summary", {})
+            release_acceptance = {"passed": summary.get("passed"), "total": summary.get("total")}
+            break
+    release_acceptance_match = re.search(
+        r"release-check-current\.json`:[^\n]*?acceptance\s+(?P<passed>\d+)\s*/\s*(?P<total>\d+)",
+        status_text,
+    )
+    checks.append(
+        {
+            "name": "release_check_acceptance_matches_status",
+            "ok": release_acceptance_match is not None
+            and release_acceptance == {
+                "passed": int(release_acceptance_match.group("passed")),
+                "total": int(release_acceptance_match.group("total")),
+            },
+            "documented": (
+                {
+                    "passed": int(release_acceptance_match.group("passed")),
+                    "total": int(release_acceptance_match.group("total")),
+                }
+                if release_acceptance_match
+                else None
+            ),
+            "artifact": release_acceptance,
+        }
+    )
+    local_refresh_payload = artifact_payloads.get("local-artifacts-refresh-current.json", {})
+    local_summaries = local_refresh_payload.get("summaries", {})
+    local_refresh_match = re.search(
+        r"local-artifacts-refresh-current\.json`:[^\n]*?"
+        r"full suite\s+(?P<full>\d+)\s+passed,\s+"
+        r"contract stack\s+(?P<contract>\d+)\s+passed,\s+"
+        r"release-check acceptance\s+(?P<acceptance_passed>\d+)\s*/\s*(?P<acceptance_total>\d+)",
+        status_text,
+    )
+    expected_full = f"{local_refresh_match.group('full')} passed" if local_refresh_match else None
+    expected_contract = f"{local_refresh_match.group('contract')} passed" if local_refresh_match else None
+    expected_acceptance = (
+        f"{local_refresh_match.group('acceptance_passed')}/{local_refresh_match.group('acceptance_total')}"
+        if local_refresh_match
+        else None
+    )
+    checks.append(
+        {
+            "name": "local_artifacts_refresh_summary_matches_status",
+            "ok": local_refresh_match is not None
+            and str(local_summaries.get("full_suite", "")).startswith(expected_full or "")
+            and str(local_summaries.get("contract_stack", "")).startswith(expected_contract or "")
+            and local_summaries.get("release_check_acceptance") == expected_acceptance,
+            "documented": (
+                {
+                    "full_suite": expected_full,
+                    "contract_stack": expected_contract,
+                    "release_check_acceptance": expected_acceptance,
+                }
+                if local_refresh_match
+                else None
+            ),
+            "artifact": {
+                "full_suite": local_summaries.get("full_suite"),
+                "contract_stack": local_summaries.get("contract_stack"),
+                "release_check_acceptance": local_summaries.get("release_check_acceptance"),
+            },
+        }
+    )
+    checks.append(
+        {
+            "name": "local_refresh_does_not_claim_postgres_or_live_smoke",
+            "ok": local_summaries.get("release_check_postgres_gate_type") is None
+            and local_summaries.get("strict_release_check_gate_type") is None
+            and local_summaries.get("live_operator_smoke_current") is None,
+            "artifact": {
+                "release_check_postgres_gate_type": local_summaries.get("release_check_postgres_gate_type"),
+                "strict_release_check_gate_type": local_summaries.get("strict_release_check_gate_type"),
+                "live_operator_smoke_current": local_summaries.get("live_operator_smoke_current"),
+            },
+        }
+    )
+    result = {
+        "artifact_type": "current_status_verification",
+        "project_root": str(resolved_project_root),
+        "ok": all(check["ok"] for check in checks),
+        "checks": checks,
+    }
     _emit_json_artifact(result, output=output)
     if not result["ok"]:
         raise typer.Exit(code=1)
@@ -1287,6 +1488,110 @@ def fact_list_command(
             domain=payload.domain,
             limit=payload.limit,
         )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+TIMELINE_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+
+
+def _timeline_temporal_sort_key(*values: str, fact_id: int) -> tuple[int, int, int, int]:
+    text = " ".join(value for value in values if value).strip()
+    iso_match = re.search(r"\b(?P<year>(?:19|20)\d{2})-(?P<month>\d{2})-(?P<day>\d{2})\b", text)
+    if iso_match:
+        return (int(iso_match.group("year")), int(iso_match.group("month")), int(iso_match.group("day")), fact_id)
+    month_match = re.search(
+        r"\b(?P<month>January|February|March|April|May|June|July|August|September|October|November|December)\s+"
+        r"(?P<year>(?:19|20)\d{2})\b",
+        text,
+        re.IGNORECASE,
+    )
+    if month_match:
+        return (
+            int(month_match.group("year")),
+            TIMELINE_MONTHS[month_match.group("month").lower()],
+            1,
+            fact_id,
+        )
+    year_match = re.search(r"\b(?P<year>(?:19|20)\d{2})\b", text)
+    if year_match:
+        return (int(year_match.group("year")), 1, 1, fact_id)
+    return (9999, 12, 31, fact_id)
+
+
+@app.command(
+    "build-life-timeline",
+    help="Build a chronological experience timeline for one person from active event memories.",
+)
+def build_life_timeline_command(
+    person_slug: str = typer.Argument(..., help="Person slug."),
+    workspace: str = typer.Option("default", help="Workspace slug."),
+    limit: int = typer.Option(100, help="Maximum experience facts to inspect."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    repository = FactRepository()
+    with get_connection(settings.db_path) as conn:
+        person_id = repository.resolve_person_id(conn, workspace_slug=workspace, person_slug=person_slug)
+        facts = repository.list_facts(
+            conn,
+            workspace_slug=workspace,
+            person_id=person_id,
+            status="active",
+            domain="experiences",
+            limit=limit,
+        )
+    events = []
+    for fact in facts:
+        if fact.get("category") != "event":
+            continue
+        payload = fact.get("payload", {})
+        temporal_anchor = str(payload.get("temporal_anchor") or fact.get("event_at") or payload.get("date_range") or "").strip()
+        events.append(
+            {
+                "fact_id": int(fact["id"]),
+                "event": payload.get("event") or fact.get("summary") or "",
+                "event_type": payload.get("event_type") or "life_event",
+                "temporal_anchor": temporal_anchor,
+                "event_at": fact.get("event_at") or payload.get("event_at") or "",
+                "date_range": payload.get("date_range") or "",
+                "location": payload.get("location") or "",
+                "participants": payload.get("participants") or [],
+                "outcome": payload.get("outcome") or "",
+                "lesson": payload.get("lesson") or "",
+                "salience": payload.get("salience", payload.get("intensity")),
+                "summary": fact.get("summary") or payload.get("summary") or "",
+                "evidence_ids": [int(item["evidence_id"]) for item in fact.get("evidence", []) if item.get("evidence_id") is not None],
+            }
+        )
+    events.sort(
+        key=lambda item: _timeline_temporal_sort_key(
+            str(item.get("event_at") or ""),
+            str(item.get("temporal_anchor") or ""),
+            str(item.get("date_range") or ""),
+            fact_id=int(item["fact_id"]),
+        )
+    )
+    result = {
+        "artifact_type": "life_timeline",
+        "workspace": workspace,
+        "person_slug": person_slug,
+        "person_id": int(person_id),
+        "event_count": len(events),
+        "events": events,
+    }
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 

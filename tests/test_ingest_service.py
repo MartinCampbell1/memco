@@ -158,9 +158,16 @@ def test_whatsapp_parser_supports_common_exports_and_metadata(settings, tmp_path
     meta = json.loads(row["meta_json"])
     assert row["source_type"] == "whatsapp"
     assert meta["parser_name"] == "whatsapp"
+    assert meta["source_document"] == str(source)
     assert meta["message_count"] == 2
     assert meta["media_omitted_count"] == 1
     assert meta["system_message_count"] == 1
+    assert meta["messages"][0]["meta"]["source_document"] == str(source)
+    assert meta["messages"][0]["meta"]["source_segment"] == "message:0"
+    assert meta["messages"][0]["meta"]["locator"]["file"] == str(source)
+    assert meta["messages"][0]["meta"]["locator"]["message_index"] == 0
+    assert isinstance(meta["messages"][0]["meta"]["locator"]["char_start"], int)
+    assert isinstance(meta["messages"][0]["meta"]["locator"]["char_end"], int)
     assert "Alice: Hello Bob\ncontinuation line" in row["parsed_text"]
     assert "Alice: Work: I moved to Lisbon." in row["parsed_text"]
     assert "<Media omitted>" not in row["parsed_text"]
@@ -190,6 +197,7 @@ def test_whatsapp_import_uses_runtime_date_locale_and_timezone(settings, tmp_pat
     assert meta["date_order"] == "MDY"
     assert meta["timezone"] == "Asia/Makassar"
     assert meta["messages"][0]["timestamp"] == "2024-12-31T01:15:00Z"
+    assert meta["messages"][0]["meta"]["source_segment"] == "message:0"
     assert "2024-12-31T01:15:00Z Alice: Year end" in row["parsed_text"]
 
 
@@ -244,6 +252,10 @@ def test_telegram_json_parser_supports_text_arrays_and_replies(settings, tmp_pat
     assert meta["message_count"] == 2
     assert meta["skipped_message_count"] == 1
     assert meta["messages"][1]["meta"]["reply_to_message_id"] == 1
+    assert meta["messages"][1]["meta"]["source_document"] == str(source)
+    assert meta["messages"][1]["meta"]["source_segment"] == "message:2"
+    assert meta["messages"][1]["meta"]["locator"]["message_id"] == "2"
+    assert isinstance(meta["messages"][1]["meta"]["locator"]["char_start"], int)
     assert "Alice: Hello Bob" in row["parsed_text"]
     assert "Bob: Reply received" in row["parsed_text"]
 
@@ -290,6 +302,13 @@ def test_telegram_html_parser_supports_sender_timestamps_and_replies(settings, t
     assert meta["message_count"] == 2
     assert meta["messages"][0]["timestamp"] == "2024-01-12T09:15:12Z"
     assert meta["messages"][1]["timestamp"] == "2024-01-12T09:16:12Z"
+    assert meta["messages"][1]["meta"]["source_document"] == str(source)
+    assert meta["messages"][1]["meta"]["source_segment"] == "message:message2"
+    assert meta["messages"][1]["meta"]["locator"]["file"] == str(source)
+    assert meta["messages"][1]["meta"]["locator"]["message_index"] == 1
+    assert meta["messages"][1]["meta"]["locator"]["message_id"] == "message2"
+    assert isinstance(meta["messages"][1]["meta"]["locator"]["char_start"], int)
+    assert isinstance(meta["messages"][1]["meta"]["locator"]["char_end"], int)
     assert "Hello Bob" in row["parsed_text"]
     assert meta["messages"][1]["meta"]["reply_preview"] == "Alice: Hello Bob"
 
@@ -327,7 +346,19 @@ def test_markdown_import_extracts_frontmatter_metadata(settings, tmp_path):
                 "  - memory",
                 "---",
                 "",
+                "Alice keeps a private pre-heading journal note.",
+                "",
+                "# 2026-04-24",
+                "",
                 "Alice lives in Lisbon.",
+                "",
+                "## Work",
+                "",
+                "Alice uses Python.",
+                "",
+                "```",
+                "# Not a journal heading",
+                "```",
             ]
         ),
         encoding="utf-8",
@@ -346,16 +377,49 @@ def test_markdown_import_extracts_frontmatter_metadata(settings, tmp_path):
             "SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?",
             (result.source_id,),
         ).fetchone()
+        segment_rows = conn.execute(
+            """
+            SELECT segment_type, segment_index, text, locator_json
+            FROM source_segments
+            WHERE source_id = ?
+            ORDER BY segment_index ASC
+            """,
+            (result.source_id,),
+        ).fetchall()
 
     assert row is not None
+    raw_source = source.read_text(encoding="utf-8")
     meta = json.loads(row["meta_json"])
     assert row["source_type"] == "markdown"
+    assert "Alice keeps a private pre-heading journal note." in row["parsed_text"]
     assert "Alice lives in Lisbon." in row["parsed_text"]
+    assert "Alice uses Python." in row["parsed_text"]
     assert "title: Alice Profile" not in row["parsed_text"]
     assert meta["parser_name"] == "markdown"
     assert meta["frontmatter"]["title"] == "Alice Profile"
     assert meta["frontmatter"]["date"] == "2026-04-24"
     assert meta["frontmatter"]["tags"] == ["memory"]
+    assert len(meta["document_segments"]) == 3
+    assert len(segment_rows) == 3
+    assert [row["segment_type"] for row in segment_rows] == [
+        "markdown_preamble",
+        "markdown_section",
+        "markdown_section",
+    ]
+    preamble_locator = json.loads(segment_rows[0]["locator_json"])
+    first_locator = json.loads(segment_rows[1]["locator_json"])
+    second_locator = json.loads(segment_rows[2]["locator_json"])
+    assert preamble_locator["file"] == str(source)
+    assert preamble_locator["heading"] == "profile"
+    assert first_locator["heading"] == "2026-04-24"
+    assert first_locator["date"] == "2026-04-24"
+    assert isinstance(first_locator["char_start"], int)
+    assert isinstance(first_locator["char_end"], int)
+    assert raw_source[preamble_locator["char_start"] : preamble_locator["char_end"]] == segment_rows[0]["text"]
+    assert raw_source[first_locator["char_start"] : first_locator["char_end"]] == segment_rows[1]["text"]
+    assert raw_source[second_locator["char_start"] : second_locator["char_end"]] == segment_rows[2]["text"]
+    assert second_locator["heading"] == "Work"
+    assert "# Not a journal heading" in segment_rows[2]["text"]
 
 
 def test_html_import_extracts_visible_text_and_title(settings, tmp_path):
@@ -415,15 +479,35 @@ def test_import_text_uses_title_and_writes_inside_runtime(settings):
             source_type="note",
         )
         row = conn.execute(
-            "SELECT title, source_path, origin_uri FROM sources WHERE id = ?",
+            "SELECT title, source_path, origin_uri, meta_json FROM sources WHERE id = ?",
             (result.source_id,),
         ).fetchone()
+        segment_rows = conn.execute(
+            """
+            SELECT segment_type, text, locator_json
+            FROM source_segments
+            WHERE source_id = ?
+            ORDER BY segment_index ASC
+            """,
+            (result.source_id,),
+        ).fetchall()
 
     assert row is not None
+    meta = json.loads(row["meta_json"])
     assert result.title == "Alice Seed"
     assert row["title"] == "Alice Seed"
     assert "var/raw/note/" in row["source_path"]
     assert row["origin_uri"] == "inline://alice-seed"
+    assert meta["source_document"] == row["source_path"]
+    assert len(meta["document_segments"]) == 1
+    assert len(segment_rows) == 1
+    assert segment_rows[0]["segment_type"] == "inline_note"
+    assert segment_rows[0]["text"] == "Alice lives in Lisbon."
+    locator = json.loads(segment_rows[0]["locator_json"])
+    assert locator["file"] == row["source_path"]
+    assert locator["origin_uri"] == "inline://alice-seed"
+    assert locator["char_start"] == 0
+    assert locator["char_end"] == len("Alice lives in Lisbon.")
 
 
 def test_import_text_preserves_russian_utf8_content(settings):
@@ -476,7 +560,15 @@ def test_email_import_normalizes_headers_and_body(settings, tmp_path):
         row = conn.execute("SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?", (result.source_id,)).fetchone()
 
     assert row is not None
+    meta = json.loads(row["meta_json"])
     assert row["source_type"] == "email"
+    assert meta["source_document"] == str(source)
+    assert meta["messages"][0]["meta"]["source_document"] == str(source)
+    assert meta["messages"][0]["meta"]["source_segment"] == "message:0"
+    assert meta["messages"][0]["meta"]["locator"]["file"] == str(source)
+    assert meta["messages"][0]["meta"]["locator"]["message_index"] == 0
+    assert isinstance(meta["messages"][0]["meta"]["locator"]["char_start"], int)
+    assert isinstance(meta["messages"][0]["meta"]["locator"]["char_end"], int)
     assert "Subject: Weekend plan" in row["parsed_text"]
     assert "From: Alice <alice@example.com>" in row["parsed_text"]
     assert "Let's meet for coffee on Friday." in row["parsed_text"]

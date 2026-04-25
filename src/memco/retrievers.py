@@ -106,7 +106,7 @@ class WorkRetriever(DomainRetriever):
                 "employment": ("title", "role", "org", "client", "status", "team"),
                 "org": ("org", "client", "status"),
                 "role": ("role", "title", "status"),
-                "project": ("project", "role", "org", "client", "outcomes"),
+                "project": ("project", "role", "org", "client", "outcomes", "tasks", "collaborators"),
                 "skill": ("skill",),
                 "tool": ("tool",),
             },
@@ -124,7 +124,22 @@ class ExperienceRetriever(DomainRetriever):
     def __init__(self) -> None:
         super().__init__(
             domain="experiences",
-            payload_fields={"event": ("event", "summary", "event_at", "date_range", "location", "participants", "outcome", "lesson")},
+            payload_fields={
+                "event": (
+                    "event",
+                    "event_type",
+                    "summary",
+                    "event_at",
+                    "date_range",
+                    "temporal_anchor",
+                    "location",
+                    "participants",
+                    "outcome",
+                    "lesson",
+                    "event_hierarchy",
+                    "salience",
+                )
+            },
             synonyms={"event": ("attended", "visited", "accident", "trip", "conference")},
             false_premise_claim_checks=("event", "date", "location", "name"),
         )

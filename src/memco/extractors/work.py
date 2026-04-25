@@ -114,7 +114,9 @@ def _work_metadata(text: str, *, is_current: bool = True) -> dict:
         if until_match:
             payload["end_date"] = clean_value(until_match.group("end"))
             payload["status"] = "past"
-    team_match = re.search(r"\b(?:with|on)\s+(?:the\s+)?(?P<team>[A-Za-z0-9 &'_-]+?)\s+team\b", text, re.IGNORECASE)
+    team_match = re.search(r"\bon\s+(?:the\s+)?(?P<team>[A-Za-z0-9 &'_-]+?)\s+team\b", text, re.IGNORECASE)
+    if not team_match:
+        team_match = re.search(r"\bwith\s+(?:the\s+)?(?P<team>[A-Za-z0-9 &'_-]+?)\s+team\b", text, re.IGNORECASE)
     if team_match:
         payload["team"] = clean_value(team_match.group("team"))
     client_match = re.search(r"\bfor\s+(?P<client>[A-Z][A-Za-z0-9 &'_-]+?)(?=$|\s+as\s+|\s+with\s+|\s+on\s+|\s+since\s+|\s+from\s+|[.!?\n])", text)
@@ -125,6 +127,14 @@ def _work_metadata(text: str, *, is_current: bool = True) -> dict:
         outcome_match = re.search(r"\bwhich\s+(?P<outcome>(?:increased|reduced|improved|cut|saved|grew)[^.!?\n]+)", text, re.IGNORECASE)
     if outcome_match:
         payload["outcomes"] = [clean_value(outcome_match.group("outcome"))]
+    collaborator_match = re.search(
+        r"\bwith\s+(?P<people>[A-Z][A-Za-z0-9'_-]+(?:\s+(?:and|,)\s+[A-Z][A-Za-z0-9'_-]+)*)(?=\s+(?:on|for|since|from|where|and\s+the\s+outcome|\.|,)|[.!?\n]|$)",
+        text,
+    )
+    if collaborator_match:
+        collaborators = split_list_values(collaborator_match.group("people"))
+        if collaborators and not any(item.lower().startswith("the ") or item.lower().endswith(" team") for item in collaborators):
+            payload["collaborators"] = collaborators
     launched_match = re.search(rf"\b(?:launched|shipped)\s+(?:it\s+)?in\s+(?P<date>{DATE_VALUE_RE})\b", text, re.IGNORECASE)
     if launched_match:
         payload["status"] = f"launched in {clean_value(launched_match.group('date'))}"

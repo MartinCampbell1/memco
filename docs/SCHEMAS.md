@@ -28,7 +28,7 @@ Supported categories:
 
 ## Experiences
 
-`event` payloads support `event`, `summary`, `event_at`, `date_range`, `location`, `participants`, `valence`, `intensity`, `outcome`, `lesson`, `recurrence`, `linked_persons`, `linked_projects`, and `temporal_anchor`.
+`event` payloads support `event`, `event_type`, `summary`, `event_at`, `date_range`, `location`, `participants`, `valence`, `intensity`, `salience`, `outcome`, `lesson`, `recurrence`, `linked_persons`, `linked_projects`, and `temporal_anchor`.
 
 ## Preferences
 

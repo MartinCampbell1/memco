@@ -111,15 +111,54 @@ def test_current_docs_entrypoints_separate_status_contract_gaps_and_reproduction
     gaps = _read("docs/PDF_PARITY_GAPS.md")
     local = _read("docs/LOCAL_REPRODUCTION.md")
 
-    assert "Current verdict: GO for the private single-user agent-memory pilot" in current
+    assert "Current verdict: P0 semantic remediation is green" in current
+    assert "Release-grade GO still requires refreshing the live/Postgres artifacts" in current
     assert "Do not derive this verdict from historical documents." in current
     assert "PRIVATE_SINGLE_USER_CONTRACT.md" in current
     assert "PDF_PARITY_GAPS.md" in current
     assert "LOCAL_REPRODUCTION.md" in current
-    assert "P3.1-P3.4: closed with independent critic GO." in current
-    assert "Final private GO gate: closed with independent critic GO" in current
-    assert "release-readiness-check-current.json" in current
-    assert "Alice lives in Lisbon." in current
+    assert "P0.7: `memco verify-current-status`" in current
+    assert "Selected P1: preference evolution queries" in current
+    assert "Selected P1: experiences now include normalized `event_type`/`salience`" in current
+    assert "`build-life-timeline` CLI" in current
+    assert "Selected P1: social-circle acceptance queries" in current
+    assert "Selected P1: work outcome/collaborator acceptance queries" in current
+    assert "Selected P1: planner private mode now runs deterministic planning first" in current
+    assert "schema/domain-validated and fail-closed when selected" in current
+    assert "Selected P1: `memco eval personal-memory` now includes a P1.8 private eval target report" in current
+    assert "the fixture/private target counts and thresholds pass for the internal 840-case suite" in current
+    assert "not paper-equivalent" in current
+    assert "Selected P1: answer guardrails reject prompt-injection attempts" in current
+    assert "Selected P1: psychometrics remain explicit opt-in" in current
+    assert "do not answer personality questions from one low-confidence signal" in current
+    assert "Selected P2: structured parser messages now carry source document" in current
+    assert "Selected P2: Markdown journal imports now create heading-based source segments" in current
+    assert "inline note imports now create `inline_note` source segments" in current
+    assert "file/origin/character locator metadata" in current
+    assert "Selected P2: `memco eval personal-memory` now includes a P2.1 external benchmark report" in current
+    assert "public/external LoCoMO as `not_run`" in current
+    assert "`ok_for_pdf_score_claim=false`" in current
+    assert "Selected P2: `memco eval personal-memory` now includes an internal synthetic long-corpus stress smoke" in current
+    assert "full P2.3 `ok_for_full_p2_3_claim=false` until 50k/500k-message and mixed-source stress" in current
+    assert "not a paper-equivalent benchmark claim" in current
+    assert "Selected P2: existing token/latency accounting remains covered" in current
+    assert "fail-closes missing token/latency fields" in current
+    assert "The personal-memory eval artifact also includes `long_corpus_stress`" in local
+    assert "false-positive retrieval checks, and refusal-quality probes" in local
+    assert "`p2_3_target_report` keeps full P2.3 `ok_for_full_p2_3_claim=false`" in local
+    assert "`p2_1_external_benchmark_report`" in local
+    assert "public/external LoCoMO remains `not_run`" in local
+    assert "`uv run pytest -q`: 632 passed." in current
+    assert "`uv run pytest tests/test_private_agent_semantic_regressions.py -q`: 14 passed." in current
+    assert "fresh fixture/internal eval proof for this dirty checkout; 840/840 passed" in current
+    assert "fresh quick repo-local release-check proof for this dirty checkout; acceptance 27/27" in current
+    assert (
+        "fresh repo-local refresh summary for this dirty checkout; "
+        "full suite 632 passed, contract stack 105 passed, release-check acceptance 27/27"
+    ) in current
+    assert "expected to fail only on release-grade artifact freshness" in current
+    assert "historical release-grade artifact from a different checkout; ignore its internal `ok=true`" in current
+    assert "historical live-smoke artifact from a different checkout; ignore its internal `ok=true`" in current
     assert "manual P0 smoke" in current
 
     assert "Status: current repo-local contract." in contract
@@ -133,6 +172,9 @@ def test_current_docs_entrypoints_separate_status_contract_gaps_and_reproduction
     assert "Docker Compose remains a strict original-brief mismatch" in gaps
 
     assert "# Memco Local Reproduction" in local
+    assert "uv run pytest tests/test_private_agent_semantic_regressions.py -q" in local
+    assert "uv run memco build-life-timeline alice --root \"$MEMCO_ROOT\"" in local
+    assert "uv run memco verify-current-status --project-root . --pytest-passed <fresh-pytest-passed-count>" in local
 
 
 def test_historical_docs_do_not_redirect_current_status_to_release_closure():

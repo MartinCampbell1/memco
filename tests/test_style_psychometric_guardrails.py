@@ -335,3 +335,19 @@ def test_psychometrics_do_not_surface_in_retrieve_results(monkeypatch, settings)
     payload = response.json()
     assert payload["hits"] == []
     assert payload["support_level"] == "unsupported"
+
+    response = client.post(
+        "/v1/chat",
+        json={
+            "workspace": "default",
+            "person_slug": "alice",
+            "query": "What kind of person is Alice?",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    chat_payload = response.json()
+    assert chat_payload["refused"] is True
+    assert chat_payload["retrieval"]["hits"] == []
+    assert "openness" not in chat_payload["answer"].lower()

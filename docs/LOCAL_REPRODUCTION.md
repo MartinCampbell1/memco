@@ -49,6 +49,7 @@ These commands are useful for local regression work. They are not release-grade 
 
 ```bash
 uv run pytest -q
+uv run pytest tests/test_private_agent_semantic_regressions.py -q
 uv run memco eval personal-memory \
   --goldens eval/personal_memory_goldens \
   --output var/reports/personal-memory-eval-current.json
@@ -60,6 +61,26 @@ uv run memco release-check \
 ```
 
 The realistic personal-memory file is `eval/personal_memory_goldens/realistic_personal_memory_goldens.jsonl`. The `--fixture-ok` artifact is archive-safe by construction: it reports `fixture_only: true` and `release_eligible: false`.
+
+The personal-memory eval artifact also includes `long_corpus_stress`: an internal synthetic JSON stress smoke with extraction token accounting, candidate volume, fact growth, retrieval latency, false-positive retrieval checks, and refusal-quality probes. Its `p2_3_target_report` keeps full P2.3 `ok_for_full_p2_3_claim=false` until 50k/500k-message and mixed-source stress are actually run; it is not paper-equivalent proof.
+
+The artifact also includes `p2_1_external_benchmark_report`: public/external LoCoMO remains `not_run`, and `ok_for_pdf_score_claim=false` until a real external benchmark and judge protocol are executed.
+
+For an experience timeline smoke after seeding and publishing event facts:
+
+```bash
+uv run memco build-life-timeline alice --root "$MEMCO_ROOT"
+```
+
+## Current Status Consistency
+
+After a fresh pytest run or artifact refresh, verify that `docs/CURRENT_STATUS.md` does not over-claim stale evidence:
+
+```bash
+uv run memco verify-current-status --project-root . --pytest-passed <fresh-pytest-passed-count>
+```
+
+This command fail-closes when the documented pytest count differs from the fresh count, when required current artifacts are missing, or when `var/reports/*current*.json` artifacts are stale relative to the current checkout/config/env.
 
 ## Postgres And Live Gates
 

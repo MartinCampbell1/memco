@@ -137,6 +137,7 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         ),
         categories={
             "relationship_event": ("target_label", "target_person_id", "event", "context"),
+            "best_friend": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "friend": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "brother": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "sister": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
@@ -151,6 +152,8 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "colleague": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "boss": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "manager": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "client": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
+            "acquaintance": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "roommate": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
             "neighbor": ("relation", "target_label", "target_person_id", "is_current", "closeness", "trust", "valence", "aliases", "is_private"),
         },
@@ -178,7 +181,7 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
             "engagement": ("engagement", "role", "org", "client", "status", "start_date", "end_date", "outcomes", "team"),
             "role": ("role", "is_current", "status", "start_date", "end_date"),
             "org": ("org", "client", "is_current", "status"),
-            "project": ("project", "role", "org", "client", "outcomes", "status", "start_date", "end_date", "team"),
+            "project": ("project", "role", "org", "client", "outcomes", "tasks", "collaborators", "status", "start_date", "end_date", "team"),
             "skill": ("skill",),
             "tool": ("tool",),
         },
@@ -218,6 +221,7 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
         categories={
             "event": (
                 "event",
+                "event_type",
                 "summary",
                 "event_at",
                 "date_range",
@@ -232,6 +236,7 @@ DOMAIN_PROMPT_CONTRACTS: dict[str, DomainPromptContract] = {
                 "linked_projects",
                 "event_hierarchy",
                 "temporal_anchor",
+                "salience",
             )
         },
         ambiguity_rules=(
@@ -665,6 +670,8 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             for key in ("role", "org", "client", "status", "start_date", "end_date", "team"):
                 _optional_string(payload, key)
             _optional_list_of_strings(payload, "outcomes")
+            _optional_list_of_strings(payload, "tasks")
+            _optional_list_of_strings(payload, "collaborators")
         elif category == "skill":
             _require_string(payload, "skill")
         elif category == "tool":
@@ -679,6 +686,8 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
         _require_string(payload, "event")
         if "summary" in payload:
             _require_string(payload, "summary")
+        if "event_type" in payload:
+            _require_string(payload, "event_type")
         if "participants" in payload:
             _require_list_of_strings(payload, "participants")
         _optional_list_of_strings(payload, "linked_persons")
@@ -695,6 +704,7 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
         if "valence" in payload:
             _require_string(payload, "valence")
         _optional_number(payload, "intensity")
+        _optional_number(payload, "salience")
         return payload
 
     if domain == "psychometrics":

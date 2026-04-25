@@ -418,7 +418,7 @@ class ExtractionService:
             ("social_circle", "relationship"): {"aliases"},
             ("social_circle", "relationship_event"): {"aliases"},
             ("work", "engagement"): {"outcomes"},
-            ("work", "project"): {"outcomes"},
+            ("work", "project"): {"collaborators", "outcomes", "tasks"},
         }
         for key in optional_list_fields.get((domain, category), set()):
             value = payload.get(key)
@@ -1244,7 +1244,6 @@ class ExtractionService:
             FROM source_chunks sc
             LEFT JOIN source_segments ss
               ON ss.chunk_id = sc.id
-             AND ss.segment_type IN ('source_chunk', 'pdf_page')
             WHERE sc.source_id = ?
             ORDER BY sc.chunk_index ASC
             """,

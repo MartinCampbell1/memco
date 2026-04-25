@@ -55,6 +55,11 @@ FAMILY_PATTERNS = (
     re.compile(r"\bмоя\s+(?P<relation>сестра|мать|жена|дочь|партнерша)\s+[—-]?\s*(?P<name>[^.!?\n]+)", re.IGNORECASE),
     re.compile(r"\bмой\s+(?P<relation>брат|отец|муж|сын|партнер)\s+[—-]?\s*(?P<name>[^.!?\n]+)", re.IGNORECASE),
 )
+RELATION_CLAUSE_BOUNDARY_RE = re.compile(
+    r"(?:\s+and|[,;])\s+(?:my|his|her|their)\s+"
+    r"(?:mother|father|sister|brother|son|daughter|wife|husband|partner|best\s+friend|friend)\b",
+    re.IGNORECASE,
+)
 
 HABIT_PATTERNS = (
     re.compile(r"\bi\s+(?:usually|always)\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
@@ -198,6 +203,19 @@ def _clean_identity_name(raw: str) -> tuple[str, list[str]]:
         reasons.append("suspicious_identity_payload")
     if len(name.split()) > 4:
         reasons.append("suspicious_identity_payload")
+    return name, reasons
+
+
+def _clean_relation_name(raw: str) -> tuple[str, list[str]]:
+    value = clean_value(raw)
+    value = RELATION_CLAUSE_BOUNDARY_RE.split(value, maxsplit=1)[0]
+    name = clean_value(value).title()
+    lowered = name.lower()
+    reasons: list[str] = []
+    if re.search(r"\b(?:my|friend|sister|brother|mother|father|partner|wife|husband)\b", lowered):
+        reasons.append("suspicious_family_payload")
+    if len(name.split()) > 4:
+        reasons.append("suspicious_family_payload")
     return name, reasons
 
 
@@ -401,10 +419,10 @@ def extract(context: ExtractionContext) -> list[dict]:
         if stable_blocked:
             break
         relation = clean_value(match.group("relation")).lower()
-        name = clean_value(match.group("name")).title()
+        name, quality_reasons = _clean_relation_name(match.group("name"))
         if _starts_negated(name):
             continue
-        review_reasons = review_reasons_for_context(context)
+        review_reasons = _with_review_reasons(context, *quality_reasons)
         candidates.append(
             {
                 "domain": "biography",

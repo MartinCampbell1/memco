@@ -7,17 +7,23 @@ CANONICAL_RELATION_TYPES = (
     "father",
     "partner",
     "spouse",
+    "best_friend",
     "friend",
     "colleague",
+    "manager",
+    "client",
+    "acquaintance",
     "son",
     "daughter",
     "boss",
-    "manager",
     "roommate",
     "neighbor",
 )
 
 RELATION_TYPE_ALIASES = {
+    "best friend": "best_friend",
+    "best_friend": "best_friend",
+    "boss": "manager",
     "mom": "mother",
     "mum": "mother",
     "dad": "father",
@@ -39,6 +45,8 @@ RELATION_TYPE_ALIASES = {
     "другом": "friend",
     "коллега": "colleague",
     "коллегой": "colleague",
+    "клиент": "client",
+    "знакомый": "acquaintance",
 }
 
 RELATION_QUERY_TERMS = tuple(sorted(set(CANONICAL_RELATION_TYPES) | set(RELATION_TYPE_ALIASES)))

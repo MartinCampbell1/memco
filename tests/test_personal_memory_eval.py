@@ -72,9 +72,10 @@ def test_personal_memory_goldens_cover_required_groups():
         r"Realistic [A-Za-z ]+ \d{3}|[a-z]+-value-\d{3}|Work\d{3}|ClientPortal\d{3}|OldCity\d{3}|HypotheticalValue\d{3}"
     )
 
-    assert len(cases) == 680
+    assert len(cases) == 840
     assert len({item["id"] for item in cases}) == len(cases)
     assert (GOLDENS_DIR / "realistic_personal_memory_goldens.jsonl").exists()
+    assert (GOLDENS_DIR / "p1_8_target_personal_memory_goldens.jsonl").exists()
     assert LOCOMO_LIKE_MANIFEST.exists()
     assert LOCOMO_LIKE_CONVERSATIONS.exists()
     assert locomo_manifest["benchmark_disclaimer"] == "Internal LoCoMo-like personal-memory eval metadata; not paper-equivalent."
@@ -165,14 +166,14 @@ def test_personal_memory_goldens_cover_required_groups():
     assert placeholder_re.search("\n".join(json.dumps(item, ensure_ascii=False) for item in realistic_cases)) is None
     assert counts == {
         **EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS,
-        "core_fact": 174,
-        "adversarial_false_premise": 125,
-        "social_family": 75,
-        "temporal": 76,
-        "preference": 75,
+        "core_fact": 249,
+        "adversarial_false_premise": 150,
+        "social_family": 100,
+        "temporal": 81,
+        "preference": 100,
         "cross_person_contamination": 55,
         "speakerless_note": 55,
-        "rollback_update": 45,
+        "rollback_update": 50,
     }
 
 
@@ -195,8 +196,8 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["artifact_type"] == "personal_memory_eval_artifact"
     assert result["release_scope"] == "personal-agent-memory"
     assert result["ok"] is True
-    assert result["total"] == 680
-    assert result["passed"] == 680
+    assert result["total"] == 840
+    assert result["passed"] == 840
     assert result["failed"] == 0
     assert result["failures"] == []
     assert all(item["ok"] for item in result["policy_checks"].values())
@@ -248,6 +249,42 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["policy_checks"]["source_hard_case_failures"]["ok"] is True
     assert result["policy_checks"]["overall_accuracy"]["threshold"] == 0.90
     assert result["policy_checks"]["temporal_accuracy"]["threshold"] == 0.90
+    p1_8_report = result["p1_8_private_eval_target_report"]
+    assert p1_8_report["scope"] == "P1.8 private realistic eval target tracking"
+    assert p1_8_report["benchmark_disclaimer"] == (
+        "Internal private eval target report from the audit remediation plan; "
+        "not paper-equivalent and not a full P1.8 closure unless ok_for_full_p1_8_claim is true."
+    )
+    assert p1_8_report["ok_for_full_p1_8_claim"] is True
+    assert p1_8_report["all_thresholds_met"] is True
+    assert p1_8_report["all_target_counts_met"] is True
+    assert p1_8_report["missing_count_targets"] == []
+    assert p1_8_report["failed_thresholds"] == []
+    assert p1_8_report["count_checks"]["preference_current_state"] == {
+        "value": 100,
+        "required": 100,
+        "ok": True,
+    }
+    assert p1_8_report["count_checks"]["work_project_tool"] == {
+        "value": 100,
+        "required": 100,
+        "ok": True,
+    }
+    assert p1_8_report["count_checks"]["cross_person_contamination"] == {
+        "value": 55,
+        "required": 50,
+        "ok": True,
+    }
+    assert p1_8_report["threshold_checks"]["overall_accuracy"] == {
+        "value": 1.0,
+        "threshold": 0.92,
+        "ok": True,
+    }
+    assert p1_8_report["threshold_checks"]["unsupported_personal_claims_answered_as_fact"] == {
+        "value": 0,
+        "threshold": 0,
+        "ok": True,
+    }
     assert result["coverage"]["single_hop"]["covered"] is True
     assert result["coverage"]["multi_hop"]["covered"] is True
     assert result["coverage"]["temporal"]["covered"] is True
@@ -287,12 +324,17 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
         "ok": True,
     }
     assert result["dataset_count_checks"]["locomo_like_cases_linked_to_conversations"] == {
-        "value": 680,
-        "required": 680,
+        "value": 840,
+        "required": 840,
+        "ok": True,
+    }
+    assert result["dataset_count_checks"]["long_corpus_stress_smoke"] == {
+        "value": 120,
+        "required": 120,
         "ok": True,
     }
     assert result["locomo_like_scope"]["benchmark_disclaimer"] == "Internal LoCoMo-like personal-memory eval; not paper-equivalent."
-    assert result["locomo_like_scope"]["current_questions"] == 680
+    assert result["locomo_like_scope"]["current_questions"] == 840
     assert result["locomo_like_scope"]["eventual_target_questions"] == 1000
     assert result["locomo_like_scope"]["conversation_suite"]["ok"] is True
     assert result["locomo_like_scope"]["conversation_suite"]["conversation_count"] == 10
@@ -301,12 +343,17 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["locomo_like_scope"]["conversation_suite"]["min_persons_per_conversation"] >= 2
     assert result["locomo_like_scope"]["conversation_suite"]["all_conversations_have_two_or_more_persons"] is True
     assert result["locomo_like_scope"]["conversation_suite"]["all_turns_have_two_or_more_speakers"] is True
-    assert result["locomo_like_scope"]["conversation_suite"]["linked_case_count"] == 680
-    assert result["locomo_like_scope"]["conversation_suite"]["total_case_count"] == 680
+    assert result["locomo_like_scope"]["conversation_suite"]["linked_case_count"] == 840
+    assert result["locomo_like_scope"]["conversation_suite"]["total_case_count"] == 840
     assert result["locomo_like_scope"]["conversation_suite"]["all_cases_linked_to_conversations"] is True
     assert result["locomo_like_scope"]["conversation_suite"]["all_fixture_case_links_match"] is True
     assert result["locomo_like_scope"]["conversation_suite"]["all_case_persons_present_in_turns"] is True
     assert result["locomo_like_scope"]["conversation_suite"]["missing_coverage_dimensions"] == []
+    assert all(item.get("conversation_id") for item in result["cases"])
+    assert {item["conversation_id"] for item in result["cases"]} == {
+        item["conversation_id"]
+        for item in result["locomo_like_scope"]["conversation_suite"]["conversations"]
+    }
     assert result["locomo_like_scope"]["private_gate_thresholds"] == {
         "overall_accuracy_min": 0.90,
         "core_memory_accuracy_min": 0.95,
@@ -315,6 +362,88 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
         "cross_person_contamination_max": 0,
         "unsupported_premise_answered_as_fact_max": 0,
     }
+    p2_1_report = result["p2_1_external_benchmark_report"]
+    assert p2_1_report["scope"] == "P2.1 external LoCoMO-like benchmark tracking"
+    assert p2_1_report["benchmark_disclaimer"] == (
+        "No public/external LoCoMO benchmark was run in this artifact; "
+        "internal LoCoMO-like fixtures are not paper-equivalent."
+    )
+    assert p2_1_report["external_dataset"] == "not_run"
+    assert p2_1_report["judge_protocol"] == "not_run"
+    assert p2_1_report["compared_systems"] == {
+        "full_context": "not_run",
+        "embedding_rag": "not_run",
+        "memco_structured_memory": "not_run",
+    }
+    assert p2_1_report["reported_dimensions"]["adversarial"] == "internal_only"
+    assert p2_1_report["ok_for_pdf_score_claim"] is False
+    stress = result["long_corpus_stress"]
+    assert stress["ok"] is True
+    assert stress["benchmark_disclaimer"] == (
+        "Internal synthetic stress; not LoCoMo paper-equivalent and not a 50k/500k-message claim."
+    )
+    assert stress["limits"]["messages_tested"] == 120
+    assert stress["limits"]["full_50k_or_500k_corpus_tested"] is False
+    assert stress["source_volume"]["source_types"] == ["json"]
+    assert stress["source_volume"]["person_count"] == 5
+    assert stress["source_volume"]["message_count"] == 120
+    assert stress["source_volume"]["chunk_count"] > 1
+    assert stress["candidate_volume"]["extracted_total"] > 0
+    assert stress["candidate_volume"]["delta"] > 0
+    assert stress["candidate_volume"]["publish_error_count"] == 0
+    assert stress["fact_growth"]["delta"] > 0
+    assert stress["extraction_cost"]["candidate_count"] == stress["candidate_volume"]["extracted_total"]
+    assert stress["extraction_cost"]["token_accounting"]["production_accounting"]["by_stage"]["extraction"][
+        "operation_count"
+    ] > 0
+    assert stress["retrieval_probe_quality"]["passed"] == stress["retrieval_probe_quality"]["total"]
+    assert stress["retrieval_probe_quality"]["false_positive_retrieval_failures"] == 0
+    assert stress["retrieval_probe_quality"]["refusal_mismatches"] == 0
+    p2_3_report = stress["p2_3_target_report"]
+    assert p2_3_report["scope"] == "P2.3 long-corpus audit target tracking"
+    assert p2_3_report["benchmark_disclaimer"] == (
+        "Internal synthetic stress target report; not a full P2.3 closure unless "
+        "ok_for_full_p2_3_claim is true."
+    )
+    assert p2_3_report["target_message_counts"] == [50_000, 500_000]
+    assert p2_3_report["volume_checks"]["50000_messages"] == {
+        "value": 120,
+        "required": 50_000,
+        "ok": False,
+    }
+    assert p2_3_report["volume_checks"]["500000_messages"] == {
+        "value": 120,
+        "required": 500_000,
+        "ok": False,
+    }
+    assert p2_3_report["dimension_checks"]["mixed_sources"] == {
+        "value": ["json"],
+        "required": "two_or_more_source_types",
+        "ok": False,
+    }
+    assert p2_3_report["dimension_checks"]["old_and_new_contradictions"]["ok"] is True
+    assert p2_3_report["dimension_checks"]["multiple_people"] == {
+        "value": 5,
+        "required": 2,
+        "ok": True,
+    }
+    assert p2_3_report["dimension_checks"]["repeated_updates"]["ok"] is True
+    assert p2_3_report["dimension_checks"]["retrieval_latency"]["ok"] is True
+    assert p2_3_report["dimension_checks"]["false_positive_retrieval"] == {
+        "value": 0,
+        "required": 0,
+        "ok": True,
+    }
+    assert p2_3_report["dimension_checks"]["refusal_quality"] == {
+        "value": 0,
+        "required": 0,
+        "ok": True,
+    }
+    assert p2_3_report["missing_volume_targets"] == ["50000_messages", "500000_messages"]
+    assert p2_3_report["missing_dimensions"] == ["mixed_sources"]
+    assert p2_3_report["all_volume_targets_met"] is False
+    assert p2_3_report["all_dimensions_met"] is False
+    assert p2_3_report["ok_for_full_p2_3_claim"] is False
 
 
 def test_personal_memory_eval_fails_when_hard_cases_are_mutated(settings, tmp_path):
@@ -402,7 +531,7 @@ def test_personal_memory_eval_cli_writes_gate_artifact(tmp_path):
     artifact = json.loads(output_path.read_text(encoding="utf-8"))
     assert artifact["artifact_path"] == str(output_path.resolve())
     assert artifact["ok"] is True
-    assert artifact["total"] == 680
+    assert artifact["total"] == 840
     assert artifact["failed"] == 0
     assert artifact["artifact_context"]["freshness"]["status"] == "current_at_generation"
     freshness = evaluate_artifact_freshness(artifact, project_root=Path.cwd().resolve())
@@ -434,6 +563,6 @@ def test_personal_memory_eval_root_alias_accepts_realistic_filename(tmp_path):
     assert artifact["artifact_path"] == str(output_path.resolve())
     assert artifact["goldens_dir"] == str(GOLDENS_DIR.resolve())
     assert artifact["ok"] is True
-    assert artifact["total"] == 680
+    assert artifact["total"] == 840
     assert artifact["failed"] == 0
     assert artifact["artifact_context"]["freshness"]["status"] == "current_at_generation"

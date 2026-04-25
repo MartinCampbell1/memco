@@ -92,7 +92,7 @@ class SourceRepository:
         for row in existing:
             conn.execute("DELETE FROM source_chunk_fts WHERE rowid = ?", (int(row["id"]),))
         conn.execute("DELETE FROM source_chunks WHERE source_id = ?", (source_id,))
-        conn.execute("DELETE FROM source_segments WHERE source_id = ? AND segment_type IN ('source_chunk', 'pdf_page')", (source_id,))
+        conn.execute("DELETE FROM source_segments WHERE source_id = ? AND segment_type != 'message'", (source_id,))
         now = isoformat_z()
         if segments:
             pieces = [

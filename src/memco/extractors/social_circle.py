@@ -8,7 +8,15 @@ from memco.utils import slugify
 
 SOCIAL_PATTERN = re.compile(
     r"\b(?P<target>[a-zA-Z][a-zA-Z0-9'\- ]{0,80})\s+is\s+my\s+"
-    r"(?P<relation>friend|brother|sister|wife|husband|partner|mother|father|mom|dad|son|daughter|colleague|boss|roommate|neighbor)\b",
+    r"(?P<relation>best\s+friend|friend|brother|sister|wife|husband|partner|mother|father|mom|dad|son|daughter|colleague|boss|manager|client|acquaintance|roommate|neighbor)\b",
+    re.IGNORECASE,
+)
+BEST_FRIEND_PATTERN = re.compile(
+    r"\b[Mm]y\s+best\s+friend\s+is\s+(?P<target>[A-Z][A-Za-z0-9'\-]*(?:\s+[A-Z][A-Za-z0-9'\-]*)*)\b",
+)
+MY_RELATION_PATTERN = re.compile(
+    r"\bmy\s+(?P<relation>best\s+friend|friend|brother|sister|wife|husband|partner|mother|father|mom|dad|son|daughter|colleague|boss|manager|client|acquaintance|roommate|neighbor)\s+is\s+"
+    r"(?P<target>[A-Z][A-Za-z0-9'\-]*(?:\s+[A-Z][A-Za-z0-9'\-]*)*)\b",
     re.IGNORECASE,
 )
 SOCIAL_PATTERN_RU = re.compile(
@@ -19,7 +27,7 @@ SOCIAL_PATTERN_RU = re.compile(
 
 SOCIAL_PAST_PATTERN = re.compile(
     r"\b(?P<target>[a-zA-Z][a-zA-Z0-9'\- ]{0,80})\s+used\s+to\s+be\s+my\s+"
-    r"(?P<relation>friend|brother|sister|wife|husband|partner|mother|father|mom|dad|son|daughter|colleague|boss|roommate|neighbor|manager)\b",
+    r"(?P<relation>friend|brother|sister|wife|husband|partner|mother|father|mom|dad|son|daughter|colleague|boss|manager|client|acquaintance|roommate|neighbor)\b",
     re.IGNORECASE,
 )
 SOCIAL_PAST_PATTERN_RU = re.compile(
@@ -74,8 +82,39 @@ def extract(context: ExtractionContext) -> list[dict]:
             }
         ]
 
+    best_friend_match = BEST_FRIEND_PATTERN.search(context.text)
+    if best_friend_match:
+        target_label = clean_value(best_friend_match.group("target"))
+        review_reasons = review_reasons_for_context(context)
+        target_person_id = None
+        if context.resolve_person_id is not None:
+            target_person_id = context.resolve_person_id(target_label)
+        if target_person_id is None:
+            review_reasons.append("relation_target_unresolved")
+        return [
+            {
+                "domain": "social_circle",
+                "category": "best_friend",
+                "subcategory": "",
+                "canonical_key": f"{context.subject_key}:social_circle:best_friend:{slugify(target_label)}",
+                "payload": {
+                    "relation": "best_friend",
+                    "target_label": target_label,
+                    "target_person_id": target_person_id,
+                    "is_current": True,
+                },
+                "summary": f"{context.subject_display} says {target_label} is their best friend.",
+                "confidence": 0.8 if not review_reasons else 0.55,
+                "reason": ",".join(review_reasons),
+                "needs_review": bool(review_reasons),
+                "evidence": build_evidence(context),
+            }
+        ]
+
     match = SOCIAL_PATTERN.search(context.text)
     is_current = True
+    if not match:
+        match = MY_RELATION_PATTERN.search(context.text)
     if not match:
         match = SOCIAL_PAST_PATTERN.search(context.text)
         is_current = False
@@ -89,6 +128,7 @@ def extract(context: ExtractionContext) -> list[dict]:
     target_label = clean_value(match.groupdict().get("target") or match.groupdict().get("target_alt") or "")
     relation = clean_value(match.groupdict().get("relation") or match.groupdict().get("relation_alt") or "").lower()
     relation = {
+        "best friend": "best_friend",
         "друг": "friend",
         "другом": "friend",
         "брат": "brother",
@@ -108,6 +148,7 @@ def extract(context: ExtractionContext) -> list[dict]:
         "партнерша": "partner",
         "коллега": "colleague",
         "коллегой": "colleague",
+        "boss": "manager",
         "менеджером": "manager",
     }.get(relation, relation)
     review_reasons = review_reasons_for_context(context)

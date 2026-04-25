@@ -585,6 +585,9 @@ def test_relationship_query_retrieves_biography_family_fallback(settings):
         ("spouse", "Sam", "biography", "family"),
         ("friend", "Bob", "social_circle", "friend"),
         ("colleague", "Dana", "social_circle", "colleague"),
+        ("manager", "Priya", "social_circle", "manager"),
+        ("client", "Jordan", "social_circle", "client"),
+        ("acquaintance", "Lee", "social_circle", "acquaintance"),
     ],
 )
 def test_relationship_queries_bridge_family_and_social_taxonomy(settings, relation, target_name, domain, category):

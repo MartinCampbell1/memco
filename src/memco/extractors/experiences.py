@@ -155,6 +155,25 @@ def _valence_and_intensity(text: str) -> tuple[str, float]:
     return "neutral", 0.2
 
 
+def _event_type(event: str, text: str) -> str:
+    haystack = f"{event} {text}".lower()
+    if "accident" in haystack or "injur" in haystack:
+        return "accident"
+    if "pycon" in haystack or "conference" in haystack or "summit" in haystack:
+        return "conference"
+    if event.lower().startswith("moved "):
+        return "move"
+    if "broke up" in haystack or "breakup" in haystack:
+        return "relationship_change"
+    if any(marker in haystack for marker in ("promoted", "promotion", "graduated")):
+        return "milestone"
+    if any(marker in haystack for marker in ("trip", "travel", "visited", "went to")):
+        return "travel"
+    if any(marker in haystack for marker in ("launched", "won", "started", "ended")):
+        return "work_or_project"
+    return "life_event"
+
+
 def extract(context: ExtractionContext) -> list[dict]:
     if (
         NEGATED_OR_HYPOTHETICAL_RE.search(context.text)
@@ -182,6 +201,7 @@ def extract(context: ExtractionContext) -> list[dict]:
         pause_match = re.search(r"\bi\s+had\s+to\s+(?P<outcome>pause\s+[^.!?\n]+)", context.text, re.IGNORECASE)
         valence, intensity = _valence_and_intensity(context.text)
         linked_projects = _linked_projects(context.text)
+        event_type = _event_type(event, context.text)
         return [
             {
                 "domain": "experiences",
@@ -190,6 +210,7 @@ def extract(context: ExtractionContext) -> list[dict]:
                 "canonical_key": f"{context.subject_key}:experiences:event:{slugify(event)}",
                 "payload": {
                     "event": event,
+                    "event_type": event_type,
                     "summary": clean_value(context.text),
                     "participants": participants,
                     "event_at": temporal["event_at"],
@@ -204,6 +225,7 @@ def extract(context: ExtractionContext) -> list[dict]:
                     "event_hierarchy": _event_hierarchy(context.text, event),
                     "valence": valence,
                     "intensity": intensity,
+                    "salience": intensity,
                 },
                 "summary": f"{context.subject_display} experienced {event}.",
                 "confidence": 0.78 if context.person_id is not None else 0.55,

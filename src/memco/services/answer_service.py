@@ -43,7 +43,10 @@ class AnswerService:
     }
     DATE_RE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}(?:-\d{2})?)?\b")
     RELATION_TERMS = {
+        "acquaintance",
+        "best_friend",
         "brother",
+        "client",
         "colleague",
         "father",
         "friend",

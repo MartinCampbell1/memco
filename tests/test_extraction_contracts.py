@@ -1177,6 +1177,174 @@ def test_pdf_source_extraction_publish_and_retrieve_preserves_page_locator_and_s
     assert retrieved_evidence["locator_json"]["source_segment_locator"]["page_label"] == "Page 2"
 
 
+def test_markdown_source_extraction_publish_and_retrieve_preserves_section_locator(settings, tmp_path):
+    candidate_repo = CandidateRepository()
+    provider = _RecordingExtractionProvider()
+    extraction = ExtractionService(llm_provider=provider)
+    source = tmp_path / "alice-journal.md"
+    source.write_text(
+        "\n".join(
+            [
+                "---",
+                "title: Alice Journal",
+                "date: 2026-04-24",
+                "---",
+                "",
+                "# 2026-04-24",
+                "",
+                "Alice moved to Lisbon in 2024.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with get_connection(settings.db_path) as conn:
+        person = FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        imported = IngestService().import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="markdown",
+        )
+        extracted = extraction.extract_candidates_from_source(
+            conn,
+            source_id=imported.source_id,
+            person_id=int(person["id"]),
+            speaker_label="Alice",
+        )
+        assert extracted
+        candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=imported.source_id,
+            conversation_id=None,
+            chunk_kind=extracted[0]["chunk_kind"],
+            chunk_id=int(extracted[0]["chunk_id"]),
+            domain=extracted[0]["domain"],
+            category=extracted[0]["category"],
+            subcategory=extracted[0]["subcategory"],
+            canonical_key=extracted[0]["canonical_key"],
+            payload=extracted[0]["payload"],
+            summary=extracted[0]["summary"],
+            confidence=float(extracted[0]["confidence"]),
+        )
+        candidate = candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(candidate["id"]),
+            evidence=extracted[0]["evidence"],
+        )
+        candidate = candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(candidate["id"]),
+            candidate_status="validated_candidate",
+        )
+        published = PublishService().publish_candidate(conn, workspace_slug="default", candidate_id=int(candidate["id"]))
+        retrieved = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"),
+        )
+
+    candidate_evidence = extracted[0]["evidence"][0]
+    assert candidate_evidence["source_segment_ids"]
+    fact_evidence = published["fact"]["evidence"][0]
+    assert fact_evidence["quote_text"].startswith("# 2026-04-24")
+    assert fact_evidence["locator_json"]["source_type"] == "markdown"
+    assert fact_evidence["locator_json"]["source_segment_type"] == "markdown_section"
+    assert fact_evidence["locator_json"]["source_segment_locator"]["heading"] == "2026-04-24"
+    assert fact_evidence["locator_json"]["source_segment_locator"]["date"] == "2026-04-24"
+    assert isinstance(fact_evidence["locator_json"]["source_segment_locator"]["char_start"], int)
+    retrieved_evidence = retrieved.hits[0].evidence[0]
+    assert retrieved_evidence["source_segment_id"] == fact_evidence["source_segment_id"]
+    assert retrieved_evidence["locator_json"]["source_type"] == "markdown"
+    assert retrieved_evidence["locator_json"]["source_segment_locator"]["heading"] == "2026-04-24"
+
+
+def test_inline_note_extraction_publish_and_retrieve_preserves_note_locator(settings):
+    candidate_repo = CandidateRepository()
+    provider = _RecordingExtractionProvider()
+    extraction = ExtractionService(llm_provider=provider)
+
+    with get_connection(settings.db_path) as conn:
+        person = FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        imported = IngestService().import_text(
+            settings,
+            conn,
+            workspace_slug="default",
+            text="Alice moved to Lisbon in 2024.",
+            title="Alice Seed",
+            source_type="note",
+        )
+        extracted = extraction.extract_candidates_from_source(
+            conn,
+            source_id=imported.source_id,
+            person_id=int(person["id"]),
+            speaker_label="Alice",
+        )
+        assert extracted
+        candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=imported.source_id,
+            conversation_id=None,
+            chunk_kind=extracted[0]["chunk_kind"],
+            chunk_id=int(extracted[0]["chunk_id"]),
+            domain=extracted[0]["domain"],
+            category=extracted[0]["category"],
+            subcategory=extracted[0]["subcategory"],
+            canonical_key=extracted[0]["canonical_key"],
+            payload=extracted[0]["payload"],
+            summary=extracted[0]["summary"],
+            confidence=float(extracted[0]["confidence"]),
+        )
+        candidate = candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(candidate["id"]),
+            evidence=extracted[0]["evidence"],
+        )
+        candidate = candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(candidate["id"]),
+            candidate_status="validated_candidate",
+        )
+        published = PublishService().publish_candidate(conn, workspace_slug="default", candidate_id=int(candidate["id"]))
+        retrieved = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"),
+        )
+
+    candidate_evidence = extracted[0]["evidence"][0]
+    assert candidate_evidence["source_type"] == "note"
+    assert candidate_evidence["source_segment_ids"]
+    fact_evidence = published["fact"]["evidence"][0]
+    assert fact_evidence["quote_text"] == "Alice moved to Lisbon in 2024."
+    assert fact_evidence["locator_json"]["source_type"] == "note"
+    assert fact_evidence["locator_json"]["source_segment_type"] == "inline_note"
+    assert fact_evidence["locator_json"]["source_segment_locator"]["origin_uri"] == "inline://alice-seed"
+    assert fact_evidence["locator_json"]["source_segment_locator"]["char_start"] == 0
+    assert fact_evidence["locator_json"]["source_segment_locator"]["char_end"] == len("Alice moved to Lisbon in 2024.")
+    retrieved_evidence = retrieved.hits[0].evidence[0]
+    assert retrieved_evidence["source_segment_id"] == fact_evidence["source_segment_id"]
+    assert retrieved_evidence["locator_json"]["source_type"] == "note"
+    assert retrieved_evidence["locator_json"]["source_segment_locator"]["origin_uri"] == "inline://alice-seed"
+
+
 def test_provider_overcaptured_payloads_are_forced_to_review(settings):
     extraction = ExtractionService.from_settings(settings)
 
@@ -1664,17 +1832,26 @@ def test_preferences_prompt_contract_includes_evolution_examples():
 def test_social_circle_extractor_captures_current_flag_and_relationship_event():
     contexts = [
         _context("Bob is my friend.", resolve_person_id=lambda label: 7),
+        _context("My manager is Priya."),
+        _context("Jordan is my client."),
+        _context("My acquaintance is Lee."),
         _context("Alice used to be my manager."),
     ]
 
     candidates = [candidate for context in contexts for candidate in extract_social_circle(context)]
     friend = next(candidate for candidate in candidates if candidate["category"] == "friend")
-    manager = next(candidate for candidate in candidates if candidate["category"] == "manager")
+    current_manager = next(candidate for candidate in candidates if candidate["category"] == "manager" and candidate["payload"]["is_current"])
+    client = next(candidate for candidate in candidates if candidate["category"] == "client")
+    acquaintance = next(candidate for candidate in candidates if candidate["category"] == "acquaintance")
+    past_manager = next(candidate for candidate in candidates if candidate["category"] == "manager" and not candidate["payload"]["is_current"])
 
     assert friend["payload"]["target_person_id"] == 7
     assert friend["payload"]["is_current"] is True
-    assert manager["payload"]["is_current"] is False
-    assert manager["payload"]["target_label"] == "Alice"
+    assert current_manager["payload"]["target_label"] == "Priya"
+    assert client["payload"]["target_label"] == "Jordan"
+    assert acquaintance["payload"]["target_label"] == "Lee"
+    assert past_manager["payload"]["is_current"] is False
+    assert past_manager["payload"]["target_label"] == "Alice"
 
 
 def test_social_circle_extractor_captures_relationship_event():
@@ -1762,7 +1939,7 @@ def test_work_extractor_covers_engagement_client_role_and_dates():
 
 def test_work_extractor_covers_project_client_team_outcomes_and_status():
     candidates = extract_work(
-        _context("I shipped Project Atlas for Acme with the mobile team. The outcome was 20% faster onboarding.")
+        _context("I shipped Project Atlas for Acme with Bob on the mobile team. The outcome was 20% faster onboarding.")
     )
     project = next(candidate for candidate in candidates if candidate["category"] == "project")
 
@@ -1772,6 +1949,7 @@ def test_work_extractor_covers_project_client_team_outcomes_and_status():
         "team": "mobile",
         "client": "Acme",
         "outcomes": ["20% faster onboarding"],
+        "collaborators": ["Bob"],
     }
     assert validate_candidate_payload(domain="work", category="project", payload=project["payload"]) == project["payload"]
 
@@ -1783,6 +1961,7 @@ def test_work_prompt_contract_includes_complete_category_examples():
     assert any("staff engineer" in item["text"] for item in work["examples"])
     assert any("engagement=consulting" in item["extract"] for item in work["examples"])
     assert any("outcomes=" in item["extract"] for item in work["examples"])
+    assert {"outcomes", "tasks", "collaborators"} <= set(work["categories"]["project"])
 
 
 def test_work_extractor_captures_role_skill_and_past_context():
@@ -1824,9 +2003,11 @@ def test_experiences_extractor_captures_accident_with_temporal_location_valence_
     assert "car accident" in payload["event"]
     assert payload["event_at"] == "October 2023"
     assert payload["temporal_anchor"] == "October 2023"
+    assert payload["event_type"] == "accident"
     assert payload["location"] == "Grand Canyon"
     assert payload["valence"] == "negative"
     assert payload["intensity"] >= 0.8
+    assert payload["salience"] == payload["intensity"]
     assert payload["outcome"] == "pause pottery"
     assert payload["lesson"] == ""
     assert payload["linked_persons"] == []
@@ -1986,9 +2167,10 @@ def test_phase6_schema_docs_and_contracts_include_expanded_taxonomy():
     work = domains["work"]
 
     assert {"age_birth", "health", "values", "finances", "legal", "travel_history", "life_milestone", "communication_preference", "other_stable_self_knowledge"} <= set(biography)
-    assert {"location", "intensity", "lesson", "recurrence", "linked_persons", "linked_projects"} <= set(experiences["event"])
+    assert {"event_type", "location", "intensity", "salience", "lesson", "recurrence", "linked_persons", "linked_projects"} <= set(experiences["event"])
     assert {"preference_domain", "valid_from", "valid_to", "original_phrasing", "context"} <= set(preferences["preference"])
     assert {"closeness", "trust", "valence", "aliases", "is_private"} <= set(social["friend"])
+    assert {"best_friend", "manager", "client", "acquaintance"} <= set(social)
     assert {"employment", "engagement", "project"} <= set(work)
     assert {"outcomes", "team", "constraints", "preferences"} <= set(work["employment"] + work["project"])
 

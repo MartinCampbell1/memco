@@ -33,7 +33,7 @@ QUESTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None, str]] = [
         "question asks about work projects",
     ),
     (
-        re.compile(r"\bskill(?:s)?\b|\bknow(?:s)?\b|\bcan\b|\bable\s+to\b", re.IGNORECASE),
+        re.compile(r"\bskill(?:s)?\b|\bcan\b|\bable\s+to\b", re.IGNORECASE),
         "work",
         "skill",
         "question asks about skills",
@@ -42,14 +42,24 @@ QUESTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None, str]] = [
     (re.compile(r"работ|професси|карьер|чем .*занима", re.IGNORECASE), "work", "employment", "question asks about work"),
     (re.compile(r"уме|использ|знаю", re.IGNORECASE), "work", "skill", "question asks about skills"),
     (
-        re.compile(r"\bwhat\s+happened\b|\bwhat\s+event\b|\bwhen\s+did\b.*\bhappen\b|\bwhy\s+did\b.*\b(?:pause|stop|quit)\b|\baccident\b|\binjur(?:y|ed)\b|\btrip\b|\bexperience\b|\battend(?:ed)?\b|\bvisit(?:ed)?\b|\bwent\b|\btravel(?:ed)?\b", re.IGNORECASE),
+        re.compile(r"\bwhat\s+happened\b|\bwhat\s+event\b|\bwhen\s+did\b.*\bhappen\b|\bwhat\s+changed\b|\bchanged\s+in\b|\bwhy\s+did\b.*\b(?:pause|stop|quit)\b|\bwhat\s+did\b.*\blearn\b|\blesson(?:s)?\b|\btakeaway(?:s)?\b|\boutcome(?:s)?\b|\baccident\b|\binjur(?:y|ed)\b|\btrip\b|\bexperience\b|\battend(?:ed)?\b|\bvisit(?:ed)?\b|\bwent\b|\btravel(?:ed)?\b",
+            re.IGNORECASE),
         "experiences",
         "event",
         "question asks about experiences",
     ),
     (re.compile(r"посет|был на|была на|ходил на|ходила на|поездк|путешеств", re.IGNORECASE), "experiences", "event", "question asks about experiences"),
     (
-        re.compile(r"\bfriend\b|\bsister\b|\bbrother\b|\bmother\b|\bfather\b|\bpartner\b|\bspouse\b|\bwife\b|\bhusband\b|\bcolleague\b",
+        re.compile(
+            r"\bknow(?:s)?\s+[A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*\b|\bclose\s+people\b|\bclose\s+friend(?:s)?\b",
+            re.IGNORECASE,
+        ),
+        "social_circle",
+        None,
+        "question asks about known or close people",
+    ),
+    (
+        re.compile(r"\bfriend\b|\bsister\b|\bbrother\b|\bmother\b|\bfather\b|\bpartner\b|\bspouse\b|\bwife\b|\bhusband\b|\bcolleague\b|\bmanager\b|\bclient\b|\bacquaintance\b",
             re.IGNORECASE),
         "social_circle",
         None,
@@ -65,7 +75,7 @@ QUESTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None, str]] = [
 
 RELATION_TERMS = RELATION_QUERY_TERMS
 TEMPORAL_HISTORY_RE = re.compile(r"\b(before|previously|used to|used to be|use to|earlier|formerly|past|previous|раньше|ранее|прежде|до|прошл)\b", re.IGNORECASE)
-TEMPORAL_CURRENT_RE = re.compile(r"\b(now|currently|current|today|these days|сейчас|теперь)\b", re.IGNORECASE)
+TEMPORAL_CURRENT_RE = re.compile(r"\b(now|currently|current|today|these days|still|сейчас|теперь)\b", re.IGNORECASE)
 TEMPORAL_WHEN_RE = re.compile(r"\b(when|когда)\b", re.IGNORECASE)
 NAME_CLAIM_RE = re.compile(r"\b(?:named|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)")
 PROPER_NAME_RE = re.compile(r"\b[A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*\b")
@@ -87,7 +97,10 @@ EVENT_CLAIM_RE = re.compile(
     r"(?P<value>[A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*)"
     r"(?:\s+in\s+(?:19|20)\d{2}\b)?",
 )
-ACCIDENT_CLAIM_RE = re.compile(r"\b(?P<value>[a-z]+(?:\s+[a-z]+){0,3}\s+accident)\b", re.IGNORECASE)
+ACCIDENT_CLAIM_RE = re.compile(
+    r"\b(?P<value>(?:(?:serious|major|minor|car|bike|bicycle|road|traffic|ski|the|an|a)\s+){0,4}accident)\b",
+    re.IGNORECASE,
+)
 DATE_CLAIM_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 RELATION_TARGET_RE = re.compile(
     r"\b(?:is|was)\s+(?P<target>[A-Z][A-Za-z0-9&.\-]+(?:\s+[A-Z][A-Za-z0-9&.\-]+)*)\s+[A-Z][A-Za-z0-9&.\-]+'s\s+(?:"
@@ -175,11 +188,13 @@ class PlannerService:
         usage_tracker: LLMUsageTracker | None = None,
         llm_provider: LLMProvider | None = None,
         use_llm: bool | None = None,
+        llm_mode: str = "hybrid",
         fail_closed_on_provider_error: bool = True,
     ) -> None:
         self.usage_tracker = usage_tracker
         self.llm_provider = llm_provider
         self.use_llm = bool(llm_provider) if use_llm is None else use_llm
+        self.llm_mode = llm_mode
         self.fail_closed_on_provider_error = fail_closed_on_provider_error
 
     def _record_usage(self, *, query: str, plan: RetrievalPlan, request: RetrievalRequest | None = None) -> None:
@@ -212,16 +227,41 @@ class PlannerService:
         )
 
     def plan(self, payload: RetrievalRequest) -> RetrievalPlan:
-        if self._should_use_provider(payload):
+        if self.use_llm and self.llm_provider is not None and not payload.domain and not payload.category:
+            deterministic_plan = self._rule_plan(payload, record_usage=False)
+            if not self._should_use_provider(payload, deterministic_plan=deterministic_plan):
+                self._record_usage(query=payload.query, plan=deterministic_plan, request=payload)
+                return deterministic_plan
             provider_plan = self._try_provider_plan(payload)
             if provider_plan is not None:
                 return provider_plan
             if self.fail_closed_on_provider_error:
                 return self._fail_closed_plan(payload, reason="LLM planner provider failed or returned invalid output.")
+            self._record_usage(query=payload.query, plan=deterministic_plan, request=payload)
+            return deterministic_plan
         return self._rule_plan(payload)
 
-    def _should_use_provider(self, payload: RetrievalRequest) -> bool:
-        return bool(self.use_llm and self.llm_provider is not None and not payload.domain and not payload.category)
+    def _should_use_provider(self, payload: RetrievalRequest, *, deterministic_plan: RetrievalPlan) -> bool:
+        if self.llm_mode == "always":
+            return True
+        if self.llm_mode != "hybrid":
+            return False
+        return (
+            deterministic_plan.requires_cross_domain_synthesis
+            or self._deterministic_plan_low_confidence(deterministic_plan)
+        )
+
+    def _deterministic_plan_low_confidence(self, plan: RetrievalPlan) -> bool:
+        if plan.question_type == "other":
+            return True
+        if len(plan.domain_queries) != 1:
+            return False
+        query = plan.domain_queries[0]
+        return (
+            query.domain == "biography"
+            and query.category is None
+            and query.reason == "default fallback for personal factual question"
+        )
 
     def _available_domain_schema(self) -> dict[str, list[str]]:
         return {domain: sorted(contract.categories.keys()) for domain, contract in DOMAIN_PROMPT_CONTRACTS.items()}
@@ -442,7 +482,7 @@ class PlannerService:
         self._record_usage(query=payload.query, plan=plan, request=payload)
         return plan
 
-    def _rule_plan(self, payload: RetrievalRequest) -> RetrievalPlan:
+    def _rule_plan(self, payload: RetrievalRequest, *, record_usage: bool = True) -> RetrievalPlan:
         temporal_mode = self._resolve_temporal_mode(payload.query, payload.temporal_mode)
         if payload.domain or payload.category:
             plan = RetrievalPlan(
@@ -463,7 +503,8 @@ class PlannerService:
                 claim_checks=self._claim_checks(payload.query, person_slug=payload.person_slug),
                 support_expectation=self._support_expectation(payload.query, 1),
             )
-            self._record_usage(query=payload.query, plan=plan, request=payload)
+            if record_usage:
+                self._record_usage(query=payload.query, plan=plan, request=payload)
             return plan
 
         domain_queries: list[RetrievalDomainPlan] = []
@@ -532,7 +573,8 @@ class PlannerService:
             claim_checks=self._claim_checks(payload.query, person_slug=payload.person_slug),
             support_expectation=self._support_expectation(payload.query, len({item.domain for item in domain_queries})),
         )
-        self._record_usage(query=payload.query, plan=plan, request=payload)
+        if record_usage:
+            self._record_usage(query=payload.query, plan=plan, request=payload)
         return plan
 
     def _resolve_temporal_mode(self, query: str, requested_mode: str) -> str:
@@ -620,6 +662,13 @@ class PlannerService:
         for match in ACCIDENT_CLAIM_RE.findall(query):
             value = re.sub(r"^.*\b(?:in|had|have|has)\s+a\s+", "", match.strip(), flags=re.IGNORECASE)
             value = re.sub(r"^.*\b(?:have|has|had)\s+the\s+", "", value, flags=re.IGNORECASE)
+            value = re.sub(r"^(?:an?|the)\s+(?=\w+\s+accident\b)", "", value, flags=re.IGNORECASE)
+            if re.search(r"\b(?:have|has|had)\s+(?:an?|the)\s+accident\b", match, flags=re.IGNORECASE) or re.fullmatch(
+                r"(?:an?|the)\s+accident",
+                value,
+                flags=re.IGNORECASE,
+            ):
+                value = "accident"
             checks.append(RetrievalClaimCheck(label="event", value=value, claim_type="event"))
         for match in DATE_CLAIM_RE.findall(query):
             checks.append(RetrievalClaimCheck(label="date", value=match.strip(), claim_type="date"))
