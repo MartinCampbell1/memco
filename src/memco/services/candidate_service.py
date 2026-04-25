@@ -70,6 +70,9 @@ class CandidateService:
                 candidate_id=int(candidate["id"]),
                 evidence=item.get("evidence", []),
             )
+            if candidate["candidate_status"] == "published":
+                persisted.append(candidate)
+                continue
             if needs_review:
                 candidate = self.candidate_repository.mark_candidate_status(
                     conn,

@@ -1,3 +1,6 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Release Gap Remediation Plan
 
 Date: 2026-04-21  

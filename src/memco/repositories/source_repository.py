@@ -76,7 +76,15 @@ class SourceRepository:
             raise RuntimeError("Failed to record source")
         return int(row["id"])
 
-    def replace_chunks(self, conn, *, source_id: int, parsed_text: str, section_title: str = "") -> None:
+    def replace_chunks(
+        self,
+        conn,
+        *,
+        source_id: int,
+        parsed_text: str,
+        section_title: str = "",
+        segments: list[dict[str, object]] | None = None,
+    ) -> None:
         existing = conn.execute(
             "SELECT id FROM source_chunks WHERE source_id = ?",
             (source_id,),
@@ -84,13 +92,45 @@ class SourceRepository:
         for row in existing:
             conn.execute("DELETE FROM source_chunk_fts WHERE rowid = ?", (int(row["id"]),))
         conn.execute("DELETE FROM source_chunks WHERE source_id = ?", (source_id,))
-        conn.execute(
-            "DELETE FROM source_segments WHERE source_id = ? AND segment_type = 'source_chunk'",
-            (source_id,),
-        )
+        conn.execute("DELETE FROM source_segments WHERE source_id = ? AND segment_type IN ('source_chunk', 'pdf_page')", (source_id,))
         now = isoformat_z()
-        pieces = chunk_text_by_tokens(parsed_text, max_tokens=500, overlap_tokens=50)
-        for index, piece in enumerate(pieces, start=0):
+        if segments:
+            pieces = [
+                {
+                    "text": str(segment.get("text") or "").strip(),
+                    "section_title": str(segment.get("section_title") or section_title or ""),
+                    "locator": segment.get("locator") if isinstance(segment.get("locator"), dict) else {},
+                    "segment_type": str(segment.get("segment_type") or "source_chunk"),
+                    "segment_index": int(segment.get("segment_index") or index),
+                }
+                for index, segment in enumerate(segments)
+                if str(segment.get("text") or "").strip()
+            ]
+        else:
+            token_pieces = chunk_text_by_tokens(parsed_text, max_tokens=500, overlap_tokens=50)
+            pieces = [
+                {
+                    "text": piece,
+                    "section_title": section_title,
+                    "locator": {
+                        "token_window": {
+                            "max_tokens": 500,
+                            "overlap_tokens": 50,
+                            "overlap_prev": index > 0,
+                            "overlap_next": index < len(token_pieces) - 1,
+                        }
+                    },
+                    "segment_type": "source_chunk",
+                    "segment_index": index,
+                }
+                for index, piece in enumerate(token_pieces)
+            ]
+        for index, piece_spec in enumerate(pieces, start=0):
+            piece = str(piece_spec["text"])
+            locator = dict(piece_spec.get("locator") or {})
+            segment_type = str(piece_spec.get("segment_type") or "source_chunk")
+            segment_index = int(piece_spec.get("segment_index") or index)
+            piece_section_title = str(piece_spec.get("section_title") or "")
             cursor = conn.execute(
                 """
                 INSERT INTO source_chunks (source_id, chunk_index, text, token_count, section_title, locator_json)
@@ -101,37 +141,28 @@ class SourceRepository:
                     index,
                     piece,
                     max(1, len(piece.split())),
-                    section_title,
-                    json.dumps(
-                        {
-                            "token_window": {
-                                "max_tokens": 500,
-                                "overlap_tokens": 50,
-                                "overlap_prev": index > 0,
-                                "overlap_next": index < len(pieces) - 1,
-                            }
-                        },
-                        ensure_ascii=False,
-                    ),
+                    piece_section_title,
+                    json.dumps(locator, ensure_ascii=False),
                 ),
             )
             conn.execute(
                 "INSERT INTO source_chunk_fts(rowid, text, section_title) VALUES (?, ?, ?)",
-                (int(cursor.lastrowid), piece, section_title),
+                (int(cursor.lastrowid), piece, piece_section_title),
             )
             conn.execute(
                 """
                 INSERT INTO source_segments (
                     source_id, segment_type, segment_index, chunk_id, conversation_id, session_id, message_id,
                     text, locator_json, occurred_at, created_at
-                ) VALUES (?, 'source_chunk', ?, ?, NULL, NULL, NULL, ?, ?, '', ?)
+                ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?, ?, '', ?)
                 """,
                 (
                     source_id,
-                    index,
+                    segment_type,
+                    segment_index,
                     int(cursor.lastrowid),
                     piece,
-                    "{}",
+                    json.dumps(locator, ensure_ascii=False),
                     now,
                 ),
             )
@@ -149,6 +180,18 @@ class SourceRepository:
             LIMIT 1
             """,
             (chunk_id,),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def get_segment(self, conn, *, segment_id: int) -> dict | None:
+        row = conn.execute(
+            """
+            SELECT *
+            FROM source_segments
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (segment_id,),
         ).fetchone()
         return dict(row) if row is not None else None
 

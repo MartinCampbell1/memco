@@ -19,6 +19,8 @@ def _sha256_text(text: str) -> str:
 
 
 def _file_sha256(path: Path) -> str | None:
+    if path.is_symlink():
+        return _sha256_text(f"symlink:{path.readlink()}")
     if not path.exists() or not path.is_file():
         return None
     digest = hashlib.sha256()
@@ -41,6 +43,29 @@ def _git_capture(*, project_root: Path, args: list[str]) -> str:
     return completed.stdout.strip()
 
 
+def _worktree_sha256(project_root: Path, *, status: str) -> str:
+    digest = hashlib.sha256()
+    digest.update(status.encode("utf-8"))
+    tracked_diff = _git_capture(project_root=project_root, args=["diff", "--no-ext-diff", "--binary", "HEAD", "--"])
+    digest.update(b"\n--tracked-diff--\n")
+    digest.update(tracked_diff.encode("utf-8", errors="replace"))
+    cached_diff = _git_capture(
+        project_root=project_root,
+        args=["diff", "--cached", "--no-ext-diff", "--binary", "HEAD", "--"],
+    )
+    digest.update(b"\n--cached-diff--\n")
+    digest.update(cached_diff.encode("utf-8", errors="replace"))
+    untracked = _git_capture(project_root=project_root, args=["ls-files", "-o", "--exclude-standard"])
+    digest.update(b"\n--untracked--\n")
+    for rel_path in sorted(line for line in untracked.splitlines() if line.strip()):
+        path = project_root / rel_path
+        digest.update(rel_path.encode("utf-8", errors="replace"))
+        digest.update(b"\0")
+        digest.update(str(_file_sha256(path)).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def _checkout_state(project_root: Path) -> dict[str, Any]:
     status = _git_capture(project_root=project_root, args=["status", "--porcelain=v1"])
     status_lines = [line for line in status.splitlines() if line.strip()]
@@ -50,6 +75,7 @@ def _checkout_state(project_root: Path) -> dict[str, Any]:
         "dirty": bool(status_lines),
         "dirty_count": len(status_lines),
         "status_sha256": _sha256_text(status),
+        "worktree_sha256": _worktree_sha256(project_root, status=status),
     }
 
 
@@ -151,10 +177,10 @@ def evaluate_artifact_freshness(payload: dict[str, Any], *, project_root: Path) 
     current_config = current["config_source"]
     artifact_env = context.get("env_overrides") or {}
     current_env = current["env_overrides"]
-    stale_checkout = (
-        artifact_checkout.get("git_head") != current_checkout.get("git_head")
-        or artifact_checkout.get("status_sha256") != current_checkout.get("status_sha256")
-    )
+    stale_checkout = artifact_checkout.get("git_head") != current_checkout.get("git_head")
+    stale_checkout = stale_checkout or artifact_checkout.get("status_sha256") != current_checkout.get("status_sha256")
+    if artifact_checkout.get("worktree_sha256") is not None or current_checkout.get("worktree_sha256") is not None:
+        stale_checkout = stale_checkout or artifact_checkout.get("worktree_sha256") != current_checkout.get("worktree_sha256")
     stale_config = artifact_config.get("sha256") != current_config.get("sha256")
     stale_env = context.get("status_source") != current.get("status_source") or artifact_env != current_env
     is_current = not stale_checkout and not stale_config and not stale_env
@@ -168,6 +194,8 @@ def evaluate_artifact_freshness(payload: dict[str, Any], *, project_root: Path) 
         "current_evaluated_at": current["generated_at"],
         "artifact_git_head": artifact_checkout.get("git_head"),
         "current_git_head": current_checkout.get("git_head"),
+        "artifact_worktree_sha256": artifact_checkout.get("worktree_sha256"),
+        "current_worktree_sha256": current_checkout.get("worktree_sha256"),
         "artifact_config_sha256": artifact_config.get("sha256"),
         "current_config_sha256": current_config.get("sha256"),
         "artifact_status_source": context.get("status_source"),

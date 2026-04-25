@@ -1,3 +1,6 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Docker Engine Recovery Notes For Memco Postgres Validation
 
 Date: 2026-04-22

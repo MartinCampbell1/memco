@@ -336,8 +336,22 @@ def run_live_operator_smoke(
                 "actor": owner_actor,
             },
         )
+        alice_residence_hit_ids = {
+            int(hit.get("fact_id"))
+            for hit in alice_retrieve.get("hits", [])
+            if hit.get("fact_id") is not None
+            and hit.get("domain") == "biography"
+            and hit.get("category") == "residence"
+            and "lisbon" in json.dumps(hit, ensure_ascii=False).lower()
+        }
+        supported_chat_fact_ids = {
+            int(fact_id)
+            for fact_id in [*supported_chat.get("fact_ids", []), *supported_chat.get("used_fact_ids", [])]
+            if fact_id is not None
+        }
+        alice_answer_text = str(supported_chat.get("answer") or "").lower()
         checks = {
-            "alice_retrieve_supported": bool(alice_retrieve.get("hits")),
+            "alice_retrieve_supported": bool(alice_residence_hit_ids),
             "bob_retrieve_supported": bool(bob_retrieve.get("hits")),
             "supported_chat_has_fact_ids": not supported_chat.get("refused", True)
             and bool(supported_chat.get("fact_ids"))
@@ -346,6 +360,9 @@ def run_live_operator_smoke(
             "supported_chat_used_llm_answer_ids": not supported_chat.get("refused", True)
             and bool(supported_chat.get("used_fact_ids"))
             and bool(supported_chat.get("used_evidence_ids")),
+            "supported_chat_mentions_expected_residence": "lisbon" in alice_answer_text,
+            "supported_chat_excludes_preference_value": "tea" not in alice_answer_text,
+            "supported_chat_uses_residence_fact": bool(alice_residence_hit_ids & supported_chat_fact_ids),
             "unsupported_premise_refused": bool(unsupported_chat.get("refused")),
             "contradicted_premise_refused": bool(contradicted_chat.get("refused")),
             "subject_isolation_refused": bool(isolation_chat.get("refused")),
@@ -360,6 +377,7 @@ def run_live_operator_smoke(
                 alice_evidence_ids=supported_chat.get("evidence_ids", []),
                 alice_used_fact_ids=supported_chat.get("used_fact_ids", []),
                 alice_used_evidence_ids=supported_chat.get("used_evidence_ids", []),
+                alice_expected_residence_fact_ids=sorted(alice_residence_hit_ids),
                 alice_planner_version=supported_chat.get("retrieval", {}).get("planner", {}).get("plan_version", ""),
             )
         )

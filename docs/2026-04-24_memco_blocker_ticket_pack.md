@@ -1,8 +1,11 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Blocker Ticket Pack
 
 Date: 2026-04-24
 Status: historical pre-remediation ticket pack, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Audit package index: `docs/2026-04-24_memco_audit_package_index.md`
 Source audit: `docs/2026-04-24_memco_final_release_audit.md`
 Evidence appendix: `docs/2026-04-24_memco_audit_evidence_appendix.md`
@@ -13,7 +16,7 @@ Docs status map: `docs/2026-04-24_memco_docs_status_map.md`
 
 This file converts the final audit into implementation tickets.
 
-These tickets describe the pre-remediation blocker queue. The current private release closure records which blockers were remediated and what fresh evidence supports the present `GO`.
+These tickets describe the pre-remediation blocker queue. Current status lives in `docs/CURRENT_STATUS.md`; dated release-closure evidence remains historical context only.
 
 These tickets are intentionally scoped to Martin's current private, single-user, Hermes/API-backed use case. They do not ask for public SaaS accounts, billing, public profiles, or broad multi-user UX.
 

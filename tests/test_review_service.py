@@ -487,6 +487,20 @@ def test_review_dashboard_surfaces_cards_flags_evidence_and_consolidation_previe
             status="pending",
             person_id=int(person["id"]),
         )
+        biography_dashboard = service.dashboard(
+            conn,
+            workspace_slug="default",
+            status="pending",
+            person_id=int(person["id"]),
+            domain="biography",
+        )
+        social_dashboard = service.dashboard(
+            conn,
+            workspace_slug="default",
+            status="pending",
+            person_id=int(person["id"]),
+            domain="social_circle",
+        )
 
     cards = {card["candidate_id"]: card for card in dashboard["candidate_cards"]}
     assert dashboard["summary"]["review_item_count"] == 2
@@ -498,3 +512,15 @@ def test_review_dashboard_surfaces_cards_flags_evidence_and_consolidation_previe
     assert dashboard["summary"]["sensitive_count"] == 2
     assert dashboard["summary"]["psychometrics_inference_count"] == 1
     assert dashboard["summary"]["proposed_supersede_count"] == 1
+
+    biography_cards = {card["candidate_id"]: card for card in biography_dashboard["candidate_cards"]}
+    assert biography_dashboard["filters"]["domain"] == "biography"
+    assert biography_dashboard["summary"]["review_item_count"] == 1
+    assert set(biography_cards) == {int(residence_candidate["id"]), int(family_candidate["id"])}
+    assert biography_dashboard["review_items"][0]["candidate_id"] == int(family_candidate["id"])
+
+    social_cards = {card["candidate_id"]: card for card in social_dashboard["candidate_cards"]}
+    assert social_dashboard["filters"]["domain"] == "social_circle"
+    assert social_dashboard["summary"]["review_item_count"] == 1
+    assert set(social_cards) == {int(social_candidate["id"])}
+    assert social_dashboard["review_items"][0]["candidate_id"] == int(social_candidate["id"])

@@ -149,21 +149,21 @@ class ExtractionService:
             candidates = self._mock_extract_from_chunk(metadata)
         else:
             candidates = self._extract_from_text(
-            text=metadata["text"],
-            subject_key=metadata["subject_key"],
-            subject_display=metadata["subject_display"],
-            speaker_label=metadata["speaker_label"],
-            person_id=metadata["person_id"],
-            conn=metadata["conn"],
-            workspace_id=metadata["workspace_id"],
-            message_id=metadata["message_id"],
-            source_segment_id=metadata["source_segment_id"],
-            session_id=metadata["session_id"],
-            occurred_at=metadata["occurred_at"],
-            include_style=metadata["include_style"],
-            include_psychometrics=metadata["include_psychometrics"],
-        )
-        if extraction_domain:
+                text=metadata["text"],
+                subject_key=metadata["subject_key"],
+                subject_display=metadata["subject_display"],
+                speaker_label=metadata["speaker_label"],
+                person_id=metadata["person_id"],
+                conn=metadata["conn"],
+                workspace_id=metadata["workspace_id"],
+                message_id=metadata["message_id"],
+                source_segment_id=metadata["source_segment_id"],
+                session_id=metadata["session_id"],
+                occurred_at=metadata["occurred_at"],
+                include_style=metadata["include_style"],
+                include_psychometrics=metadata["include_psychometrics"],
+            )
+        if extraction_domain and extraction_domain != "combined_legacy":
             return [candidate for candidate in candidates if candidate.get("domain") == extraction_domain]
         return candidates
 
@@ -182,6 +182,8 @@ class ExtractionService:
             metadata={
                 "stage": "extraction",
                 "schema_name": metadata.get("schema_name"),
+                "extraction_domain": metadata.get("extraction_domain"),
+                "domain": metadata.get("extraction_domain"),
                 "message_id": metadata.get("message_id"),
                 "source_id": metadata.get("source_id"),
                 "chunk_id": metadata.get("chunk_id"),
@@ -226,6 +228,7 @@ class ExtractionService:
         if attribution_method:
             item["attribution_method"] = attribution_method
             item["attribution_confidence"] = attribution_confidence
+        if source_type:
             item["source_type"] = source_type
         return item
 
@@ -321,6 +324,7 @@ class ExtractionService:
                 if attribution_method:
                     evidence_item["attribution_method"] = attribution_method
                     evidence_item["attribution_confidence"] = attribution_confidence
+                if source_type:
                     evidence_item["source_type"] = source_type
                 normalized.append(evidence_item)
             if normalized:
@@ -563,6 +567,15 @@ class ExtractionService:
 
     def _extract_candidates_via_provider(
         self,
+        **kwargs,
+    ) -> list[dict]:
+        mode = self._settings.extraction.mode if self._settings is not None else "per_domain"
+        if mode == "combined_legacy":
+            return self._extract_candidates_via_provider_combined_legacy(**kwargs)
+        return self._extract_candidates_via_provider_per_domain(**kwargs)
+
+    def _extract_candidates_via_provider_per_domain(
+        self,
         *,
         text: str,
         subject_key: str,
@@ -674,31 +687,166 @@ class ExtractionService:
                     usage=response.usage,
                 )
                 for candidate in content:
-                    if not isinstance(candidate, dict):
-                        raise ValueError("LLM provider returned non-object candidate")
-                    if str(candidate.get("domain") or "") != domain_name:
-                        continue
-                    validated.append(
-                        validate_candidate(
-                            self._normalize_provider_candidate(
-                                candidate=candidate,
-                                text=text,
-                                subject_display=subject_display,
-                                person_id=person_id,
-                                message_id=message_id,
-                                source_segment_id=source_segment_id,
-                                session_id=session_id,
-                                fallback_message_ids=fallback_message_ids,
-                                fallback_source_segment_ids=fallback_source_segment_ids,
-                                fallback_session_ids=fallback_session_ids,
-                                chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
-                                attribution_method=attribution_method,
-                                attribution_confidence=attribution_confidence,
-                                source_type=source_type,
+                    try:
+                        if not isinstance(candidate, dict):
+                            raise ValueError("LLM provider returned non-object candidate")
+                        if str(candidate.get("domain") or "") != domain_name:
+                            continue
+                        validated.append(
+                            validate_candidate(
+                                self._normalize_provider_candidate(
+                                    candidate=candidate,
+                                    text=text,
+                                    subject_display=subject_display,
+                                    person_id=person_id,
+                                    message_id=message_id,
+                                    source_segment_id=source_segment_id,
+                                    session_id=session_id,
+                                    fallback_message_ids=fallback_message_ids,
+                                    fallback_source_segment_ids=fallback_source_segment_ids,
+                                    fallback_session_ids=fallback_session_ids,
+                                    chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
+                                    attribution_method=attribution_method,
+                                    attribution_confidence=attribution_confidence,
+                                    source_type=source_type,
+                                )
                             )
                         )
-                    )
+                    except ValueError:
+                        if strict_validation:
+                            raise
+                        continue
             except (RuntimeError, ValueError):
+                if strict_validation:
+                    raise
+                continue
+        return validated
+
+    def _extract_candidates_via_provider_combined_legacy(self, **kwargs) -> list[dict]:
+        text = kwargs["text"]
+        subject_key_value = kwargs["subject_key"]
+        subject_display = kwargs["subject_display"]
+        speaker_label = kwargs["speaker_label"]
+        person_id = kwargs["person_id"]
+        conn = kwargs.get("conn")
+        workspace_id = kwargs.get("workspace_id")
+        source_id = kwargs.get("source_id")
+        message_id = kwargs.get("message_id")
+        source_segment_id = kwargs.get("source_segment_id")
+        session_id = kwargs.get("session_id")
+        occurred_at = kwargs.get("occurred_at", "")
+        include_style = bool(kwargs.get("include_style", False))
+        include_psychometrics = bool(kwargs.get("include_psychometrics", False))
+        chunk = kwargs.get("chunk")
+        target_messages = kwargs.get("target_messages") or []
+        attribution_method = kwargs.get("attribution_method", "")
+        attribution_confidence = kwargs.get("attribution_confidence")
+        source_type = kwargs.get("source_type", "")
+        strict_validation = bool(kwargs.get("strict_validation", True))
+        metadata = {
+            "text": text,
+            "subject_key": subject_key_value,
+            "subject_display": subject_display,
+            "speaker_label": speaker_label,
+            "person_id": person_id,
+            "conn": conn,
+            "workspace_id": workspace_id,
+            "source_id": source_id,
+            "message_id": message_id,
+            "source_segment_id": source_segment_id,
+            "session_id": session_id,
+            "occurred_at": occurred_at,
+            "include_style": include_style,
+            "include_psychometrics": include_psychometrics,
+            "chunk_id": chunk.chunk_id if chunk is not None else None,
+            "chunk_kind": chunk.chunk_kind if chunk is not None else None,
+            "chunk_messages": [message.model_dump(mode="json") for message in chunk.messages] if chunk is not None else [],
+            "chunk_source_segment_ids": list(chunk.source_segment_ids) if chunk is not None else [],
+            "chunk_overlap_prev": chunk.overlap_prev if chunk is not None else False,
+            "chunk_overlap_next": chunk.overlap_next if chunk is not None else False,
+            "target_message_ids": [message.message_id for message in target_messages],
+            "attribution_method": attribution_method,
+            "attribution_confidence": attribution_confidence,
+            "source_type": source_type,
+            "extraction_domain": "combined_legacy",
+        }
+        response = self.llm_provider.complete_json(
+            system_prompt=self._extraction_system_prompt(
+                include_style=include_style,
+                include_psychometrics=include_psychometrics,
+            ),
+            prompt=self._extraction_prompt(
+                text=text,
+                subject_key=subject_key_value,
+                subject_display=subject_display,
+                speaker_label=speaker_label,
+                person_id=person_id,
+                message_id=message_id,
+                source_segment_id=source_segment_id,
+                session_id=session_id,
+                occurred_at=occurred_at,
+                include_style=include_style,
+                include_psychometrics=include_psychometrics,
+                chunk=chunk,
+                target_message_ids=[message.message_id for message in target_messages],
+            ),
+            schema_name=EXTRACTION_SCHEMA_NAME,
+            metadata=metadata,
+        )
+        content = response.content
+        if isinstance(content, dict) and isinstance(content.get("items"), list):
+            content = content["items"]
+        if not isinstance(content, list):
+            raise ValueError("LLM provider returned non-list candidate payload")
+        self._record_usage(
+            operation="complete_json",
+            metadata={
+                **metadata,
+                "schema_name": EXTRACTION_SCHEMA_NAME,
+                "candidate_count": len(content),
+                "candidate_domains": sorted(
+                    {
+                        str(candidate.get("domain") or "")
+                        for candidate in content
+                        if isinstance(candidate, dict) and candidate.get("domain")
+                    }
+                ),
+            },
+            usage=response.usage,
+        )
+        fallback_message_ids = [message.message_id for message in chunk.messages] if chunk is not None else []
+        fallback_source_segment_ids = list(chunk.source_segment_ids) if chunk is not None else []
+        fallback_session_ids = (
+            sorted({int(message.session_id) for message in chunk.messages if message.session_id is not None})
+            if chunk is not None
+            else []
+        )
+        validated: list[dict] = []
+        for candidate in content:
+            try:
+                if not isinstance(candidate, dict):
+                    raise ValueError("LLM provider returned non-object candidate")
+                validated.append(
+                    validate_candidate(
+                        self._normalize_provider_candidate(
+                            candidate=candidate,
+                            text=text,
+                            subject_display=subject_display,
+                            person_id=person_id,
+                            message_id=message_id,
+                            source_segment_id=source_segment_id,
+                            session_id=session_id,
+                            fallback_message_ids=fallback_message_ids,
+                            fallback_source_segment_ids=fallback_source_segment_ids,
+                            fallback_session_ids=fallback_session_ids,
+                            chunk_kind=chunk.chunk_kind if chunk is not None else "conversation",
+                            attribution_method=attribution_method,
+                            attribution_confidence=attribution_confidence,
+                            source_type=source_type,
+                        )
+                    )
+                )
+            except ValueError:
                 if strict_validation:
                     raise
                 continue
@@ -1096,7 +1244,7 @@ class ExtractionService:
             FROM source_chunks sc
             LEFT JOIN source_segments ss
               ON ss.chunk_id = sc.id
-             AND ss.segment_type = 'source_chunk'
+             AND ss.segment_type IN ('source_chunk', 'pdf_page')
             WHERE sc.source_id = ?
             ORDER BY sc.chunk_index ASC
             """,

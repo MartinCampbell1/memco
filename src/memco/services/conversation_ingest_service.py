@@ -113,7 +113,7 @@ class ConversationIngestService:
                 )
             return [message for message in messages if message["text"]]
 
-        if source_type == "email":
+        if source_type in {"email", "whatsapp", "telegram"}:
             raw_messages = meta.get("messages") if isinstance(meta.get("messages"), list) else []
             messages: list[dict] = []
             for item in raw_messages:
@@ -123,8 +123,8 @@ class ConversationIngestService:
                 message_meta = dict(item_meta) if isinstance(item_meta, dict) else {}
                 messages.append(
                     {
-                        "role": str(item.get("role") or "email"),
-                        "speaker_label": str(item.get("speaker") or item.get("from") or ""),
+                        "role": str(item.get("role") or source_type),
+                        "speaker_label": str(item.get("speaker") or item.get("from") or item.get("author") or ""),
                         "occurred_at": str(item.get("timestamp") or item.get("date") or ""),
                         "text": str(item.get("text") or item.get("body") or "").strip(),
                         "meta": message_meta,

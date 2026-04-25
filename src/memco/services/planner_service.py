@@ -64,7 +64,7 @@ QUESTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None, str]] = [
 ]
 
 RELATION_TERMS = RELATION_QUERY_TERMS
-TEMPORAL_HISTORY_RE = re.compile(r"\b(before|previously|used to|used to be|earlier|formerly|past|previous|раньше|ранее|прежде|до|прошл)\b", re.IGNORECASE)
+TEMPORAL_HISTORY_RE = re.compile(r"\b(before|previously|used to|used to be|use to|earlier|formerly|past|previous|раньше|ранее|прежде|до|прошл)\b", re.IGNORECASE)
 TEMPORAL_CURRENT_RE = re.compile(r"\b(now|currently|current|today|these days|сейчас|теперь)\b", re.IGNORECASE)
 TEMPORAL_WHEN_RE = re.compile(r"\b(when|когда)\b", re.IGNORECASE)
 NAME_CLAIM_RE = re.compile(r"\b(?:named|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)")
@@ -343,6 +343,7 @@ class PlannerService:
                 seen.add(key)
         if not domain_queries:
             raise ValueError("LLM planner returned no usable domain queries")
+        domain_queries = self._guard_provider_domain_queries(payload=payload, domain_queries=domain_queries)
 
         claim_checks = self._provider_claim_checks(output, person_slug=payload.person_slug)
         false_premise_risk = output.false_premise_risk if output.false_premise_risk in {"low", "medium", "high"} else self._false_premise_risk(payload.query)
@@ -360,6 +361,30 @@ class PlannerService:
             claim_checks=claim_checks or self._claim_checks(payload.query, person_slug=payload.person_slug),
             support_expectation=self._support_expectation(payload.query, len({item.domain for item in domain_queries})),
         )
+
+    def _guard_provider_domain_queries(
+        self,
+        *,
+        payload: RetrievalRequest,
+        domain_queries: list[RetrievalDomainPlan],
+    ) -> list[RetrievalDomainPlan]:
+        temporal_mode = self._resolve_temporal_mode(payload.query, payload.temporal_mode)
+        if self._question_type(payload.query, temporal_mode=temporal_mode) != "single_hop":
+            return domain_queries
+        for pattern, domain, category, reason in QUESTION_PATTERNS:
+            if not pattern.search(payload.query):
+                continue
+            if any(item.domain == domain and item.category == category for item in domain_queries):
+                return domain_queries
+            return [
+                RetrievalDomainPlan(
+                    domain=domain,
+                    category=category,
+                    field_query=payload.query,
+                    reason=f"{reason}; deterministic guard corrected provider domain plan",
+                )
+            ]
+        return domain_queries
 
     def _provider_domain_spec(self, item: str | LLMPlannerDomain) -> dict[str, Any]:
         if isinstance(item, str):

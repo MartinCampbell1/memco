@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from memco.config import Settings
 from memco.extractors import ExtractionOrchestrator
 from memco.extractors.base import (
     ExtractionContext,
@@ -23,6 +24,8 @@ from memco.consolidation.biography import BiographyConsolidationPolicy
 from memco.db import get_connection
 from memco.llm import LLMJSONResponse, LLMTextResponse, LLMUsage
 from memco.models.memory_fact import MemoryFactInput
+from memco.models.retrieval import RetrievalRequest
+from memco.repositories.candidate_repository import CandidateRepository
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.source_repository import SourceRepository
 from memco.services.candidate_service import CandidateService
@@ -31,6 +34,8 @@ from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.extraction_service import ExtractionService
 from memco.services.ingest_service import IngestService
 from memco.services.pipeline_service import IngestPipelineService
+from memco.services.publish_service import PublishService
+from memco.services.retrieval_service import RetrievalService
 
 
 def _context(text: str, *, person_id: int | None = 1, resolve_person_id=None) -> ExtractionContext:
@@ -336,7 +341,10 @@ class _DomainDenseProvider(_RecordingExtractionProvider):
                 }
             ],
         }
-        items = items_by_domain.get(domain, [])
+        if domain == "combined_legacy":
+            items = [item for domain_items in items_by_domain.values() for item in domain_items]
+        else:
+            items = items_by_domain.get(domain, [])
         raw_text = json.dumps({"items": items}, ensure_ascii=False)
         return LLMJSONResponse(
             content={"items": items},
@@ -765,6 +773,7 @@ def test_provider_receives_conversation_chunk_payload(settings, tmp_path):
     assert all(call["metadata"]["message_id"] is None for call in provider.calls)
     residence = next(candidate for candidate in candidates if candidate["domain"] == "biography")
     assert residence["payload"] == {"city": "Lisbon", "valid_from": "2024"}
+    assert len(residence["evidence"][0]["source_segment_ids"]) == 3
 
 
 def test_provider_extraction_runs_domain_scoped_prompts_for_dense_snippet():
@@ -785,6 +794,37 @@ def test_provider_extraction_runs_domain_scoped_prompts_for_dense_snippet():
     domains = {candidate["domain"] for candidate in candidates}
     assert {"biography", "preferences", "work", "experiences"} <= domains
     assert any(candidate["domain"] == "biography" and candidate["category"] == "family" for candidate in candidates)
+    usage_events = extraction.usage_tracker.events
+    assert [event.metadata["extraction_domain"] for event in usage_events] == call_domains
+    by_domain = extraction.usage_tracker.summary()["production_accounting"]["by_domain"]
+    assert by_domain["social_circle"]["operation_count"] == 1
+    assert by_domain["social_circle"]["output_tokens"] > 0
+
+
+def test_provider_combined_legacy_mode_keeps_single_combined_prompt(tmp_path):
+    settings = Settings(root=tmp_path / "combined-legacy")
+    settings.extraction.mode = "combined_legacy"
+    provider = _DomainDenseProvider()
+    extraction = ExtractionService(settings=settings, llm_provider=provider)
+    dense = (
+        "I live in Lisbon. My sister is Maria. I prefer coffee. "
+        "I use Python. In October I had a car accident. I work at Acme."
+    )
+
+    candidates = extraction.extract_candidates(source_text=dense, person_hint="Alice")
+
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["metadata"]["extraction_domain"] == "combined_legacy"
+    contract_domains = [item["domain"] for item in provider.calls[0]["payload"]["output_contract"]["domains"]]
+    assert {"biography", "preferences", "social_circle", "work", "experiences"} <= set(contract_domains)
+    domains = {candidate["domain"] for candidate in candidates}
+    assert {"biography", "preferences", "work", "experiences"} <= domains
+    usage_events = extraction.usage_tracker.events
+    assert len(usage_events) == 1
+    assert usage_events[0].metadata["extraction_domain"] == "combined_legacy"
+    assert extraction.usage_tracker.summary()["production_accounting"]["by_domain"]["combined_legacy"][
+        "operation_count"
+    ] == 1
 
 
 def test_provider_domain_failure_does_not_suppress_other_domains_when_non_strict():
@@ -816,7 +856,6 @@ def test_provider_domain_failure_does_not_suppress_other_domains_when_non_strict
         "work",
         "experiences",
     ]
-    assert len(residence["evidence"][0]["source_segment_ids"]) == 3
 
 
 def test_pipeline_backfills_empty_provider_chunk_provenance(settings, tmp_path):
@@ -1047,6 +1086,97 @@ def test_extract_candidates_from_source_uses_source_chunk_payload(settings, tmp_
     assert residence["evidence"][0]["source_segment_ids"] == payload["chunk"]["source_segment_ids"]
 
 
+def test_pdf_source_extraction_publish_and_retrieve_preserves_page_locator_and_source_type(settings):
+    source_repo = SourceRepository()
+    candidate_repo = CandidateRepository()
+    provider = _RecordingExtractionProvider()
+    extraction = ExtractionService(llm_provider=provider)
+    with get_connection(settings.db_path) as conn:
+        person = FactRepository().upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/pdf/alice.pdf",
+            source_type="pdf",
+            origin_uri="/tmp/alice.pdf",
+            title="alice",
+            sha256="pdf-source-extraction",
+            parsed_text="## Page 2\n\nAlice moved to Lisbon in 2024.",
+        )
+        source_repo.replace_chunks(
+            conn,
+            source_id=source_id,
+            parsed_text="## Page 2\n\nAlice moved to Lisbon in 2024.",
+            segments=[
+                {
+                    "segment_type": "pdf_page",
+                    "segment_index": 1,
+                    "section_title": "Page 2",
+                    "text": "## Page 2\n\nAlice moved to Lisbon in 2024.",
+                    "locator": {"page_number": 2, "page_label": "Page 2", "section_title": "Page 2"},
+                }
+            ],
+        )
+        extracted = extraction.extract_candidates_from_source(
+            conn,
+            source_id=source_id,
+            person_id=int(person["id"]),
+            speaker_label="Alice",
+        )
+        assert extracted
+        candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=source_id,
+            conversation_id=None,
+            chunk_kind=extracted[0]["chunk_kind"],
+            chunk_id=int(extracted[0]["chunk_id"]),
+            domain=extracted[0]["domain"],
+            category=extracted[0]["category"],
+            subcategory=extracted[0]["subcategory"],
+            canonical_key=extracted[0]["canonical_key"],
+            payload=extracted[0]["payload"],
+            summary=extracted[0]["summary"],
+            confidence=float(extracted[0]["confidence"]),
+        )
+        candidate = candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(candidate["id"]),
+            evidence=extracted[0]["evidence"],
+        )
+        candidate = candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(candidate["id"]),
+            candidate_status="validated_candidate",
+        )
+        published = PublishService().publish_candidate(conn, workspace_slug="default", candidate_id=int(candidate["id"]))
+        retrieved = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"),
+        )
+
+    candidate_evidence = extracted[0]["evidence"][0]
+    assert candidate_evidence["source_type"] == "pdf"
+    assert candidate_evidence["source_segment_ids"]
+    fact_evidence = published["fact"]["evidence"][0]
+    assert fact_evidence["quote_text"] == "## Page 2\n\nAlice moved to Lisbon in 2024."
+    assert fact_evidence["locator_json"]["source_type"] == "pdf"
+    assert fact_evidence["locator_json"]["source_segment_type"] == "pdf_page"
+    assert fact_evidence["locator_json"]["source_segment_locator"]["page_number"] == 2
+    retrieved_evidence = retrieved.hits[0].evidence[0]
+    assert retrieved_evidence["source_segment_id"] == fact_evidence["source_segment_id"]
+    assert retrieved_evidence["locator_json"]["source_type"] == "pdf"
+    assert retrieved_evidence["locator_json"]["source_segment_locator"]["page_label"] == "Page 2"
+
+
 def test_provider_overcaptured_payloads_are_forced_to_review(settings):
     extraction = ExtractionService.from_settings(settings)
 
@@ -1096,7 +1226,7 @@ def test_psychometrics_extractor_returns_trait_candidate():
     assert payload["counterevidence_quotes"] == []
     assert payload["extracted_signal"]["signal_kind"] == "explicit_self_description"
     assert payload["scored_profile"]["conservative_update"] is True
-    assert payload["use_in_generation"] is True
+    assert payload["use_in_generation"] is False
     assert "stub" not in payload["safety_notes"].lower()
 
 
@@ -1164,6 +1294,16 @@ def test_psychometrics_scoring_layer_aggregates_multiple_supporting_signals():
     assert payload["extracted_signal"]["evidence_count"] == 2
     assert payload["scored_profile"]["score"] > payload["extracted_signal"]["signal_confidence"]
     assert payload["use_in_generation"] is True
+
+
+def test_psychometrics_generation_hint_requires_multiple_evidence_signals():
+    candidates = extract_psychometrics(_context("I'm very curious."))
+
+    assert len(candidates) == 1
+    payload = candidates[0]["payload"]
+    assert payload["extracted_signal"]["explicit_self_description"] is True
+    assert payload["extracted_signal"]["evidence_count"] == 1
+    assert payload["use_in_generation"] is False
 
 
 def test_orchestrator_combines_core_and_optional_extractors():
@@ -2020,6 +2160,44 @@ def test_validate_candidate_payload_rejects_unsafe_psychometric_generation_flag(
         "confidence": 0.82,
         "evidence_quotes": [{"quote": "I feel excited.", "message_ids": ["1"], "interpretation": "signal"}],
         "counterevidence_quotes": [{"quote": "but sometimes I shut down", "message_ids": ["1"], "interpretation": "counter"}],
+        "conservative_update": True,
+        "use_in_generation": True,
+        "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",
+    }
+
+    with pytest.raises(ValueError, match="violates conservative psychometric generation policy"):
+        validate_candidate_payload(domain="psychometrics", category="trait", payload=payload)
+
+
+def test_validate_candidate_payload_rejects_single_signal_generation_flag():
+    payload = {
+        "framework": "big_five",
+        "trait": "openness",
+        "extracted_signal": {
+            "signal_kind": "explicit_self_description",
+            "explicit_self_description": True,
+            "signal_confidence": 0.72,
+            "evidence_count": 1,
+            "counterevidence_count": 0,
+            "evidence_quotes": [{"quote": "I am curious.", "message_ids": ["1"], "interpretation": "signal"}],
+            "counterevidence_quotes": [],
+            "observed_at": "2026-04-21T10:00:00Z",
+        },
+        "scored_profile": {
+            "score": 0.8,
+            "score_scale": "0_1",
+            "direction": "high",
+            "confidence": 0.76,
+            "framework_threshold": 0.7,
+            "conservative_update": True,
+            "use_in_generation": True,
+        },
+        "score": 0.8,
+        "score_scale": "0_1",
+        "direction": "high",
+        "confidence": 0.76,
+        "evidence_quotes": [{"quote": "I am curious.", "message_ids": ["1"], "interpretation": "signal"}],
+        "counterevidence_quotes": [],
         "conservative_update": True,
         "use_in_generation": True,
         "safety_notes": "Non-diagnostic psychometric hint; do not use as factual evidence.",

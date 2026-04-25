@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import timezone, tzinfo
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from memco.models.source import ImportResult
 from memco.parsers.base import ParsedDocument
@@ -10,7 +12,9 @@ from memco.parsers.html_parser import HtmlParser
 from memco.parsers.json_parser import JsonParser
 from memco.parsers.markdown_parser import MarkdownParser
 from memco.parsers.pdf_parser import PdfParser
+from memco.parsers.telegram_parser import TelegramParser
 from memco.parsers.text_parser import TextParser
+from memco.parsers.whatsapp_parser import WhatsAppParser
 from memco.repositories.source_repository import SourceRepository
 from memco.utils import sha256_file, sha256_text, slugify
 
@@ -38,7 +42,17 @@ SOURCE_TYPE_PARSERS = {
     "email": EmailParser(),
     "pdf": PdfParser(),
     "html": HtmlParser(),
+    "whatsapp": WhatsAppParser(),
+    "telegram": TelegramParser(),
 }
+
+
+def _timezone_from_settings(settings) -> tzinfo:
+    timezone_name = str(getattr(settings, "timezone", "") or "UTC")
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return timezone.utc
 
 
 def _normalize_source_type(source_type: str | None) -> str:
@@ -71,6 +85,20 @@ def parse_document(path: Path, *, source_type: str | None = None) -> ParsedDocum
     return parser.parse(path)
 
 
+def parse_document_for_settings(settings, path: Path, *, source_type: str) -> ParsedDocument:
+    normalized_type = validate_source_type(source_type)
+    if normalized_type == "whatsapp":
+        parser = WhatsAppParser(
+            date_order=str(getattr(settings.ingest, "whatsapp_date_order", "DMY")),
+            tz=_timezone_from_settings(settings),
+        )
+        return parser.parse(path)
+    if normalized_type == "pdf":
+        parser = PdfParser(ocr_enabled=bool(getattr(settings.ingest, "pdf_ocr_enabled", False)))
+        return parser.parse(path)
+    return parse_document(path, source_type=normalized_type)
+
+
 def render_normalized_markdown(source_type: str, original_path: Path, parsed_text: str) -> str:
     return (
         f"---\nsource_type: {source_type}\norigin_path: {original_path}\n---\n\n"
@@ -89,7 +117,7 @@ class IngestService:
         raw_dir.mkdir(parents=True, exist_ok=True)
         copied = raw_dir / path.name
         copied.write_bytes(path.read_bytes())
-        parsed = parse_document(path, source_type=source_type)
+        parsed = parse_document_for_settings(settings, path, source_type=source_type)
         parsed_text = parsed.text
         normalized_path = copied if copied.suffix.lower() == ".md" else copied.with_name(f"{copied.stem}-normalized.md")
         if normalized_path != copied:
@@ -113,7 +141,13 @@ class IngestService:
                 **parsed.metadata,
             },
         )
-        self.source_repository.replace_chunks(conn, source_id=source_id, parsed_text=parsed_text)
+        page_segments = parsed.metadata.get("page_segments") if isinstance(parsed.metadata.get("page_segments"), list) else None
+        self.source_repository.replace_chunks(
+            conn,
+            source_id=source_id,
+            parsed_text=parsed_text,
+            segments=page_segments,
+        )
         return ImportResult(
             source_id=source_id,
             source_path=str(copied),

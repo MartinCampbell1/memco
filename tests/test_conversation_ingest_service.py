@@ -535,6 +535,115 @@ def test_email_import_conversation_uses_parser_messages_not_header_lines(setting
     assert "Subject:" not in row["text"]
 
 
+def test_whatsapp_import_conversation_uses_structured_parser_messages(settings, tmp_path):
+    source = tmp_path / "whatsapp.txt"
+    source.write_text(
+        "\n".join(
+            [
+                "[12/01/2024, 09:15:12] Alice: Hello Bob",
+                "multiline note",
+                "12/01/24, 09:16 - Alice: Work: I moved to Lisbon.",
+                "12.01.2024, 09:17 - Bob: <Media omitted>",
+                "12.01.2024, 09:18 - Messages and calls are end-to-end encrypted.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    ingest = IngestService()
+    conversation_service = ConversationIngestService()
+    with get_connection(settings.db_path) as conn:
+        imported = ingest.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="whatsapp",
+        )
+        result = conversation_service.import_conversation(
+            settings,
+            conn,
+            workspace_slug="default",
+            source_id=imported.source_id,
+        )
+        rows = conn.execute(
+            """
+            SELECT speaker_label, occurred_at, text
+            FROM conversation_messages
+            WHERE conversation_id = ?
+            ORDER BY message_index ASC
+            """,
+            (result.conversation_id,),
+        ).fetchall()
+
+    assert result.message_count == 2
+    assert rows[0]["speaker_label"] == "Alice"
+    assert rows[0]["occurred_at"] == "2024-01-12T09:15:12Z"
+    assert rows[0]["text"] == "Hello Bob\nmultiline note"
+    assert rows[1]["speaker_label"] == "Alice: Work"
+    assert rows[1]["text"] == "I moved to Lisbon."
+
+
+def test_telegram_import_conversation_preserves_json_reply_metadata(settings, tmp_path):
+    source = tmp_path / "telegram.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "id": 10,
+                        "type": "message",
+                        "date": "2024-01-12T09:15:12",
+                        "from": "Alice",
+                        "text": ["Hello ", {"type": "bold", "text": "Bob"}],
+                    },
+                    {
+                        "id": 11,
+                        "type": "message",
+                        "date": "2024-01-12T09:16:12",
+                        "from": "Bob",
+                        "reply_to_message_id": 10,
+                        "text": "Reply received",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ingest = IngestService()
+    conversation_service = ConversationIngestService()
+    with get_connection(settings.db_path) as conn:
+        imported = ingest.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="telegram",
+        )
+        result = conversation_service.import_conversation(
+            settings,
+            conn,
+            workspace_slug="default",
+            source_id=imported.source_id,
+        )
+        rows = conn.execute(
+            """
+            SELECT speaker_label, occurred_at, text, meta_json
+            FROM conversation_messages
+            WHERE conversation_id = ?
+            ORDER BY message_index ASC
+            """,
+            (result.conversation_id,),
+        ).fetchall()
+
+    assert result.message_count == 2
+    assert rows[0]["speaker_label"] == "Alice"
+    assert rows[0]["text"] == "Hello Bob"
+    assert rows[1]["speaker_label"] == "Bob"
+    assert rows[1]["occurred_at"] == "2024-01-12T09:16:12Z"
+    assert json.loads(rows[1]["meta_json"])["reply_to_message_id"] == 10
+
+
 def test_mbox_import_conversation_preserves_thread_messages(settings, tmp_path):
     source = tmp_path / "thread.mbox"
     box = mailbox.mbox(str(source), create=True)

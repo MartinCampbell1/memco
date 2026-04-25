@@ -114,6 +114,100 @@ def test_publish_candidate_creates_active_fact_with_evidence_and_marks_candidate
     assert result["fact"]["evidence"][0]["source_segment_id"] is not None
 
 
+def test_publish_pdf_candidate_preserves_page_locator(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    candidate_repo = CandidateRepository()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/pdf/alice.pdf",
+            source_type="pdf",
+            origin_uri="/tmp/alice.pdf",
+            title="alice",
+            sha256="pdf-sha",
+            parsed_text="## Page 2\n\nAlice lives in Lisbon.",
+        )
+        source_repo.replace_chunks(
+            conn,
+            source_id=source_id,
+            parsed_text="## Page 2\n\nAlice lives in Lisbon.",
+            segments=[
+                {
+                    "segment_type": "pdf_page",
+                    "segment_index": 1,
+                    "section_title": "Page 2",
+                    "text": "## Page 2\n\nAlice lives in Lisbon.",
+                    "locator": {"page_number": 2, "page_label": "Page 2", "section_title": "Page 2"},
+                }
+            ],
+        )
+        chunk = conn.execute("SELECT id FROM source_chunks WHERE source_id = ?", (source_id,)).fetchone()
+        segment = source_repo.get_segment_by_chunk_id(conn, chunk_id=int(chunk["id"]))
+        candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=source_id,
+            conversation_id=None,
+            chunk_kind="source",
+            chunk_id=int(chunk["id"]),
+            domain="biography",
+            category="residence",
+            subcategory="",
+            canonical_key="alice:biography:residence:lisbon",
+            payload={"city": "Lisbon"},
+            summary="Alice lives in Lisbon.",
+            confidence=0.91,
+        )
+        candidate = candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(candidate["id"]),
+            evidence=[
+                {
+                    "quote": "Alice lives in Lisbon.",
+                    "message_ids": [],
+                    "source_segment_ids": [int(segment["id"])],
+                    "chunk_kind": "source",
+                    "source_type": "pdf",
+                }
+            ],
+        )
+        candidate = candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(candidate["id"]),
+            candidate_status="validated_candidate",
+        )
+        result = PublishService().publish_candidate(conn, workspace_slug="default", candidate_id=int(candidate["id"]))
+        retrieved = RetrievalService().retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Where does Alice live?",
+            ),
+        )
+
+    evidence = result["fact"]["evidence"][0]
+    assert evidence["quote_text"] == "Alice lives in Lisbon."
+    assert evidence["source_segment_id"] == int(segment["id"])
+    assert evidence["locator_json"]["source_segment_type"] == "pdf_page"
+    assert evidence["locator_json"]["source_segment_locator"]["page_number"] == 2
+    retrieved_evidence = retrieved.hits[0].evidence[0]
+    assert retrieved_evidence["quote_text"] == "Alice lives in Lisbon."
+    assert retrieved_evidence["source_segment_id"] == int(segment["id"])
+    assert retrieved_evidence["locator_json"]["source_segment_locator"]["page_label"] == "Page 2"
+
+
 def test_publish_candidate_promotes_extracted_valid_from(settings):
     service = PublishService()
 

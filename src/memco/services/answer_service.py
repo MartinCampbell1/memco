@@ -15,6 +15,9 @@ class LLMAnswerOutput(BaseModel):
 
     answer: str
     support_level: str
+    unsupported_claims: list[str]
+    answerable: bool
+    refused: bool
     used_fact_ids: list[int] = Field(default_factory=list)
     used_evidence_ids: list[int] = Field(default_factory=list)
 
@@ -37,6 +40,20 @@ class AnswerService:
         "have",
         "had",
         "should",
+    }
+    DATE_RE = re.compile(r"\b(?:19|20)\d{2}(?:-\d{2}(?:-\d{2})?)?\b")
+    RELATION_TERMS = {
+        "brother",
+        "colleague",
+        "father",
+        "friend",
+        "husband",
+        "manager",
+        "mother",
+        "partner",
+        "sister",
+        "spouse",
+        "wife",
     }
 
     def __init__(
@@ -145,6 +162,12 @@ class AnswerService:
 
     def _unsupported_values(self, unsupported_claims: list[str]) -> list[str]:
         return [item["value"] for item in self._claim_details(unsupported_claims) if item["value"]]
+
+    def _unsupported_claims_sentence(self, unsupported_claims: list[str]) -> str:
+        values = self._unsupported_values(unsupported_claims)
+        if not values:
+            return "that part is unknown from confirmed memory."
+        return f"I do not have confirmed memory evidence for {', '.join(values)}, so that part is unknown."
 
     def _confirmed_fact_details(self, retrieval_result) -> list[dict]:
         details: list[dict] = []
@@ -364,17 +387,26 @@ class AnswerService:
                 "task": "Synthesize an evidence-bound answer for the user.",
                 "query": query,
                 "support_level": getattr(retrieval_result, "support_level", "unsupported"),
+                "unsupported_claims": list(getattr(retrieval_result, "unsupported_claims", []) or []),
+                "answerable": self._answerable(query=query, refused=False, retrieval_result=retrieval_result),
+                "refused": False,
                 "detail_policy": detail_policy,
                 "confirmed_facts": facts,
                 "output_schema": {
                     "answer": "string",
                     "support_level": "supported|partial|unsupported|ambiguous|contradicted",
+                    "unsupported_claims": ["unsupported claims from retrieval, unchanged"],
+                    "answerable": "boolean, unchanged from retrieval",
+                    "refused": "boolean, false only when evidence fully supports the answer",
                     "used_fact_ids": ["fact ids used by the answer"],
                     "used_evidence_ids": ["evidence ids used by the answer"],
                 },
                 "rules": [
                     "Use only confirmed_facts and their evidence.",
                     "Do not introduce facts that are absent from confirmed_facts.",
+                    "Return unsupported_claims exactly as provided by retrieval.",
+                    "Return answerable exactly as provided by retrieval.",
+                    "Return refused=false only for supported, evidence-grounded answers.",
                     "Every supported answer must cite at least one used_fact_id and used_evidence_id.",
                     "Return JSON only.",
                 ],
@@ -526,12 +558,39 @@ class AnswerService:
             unsupported.append(token)
         return unsupported
 
-    def _payload_from_provider_output(self, *, output: LLMAnswerOutput, query: str, retrieval_result, detail_policy: DetailPolicy) -> dict:
-        answer = output.answer.strip()
-        if not answer:
-            raise ValueError("LLM answer output is empty")
+    def _unsupported_dates_in_answer(self, *, answer: str, retrieval_result) -> list[str]:
+        allowed_text = self._grounding_allowed_text(retrieval_result=retrieval_result).lower()
+        unsupported: list[str] = []
+        seen: set[str] = set()
+        for value in self.DATE_RE.findall(answer):
+            if value.lower() in allowed_text or value in seen:
+                continue
+            seen.add(value)
+            unsupported.append(value)
+        return unsupported
+
+    def _unsupported_relation_terms_in_answer(self, *, answer: str, retrieval_result) -> list[str]:
+        allowed_text = self._grounding_allowed_text(retrieval_result=retrieval_result).lower()
+        unsupported: list[str] = []
+        for term in sorted(self.RELATION_TERMS):
+            if not re.search(rf"\b{re.escape(term)}\b", answer, flags=re.IGNORECASE):
+                continue
+            if re.search(rf"\b{re.escape(term)}\b", allowed_text, flags=re.IGNORECASE):
+                continue
+            unsupported.append(term)
+        return unsupported
+
+    def _validate_provider_grounding(self, *, output: LLMAnswerOutput, answer: str, query: str, retrieval_result) -> None:
         if output.support_level != getattr(retrieval_result, "support_level", "unsupported"):
             raise ValueError("LLM answer changed the retrieval support level")
+        retrieval_unsupported_claims = list(getattr(retrieval_result, "unsupported_claims", []) or [])
+        if output.unsupported_claims != retrieval_unsupported_claims:
+            raise ValueError("LLM answer changed unsupported claims")
+        expected_answerable = self._answerable(query=query, refused=output.refused, retrieval_result=retrieval_result)
+        if output.answerable is not expected_answerable:
+            raise ValueError("LLM answer changed answerable flag")
+        if output.refused:
+            raise ValueError("LLM answer refused despite supported evidence path")
         available_fact_ids, available_evidence_ids = self._answer_ids(retrieval_result)
         available_fact_set = set(available_fact_ids)
         available_evidence_set = set(available_evidence_ids)
@@ -543,12 +602,24 @@ class AnswerService:
             raise ValueError("LLM answer cited unknown fact ids")
         if not used_evidence_set.issubset(available_evidence_set):
             raise ValueError("LLM answer cited unknown evidence ids")
+        unsupported_dates = self._unsupported_dates_in_answer(answer=answer, retrieval_result=retrieval_result)
+        if unsupported_dates:
+            raise ValueError(f"LLM answer introduced unsupported dates: {unsupported_dates}")
+        unsupported_relations = self._unsupported_relation_terms_in_answer(answer=answer, retrieval_result=retrieval_result)
+        if unsupported_relations:
+            raise ValueError(f"LLM answer introduced unsupported relations: {unsupported_relations}")
         unsupported_phrases = self._unsupported_named_phrases_in_answer(answer=answer, query=query, retrieval_result=retrieval_result)
         if unsupported_phrases:
             raise ValueError(f"LLM answer introduced unsupported named phrases: {unsupported_phrases}")
         unsupported_tokens = self._unsupported_content_tokens_in_answer(answer=answer, query=query, retrieval_result=retrieval_result)
         if unsupported_tokens:
             raise ValueError(f"LLM answer introduced unsupported content tokens: {unsupported_tokens}")
+
+    def _payload_from_provider_output(self, *, output: LLMAnswerOutput, query: str, retrieval_result, detail_policy: DetailPolicy) -> dict:
+        answer = output.answer.strip()
+        if not answer:
+            raise ValueError("LLM answer output is empty")
+        self._validate_provider_grounding(output=output, answer=answer, query=query, retrieval_result=retrieval_result)
         return self._payload(
             query=query,
             answer=answer,
@@ -651,7 +722,8 @@ class AnswerService:
             return payload
         if retrieval_result.support_level == "partial":
             supported = " ".join(hit.summary for hit in factual_hits).strip()
-            unsupported = " ".join(retrieval_result.unsupported_claims).strip()
+            unsupported_claims = list(getattr(retrieval_result, "unsupported_claims", []) or [])
+            unsupported = self._unsupported_claims_sentence(unsupported_claims) if unsupported_claims else ""
             if self._must_refuse_partial(query=query, retrieval_result=retrieval_result):
                 answer = self._false_premise_answer(
                     query=query,

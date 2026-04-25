@@ -1,3 +1,6 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Короткий вердикт по Memco
 
 Дата: 2026-04-21

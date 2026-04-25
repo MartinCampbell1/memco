@@ -114,6 +114,155 @@ def test_chat_returns_answer_with_memory(monkeypatch, settings):
     assert payload["agent_response"]["used_evidence_ids"] == payload["evidence_ids"]
 
 
+def test_chat_synthesizes_supported_residence_and_work_with_all_ids(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-residence-work.md",
+            source_type="note",
+            origin_uri="/tmp/alice-residence-work.md",
+            title="alice-residence-work",
+            sha256="alice-residence-work",
+            parsed_text="Alice lives in Lisbon. Alice works at Acme Robotics.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:lisbon",
+                payload={"city": "Lisbon"},
+                summary="Alice lives in Lisbon.",
+                source_kind="explicit",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice lives in Lisbon.",
+            ),
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="work",
+                category="employment",
+                canonical_key="alice:work:employment:acme",
+                payload={"org": "Acme Robotics"},
+                summary="Alice works at Acme Robotics.",
+                source_kind="explicit",
+                confidence=0.9,
+                observed_at="2026-04-21T10:05:00Z",
+                source_id=source_id,
+                quote_text="Alice works at Acme Robotics.",
+            ),
+        )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={
+            "workspace": "default",
+            "person_slug": "alice",
+            "query": "Where does Alice live and what does she do for work?",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refused"] is False
+    assert payload["answerable"] is True
+    assert payload["support_level"] == "supported"
+    assert "Lisbon" in payload["answer"]
+    assert "Acme Robotics" in payload["answer"]
+    assert len(payload["used_fact_ids"]) == 2
+    assert len(payload["used_evidence_ids"]) == 2
+    assert {hit["domain"] for hit in payload["retrieval"]["hits"]} == {"biography", "work"}
+
+
+def test_chat_partial_residence_answer_marks_missing_work_unknown(monkeypatch, settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-residence-only.md",
+            source_type="note",
+            origin_uri="/tmp/alice-residence-only.md",
+            title="alice-residence-only",
+            sha256="alice-residence-only",
+            parsed_text="Alice lives in Lisbon.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:lisbon",
+                payload={"city": "Lisbon"},
+                summary="Alice lives in Lisbon.",
+                source_kind="explicit",
+                confidence=0.9,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice lives in Lisbon.",
+            ),
+        )
+
+    monkeypatch.setenv("MEMCO_ROOT", str(settings.root))
+    client = TestClient(app)
+    response = client.post(
+        "/v1/chat",
+        json={
+            "workspace": "default",
+            "person_slug": "alice",
+            "query": "Where does Alice live and what does she do for work?",
+            "actor": _actor(settings),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["refused"] is False
+    assert payload["answerable"] is True
+    assert payload["support_level"] == "partial"
+    assert payload["retrieval"]["support_level"] == "partial"
+    assert "Lisbon" in payload["answer"]
+    assert "work" in payload["answer"]
+    assert "unknown" in payload["answer"]
+    assert len(payload["used_fact_ids"]) == 1
+    assert len(payload["used_evidence_ids"]) == 1
+    assert any("work" in claim for claim in payload["unsupported_claims"])
+
+
 def test_chat_does_not_answer_from_unpublished_candidates(monkeypatch, settings):
     fact_repo = FactRepository()
     source_repo = SourceRepository()

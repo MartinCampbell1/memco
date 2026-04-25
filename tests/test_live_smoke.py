@@ -141,6 +141,88 @@ def test_run_live_operator_smoke_emits_compact_artifact(monkeypatch, tmp_path):
     assert any(step["name"] == "api_queries" for step in written["steps"])
 
 
+def test_run_live_operator_smoke_rejects_wrong_supported_answer(monkeypatch, tmp_path):
+    root = tmp_path / "runtime"
+    project_root = tmp_path / "repo"
+    output_path = tmp_path / "artifacts" / "live-operator-smoke.json"
+    project_root.mkdir()
+    monkeypatch.setenv("MEMCO_LLM_PROVIDER", "openai-compatible")
+    monkeypatch.setenv("MEMCO_LLM_MODEL", "gpt-5.4-mini")
+    monkeypatch.setenv("MEMCO_LLM_BASE_URL", "http://127.0.0.1:2455/v1")
+    monkeypatch.setenv("MEMCO_LLM_API_KEY", "secret")
+    monkeypatch.setenv("MEMCO_API_TOKEN", "smoke-token")
+    monkeypatch.setattr(
+        "memco.live_smoke.ensure_postgres_database",
+        lambda **kwargs: "postgresql://martin@127.0.0.1:5432/memco_live_smoke_12345",
+    )
+    monkeypatch.setattr("memco.live_smoke.drop_postgres_database", lambda **kwargs: None)
+    monkeypatch.setattr("memco.live_smoke.ensure_runtime", lambda settings: settings)
+    monkeypatch.setattr("memco.live_smoke.subprocess.Popen", lambda *args, **kwargs: _FakeProcess())
+    monkeypatch.setattr(
+        "memco.live_smoke._wait_http",
+        lambda url, timeout_seconds=30: {
+            "storage_engine": "postgres",
+            "storage_role": "primary",
+            "llm_runtime": {"release_eligible": True},
+        },
+    )
+
+    def fake_request_json(*, url: str, method: str = "GET", payload=None, headers=None, timeout: int = 60, retries: int = 0):
+        if url.endswith("/v1/ingest/pipeline"):
+            return {
+                "published": [
+                    {"fact": {"domain": "biography", "category": "residence"}},
+                    {"fact": {"domain": "preferences", "category": "preference"}},
+                    {"fact": {"domain": "work", "category": "org"}},
+                    {"fact": {"domain": "work", "category": "role"}},
+                ],
+                "pending_review_items": [],
+            }
+        if url.endswith("/v1/retrieve") and payload["person_slug"] == "alice":
+            return {
+                "hits": [
+                    {
+                        "fact_id": 1,
+                        "domain": "biography",
+                        "category": "residence",
+                        "summary": "Alice lives in Lisbon.",
+                        "evidence": [{"evidence_id": 10}],
+                    }
+                ]
+            }
+        if url.endswith("/v1/retrieve") and payload["person_slug"] == "bob":
+            return {"hits": [{"fact_id": 2, "evidence": [{"evidence_id": 20}]}]}
+        if url.endswith("/v1/chat") and payload["query"] == "Where does Alice live?":
+            return {
+                "refused": False,
+                "answer": "Alice lives in tea.",
+                "fact_ids": [3],
+                "evidence_ids": [30],
+                "used_fact_ids": [3],
+                "used_evidence_ids": [30],
+                "retrieval": {"planner": {"plan_version": "v2_llm"}},
+            }
+        if url.endswith("/v1/chat"):
+            return {"refused": True, "answer": "I don't have confirmed memory evidence for that.", "fact_ids": [], "evidence_ids": []}
+        raise AssertionError(f"Unexpected request: {method} {url} {payload}")
+
+    monkeypatch.setattr("memco.live_smoke._request_json", fake_request_json)
+
+    result = run_live_operator_smoke(
+        maintenance_database_url="postgresql://martin@127.0.0.1:5432/postgres",
+        root=root,
+        project_root=project_root,
+        output_path=output_path,
+    )
+
+    assert result["ok"] is False
+    assert result["failures"] == ["api_queries"]
+    api_step = next(step for step in result["steps"] if step["name"] == "api_queries")
+    assert api_step["checks"]["supported_chat_mentions_expected_residence"] is False
+    assert api_step["checks"]["supported_chat_excludes_preference_value"] is False
+    assert api_step["checks"]["supported_chat_uses_residence_fact"] is False
+
+
 def test_run_live_operator_smoke_uses_project_config_when_env_is_absent(monkeypatch, tmp_path):
     root = tmp_path / "runtime"
     project_root = tmp_path / "repo"
@@ -194,7 +276,17 @@ def test_run_live_operator_smoke_uses_project_config_when_env_is_absent(monkeypa
                 "pending_review_items": [],
             }
         if url.endswith("/v1/retrieve"):
-            return {"hits": [{"fact_id": 1, "evidence": [{"evidence_id": 10}]}]}
+            return {
+                "hits": [
+                    {
+                        "fact_id": 1,
+                        "domain": "biography",
+                        "category": "residence",
+                        "summary": "Alice lives in Lisbon.",
+                        "evidence": [{"evidence_id": 10}],
+                    }
+                ]
+            }
         if url.endswith("/v1/chat") and payload["query"] == "Where does Alice live?":
             return {
                 "refused": False,

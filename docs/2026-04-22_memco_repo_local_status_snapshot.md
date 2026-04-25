@@ -1,10 +1,13 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Repo-Local Status Snapshot
 
 Date: 2026-04-23
 Last refreshed on `main`: `17e1a7d` (`Merge pull request #5 from MartinCampbell1/codex/memco-node24-native-actions`)
 Status: repo-local status snapshot
 Status note: historical repo-local status snapshot, not current release verdict.
-Current verdict lives in docs/2026-04-24_memco_release_closure.md and the active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
+Current verdict: see docs/CURRENT_STATUS.md. The active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
 This snapshot records a prior operator environment; do not use its green claims as fresh proof without artifact freshness validation.
 
 ## Active Contract

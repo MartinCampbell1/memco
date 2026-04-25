@@ -1,9 +1,12 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco: итоговый аудит релизной готовности
 
 Дата: 2026-04-24
 Аудитор: Codex
 Status: historical pre-remediation audit baseline, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Индекс audit-пакета: `docs/2026-04-24_memco_audit_package_index.md`
 Источник полного аудита: `docs/2026-04-24_memco_final_release_audit.md`
 Матрица соответствия: `docs/2026-04-24_memco_contract_compliance_matrix.md`

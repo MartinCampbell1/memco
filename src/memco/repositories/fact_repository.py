@@ -216,6 +216,7 @@ class FactRepository:
                 domain=domain,
                 category=category,
                 canonical_key=canonical_key,
+                payload=payload,
             )
             if previous is not None:
                 decision = policy.resolve(
@@ -640,19 +641,35 @@ class FactRepository:
         domain: str,
         category: str,
         canonical_key: str,
+        payload: dict | None = None,
     ) -> dict | None:
         workspace_id = self.ensure_workspace(conn, workspace_slug)
+        policy = get_policy(domain)
         if self.is_current_state_category(domain=domain, category=category):
-            row = conn.execute(
+            current_key = policy.current_state_key(
+                category=category,
+                canonical_key=canonical_key,
+                payload=payload or {},
+            )
+            rows = conn.execute(
                 """
                 SELECT *
                 FROM memory_facts
-                WHERE workspace_id = ? AND person_id = ? AND domain = ? AND category = ? AND status = 'active'
+                WHERE workspace_id = ? AND person_id = ? AND domain = ? AND status = 'active'
                 ORDER BY observed_at DESC, id DESC
-                LIMIT 1
                 """,
-                (workspace_id, person_id, domain, category),
-            ).fetchone()
+                (workspace_id, person_id, domain),
+            ).fetchall()
+            for candidate in rows:
+                candidate_payload = json.loads(candidate["payload_json"] or "{}")
+                candidate_key = policy.current_state_key(
+                    category=str(candidate["category"] or ""),
+                    canonical_key=str(candidate["canonical_key"] or ""),
+                    payload=candidate_payload,
+                )
+                if candidate_key and candidate_key == current_key:
+                    return dict(candidate)
+            return None
         else:
             row = conn.execute(
                 """
@@ -741,21 +758,32 @@ class FactRepository:
         person_id: int | None = None,
         target_fact_id: int | None = None,
         operation_type: str | None = None,
+        domain: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
         workspace_id = self.ensure_workspace(conn, workspace_slug)
-        sql = "SELECT * FROM memory_operations WHERE workspace_id = ?"
-        params: list[object] = [workspace_id]
+        if domain:
+            sql = """
+                SELECT mo.*
+                FROM memory_operations mo
+                JOIN memory_facts mf ON mf.id = mo.target_fact_id
+                WHERE mo.workspace_id = ? AND mf.domain = ?
+            """
+            params: list[object] = [workspace_id, domain]
+        else:
+            sql = "SELECT * FROM memory_operations WHERE workspace_id = ?"
+            params = [workspace_id]
+        column_prefix = "mo." if domain else ""
         if person_id is not None:
-            sql += " AND person_id = ?"
+            sql += f" AND {column_prefix}person_id = ?"
             params.append(person_id)
         if target_fact_id is not None:
-            sql += " AND target_fact_id = ?"
+            sql += f" AND {column_prefix}target_fact_id = ?"
             params.append(target_fact_id)
         if operation_type:
-            sql += " AND operation_type = ?"
+            sql += f" AND {column_prefix}operation_type = ?"
             params.append(operation_type)
-        sql += " ORDER BY id DESC LIMIT ?"
+        sql += f" ORDER BY {column_prefix}id DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         return [self.get_operation(conn, operation_id=int(row["id"])) for row in rows]

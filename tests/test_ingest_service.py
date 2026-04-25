@@ -68,8 +68,8 @@ def test_parse_document_rejects_explicit_unsupported_source_type(tmp_path):
     source = tmp_path / "note.txt"
     source.write_text("This suffix is supported, but the source_type is not.", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="unsupported source_type 'whatsapp'"):
-        parse_document(source, source_type="whatsapp")
+    with pytest.raises(ValueError, match="unsupported source_type 'slack'"):
+        parse_document(source, source_type="slack")
 
 
 def test_import_file_rejects_source_type_outside_runtime_contract(settings, tmp_path):
@@ -78,13 +78,13 @@ def test_import_file_rejects_source_type_outside_runtime_contract(settings, tmp_
 
     service = IngestService()
     with get_connection(settings.db_path) as conn:
-        with pytest.raises(ValueError, match="unsupported source_type 'whatsapp'"):
+        with pytest.raises(ValueError, match="unsupported source_type 'slack'"):
             service.import_file(
                 settings,
                 conn,
                 workspace_slug="default",
                 path=source,
-                source_type="whatsapp",
+                source_type="slack",
             )
 
         count = conn.execute("SELECT COUNT(*) AS count FROM sources").fetchone()["count"]
@@ -95,14 +95,14 @@ def test_import_file_rejects_source_type_outside_runtime_contract(settings, tmp_
 def test_import_text_rejects_source_type_outside_runtime_contract(settings):
     service = IngestService()
     with get_connection(settings.db_path) as conn:
-        with pytest.raises(ValueError, match="unsupported source_type 'whatsapp'"):
+        with pytest.raises(ValueError, match="unsupported source_type 'slack'"):
             service.import_text(
                 settings,
                 conn,
                 workspace_slug="default",
                 text="Alice lives in Lisbon.",
                 title="Alice Seed",
-                source_type="whatsapp",
+                source_type="slack",
             )
 
 
@@ -123,6 +123,196 @@ def test_import_file_normalizes_supported_source_type(settings, tmp_path):
 
     assert result.source_type == "note"
     assert row["source_type"] == "note"
+
+
+def test_whatsapp_parser_supports_common_exports_and_metadata(settings, tmp_path):
+    source = tmp_path / "whatsapp.txt"
+    source.write_text(
+        "\n".join(
+            [
+                "[12/01/2024, 09:15:12] Alice: Hello Bob",
+                "continuation line",
+                "12/01/24, 09:16 - Alice: Work: I moved to Lisbon.",
+                "12.01.2024, 09:17 - Bob: <Media omitted>",
+                "12.01.2024, 09:18 - Messages and calls are end-to-end encrypted.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="whatsapp",
+        )
+        row = conn.execute(
+            "SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert row["source_type"] == "whatsapp"
+    assert meta["parser_name"] == "whatsapp"
+    assert meta["message_count"] == 2
+    assert meta["media_omitted_count"] == 1
+    assert meta["system_message_count"] == 1
+    assert "Alice: Hello Bob\ncontinuation line" in row["parsed_text"]
+    assert "Alice: Work: I moved to Lisbon." in row["parsed_text"]
+    assert "<Media omitted>" not in row["parsed_text"]
+
+
+def test_whatsapp_import_uses_runtime_date_locale_and_timezone(settings, tmp_path):
+    settings.ingest.whatsapp_date_order = "MDY"
+    settings.timezone = "Asia/Makassar"
+    source = tmp_path / "whatsapp-us.txt"
+    source.write_text("12/31/2024, 09:15 - Alice: Year end\n", encoding="utf-8")
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="whatsapp",
+        )
+        row = conn.execute(
+            "SELECT parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert meta["date_order"] == "MDY"
+    assert meta["timezone"] == "Asia/Makassar"
+    assert meta["messages"][0]["timestamp"] == "2024-12-31T01:15:00Z"
+    assert "2024-12-31T01:15:00Z Alice: Year end" in row["parsed_text"]
+
+
+def test_telegram_json_parser_supports_text_arrays_and_replies(settings, tmp_path):
+    source = tmp_path / "telegram.json"
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {
+                        "id": 1,
+                        "type": "message",
+                        "date": "2024-01-12T09:15:12",
+                        "from": "Alice",
+                        "text": ["Hello ", {"type": "bold", "text": "Bob"}],
+                    },
+                    {
+                        "id": 2,
+                        "type": "message",
+                        "date": "2024-01-12T09:16:12",
+                        "from": "Bob",
+                        "reply_to_message_id": 1,
+                        "text": "Reply received",
+                    },
+                    {"id": 3, "type": "service", "text": "Alice joined"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="telegram",
+        )
+        row = conn.execute(
+            "SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert row["source_type"] == "telegram"
+    assert meta["parser_name"] == "telegram"
+    assert meta["parser_kind"] == "telegram_json"
+    assert meta["message_count"] == 2
+    assert meta["skipped_message_count"] == 1
+    assert meta["messages"][1]["meta"]["reply_to_message_id"] == 1
+    assert "Alice: Hello Bob" in row["parsed_text"]
+    assert "Bob: Reply received" in row["parsed_text"]
+
+
+def test_telegram_html_parser_supports_sender_timestamps_and_replies(settings, tmp_path):
+    source = tmp_path / "telegram.html"
+    source.write_text(
+        """
+        <html><body>
+          <div class="message default clearfix" id="message1">
+            <div class="pull_right date details" title="12.01.2024 09:15:12 UTC+00:00"></div>
+            <div class="from_name">Alice</div>
+            <div class="text">Hello<br>Bob</div>
+          </div>
+          <div class="message default clearfix" id="message2">
+            <div class="pull_right date details" title="12.01.2024 09:16:12 UTC+00:00"></div>
+            <div class="from_name">Bob</div>
+            <div class="reply_to details">Alice: Hello Bob</div>
+            <div class="text">Reply received</div>
+          </div>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    service = IngestService()
+    with get_connection(settings.db_path) as conn:
+        result = service.import_file(
+            settings,
+            conn,
+            workspace_slug="default",
+            path=source,
+            source_type="telegram",
+        )
+        row = conn.execute(
+            "SELECT source_type, parsed_text, meta_json FROM sources WHERE id = ?",
+            (result.source_id,),
+        ).fetchone()
+
+    assert row is not None
+    meta = json.loads(row["meta_json"])
+    assert row["source_type"] == "telegram"
+    assert meta["parser_kind"] == "telegram_html"
+    assert meta["message_count"] == 2
+    assert meta["messages"][0]["timestamp"] == "2024-01-12T09:15:12Z"
+    assert meta["messages"][1]["timestamp"] == "2024-01-12T09:16:12Z"
+    assert "Hello Bob" in row["parsed_text"]
+    assert meta["messages"][1]["meta"]["reply_preview"] == "Alice: Hello Bob"
+
+
+def test_telegram_html_parser_applies_utc_offsets(settings, tmp_path):
+    source = tmp_path / "telegram-offset.html"
+    source.write_text(
+        """
+        <html><body>
+          <div class="message default clearfix" id="message1">
+            <div class="pull_right date details" title="12.01.2024 09:15:12 UTC+03:00"></div>
+            <div class="from_name">Alice</div>
+            <div class="text">Hello</div>
+          </div>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    parsed = parse_document(source, source_type="telegram")
+
+    assert parsed.metadata["messages"][0]["timestamp"] == "2024-01-12T06:15:12Z"
+    assert "2024-01-12T06:15:12Z Alice: Hello" in parsed.text
 
 
 def test_markdown_import_extracts_frontmatter_metadata(settings, tmp_path):
@@ -448,6 +638,24 @@ def test_pdf_import_records_page_quality_metadata(settings, tmp_path):
             "SELECT parsed_text, meta_json FROM sources WHERE id = ?",
             (result.source_id,),
         ).fetchone()
+        segment_rows = conn.execute(
+            """
+            SELECT segment_type, segment_index, text, locator_json
+            FROM source_segments
+            WHERE source_id = ?
+            ORDER BY segment_index ASC
+            """,
+            (result.source_id,),
+        ).fetchall()
+        chunk_rows = conn.execute(
+            """
+            SELECT section_title, locator_json
+            FROM source_chunks
+            WHERE source_id = ?
+            ORDER BY chunk_index ASC
+            """,
+            (result.source_id,),
+        ).fetchall()
 
     assert row is not None
     meta = json.loads(row["meta_json"])
@@ -460,7 +668,16 @@ def test_pdf_import_records_page_quality_metadata(settings, tmp_path):
     assert meta["page_count"] == 3
     assert meta["extracted_page_count"] == 2
     assert meta["empty_page_numbers"] == [2]
-    assert meta["pages"][1] == {"page_number": 2, "extracted_chars": 0, "empty": True}
+    assert meta["pages"][1]["page_number"] == 2
+    assert meta["pages"][1]["empty"] is True
+    assert meta["ocr_enabled"] is False
+    assert len(meta["page_segments"]) == 2
+    assert len(segment_rows) == 2
+    assert {row["segment_type"] for row in segment_rows} == {"pdf_page"}
+    assert json.loads(segment_rows[0]["locator_json"])["page_number"] == 1
+    assert json.loads(segment_rows[1]["locator_json"])["page_number"] == 3
+    assert chunk_rows[0]["section_title"] == "Page 1"
+    assert json.loads(chunk_rows[0]["locator_json"])["page_label"] == "Page 1"
 
 
 def test_import_persists_parser_confidence(settings, tmp_path):

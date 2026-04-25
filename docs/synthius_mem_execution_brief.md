@@ -73,15 +73,20 @@ Stage A requires:
 
 Stage A ingestion scope:
 
-- supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`
-- not part of the current repo-local contract: `WhatsApp`, `Telegram`
-- those messenger-specific parsers remain roadmap/reference-track work unless explicitly pulled into scope
+- supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`, `whatsapp`, `telegram`
+- WhatsApp text exports plus Telegram JSON/HTML exports are in the current repo-local contract for common export shapes
+- unusual messenger export variants remain fixture-validation work before broader parser claims
 
 Stage A operator model:
 
 - owner-only local usage
 - CLI/local path may run without API actor payload
-- user-facing API still requires actor on `chat` / `retrieve`
+- user-facing API still requires actor on `chat`, `retrieve`, and `POST /v1/agent/memory-context`
+- agent integrations should prefer `POST /v1/agent/memory-context` when they need structured memory facts instead of a natural-language chat answer
+- local memory inspection uses `memory-explorer` for facts, evidence, review candidates, changes, rollback hints, and domain filters
+- operator shortcuts include `memco import whatsapp|telegram|pdf|note`, `memco review pending`, and `memco publish --all-safe`
+- backup/restore guidance lives in `docs/BACKUP_RESTORE_RUNBOOK.md`, with generated `memco backup runbook` commands for SQLite backup, Postgres dump, encrypted exports, restore, and corruption checks
+- current docs entrypoints are `docs/CURRENT_STATUS.md`, `docs/PRIVATE_SINGLE_USER_CONTRACT.md`, `docs/PDF_PARITY_GAPS.md`, and `docs/LOCAL_REPRODUCTION.md`
 
 ## Stage B Scope
 

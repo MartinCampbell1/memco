@@ -19,6 +19,7 @@ def test_load_settings_accepts_env_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv("MEMCO_STORAGE_ENGINE", "postgres")
     monkeypatch.setenv("MEMCO_DATABASE_URL", "postgresql://memco:memco@db:5432/memco")
     monkeypatch.setenv("MEMCO_RUNTIME_PROFILE", "fixture")
+    monkeypatch.setenv("MEMCO_EXTRACTION_MODE", "combined_legacy")
 
     settings = load_settings()
 
@@ -31,6 +32,7 @@ def test_load_settings_accepts_env_overrides(tmp_path, monkeypatch):
     assert settings.storage.engine == "postgres"
     assert settings.storage.database_url == "postgresql://memco:memco@db:5432/memco"
     assert settings.runtime.profile == "fixture"
+    assert settings.extraction.mode == "combined_legacy"
 
 
 def test_load_settings_can_ignore_env_overrides(tmp_path, monkeypatch):
@@ -51,12 +53,14 @@ def test_write_settings_roundtrip(tmp_path):
     settings = Settings(root=tmp_path / "project")
     settings.api.port = 9898
     settings.llm.model = "fixture-y"
+    settings.extraction.mode = "combined_legacy"
 
     write_settings(settings)
     loaded = load_settings(settings.root)
 
     assert loaded.api.port == 9898
     assert loaded.llm.model == "fixture-y"
+    assert loaded.extraction.mode == "combined_legacy"
     assert loaded.logging.query_hash_salt
 
 
@@ -207,6 +211,6 @@ def test_ingest_source_types_match_current_repo_local_contract(tmp_path):
     settings = Settings(root=tmp_path / "project")
 
     assert settings.ingest.attribution_policy == "owner_first_person_fallback"
-    assert {"text", "markdown", "chat", "json", "csv", "email", "pdf", "html"} <= set(settings.ingest.source_types)
-    assert "whatsapp" not in settings.ingest.source_types
-    assert "telegram" not in settings.ingest.source_types
+    assert {"text", "markdown", "chat", "json", "csv", "email", "pdf", "html", "whatsapp", "telegram"} <= set(
+        settings.ingest.source_types
+    )

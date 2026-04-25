@@ -30,18 +30,29 @@ class ReviewRepository:
         workspace_slug: str,
         status: str | None = None,
         person_id: int | None = None,
+        domain: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
         workspace_id = self.ensure_workspace(conn, workspace_slug)
-        sql = "SELECT * FROM review_queue WHERE workspace_id = ?"
-        params: list[object] = [workspace_id]
+        if domain:
+            sql = """
+                SELECT rq.*
+                FROM review_queue rq
+                JOIN fact_candidates fc ON fc.id = rq.candidate_id
+                WHERE rq.workspace_id = ? AND fc.domain = ?
+            """
+            params: list[object] = [workspace_id, domain]
+        else:
+            sql = "SELECT * FROM review_queue WHERE workspace_id = ?"
+            params = [workspace_id]
+        column_prefix = "rq." if domain else ""
         if status:
-            sql += " AND status = ?"
+            sql += f" AND {column_prefix}status = ?"
             params.append(status)
         if person_id is not None:
-            sql += " AND person_id = ?"
+            sql += f" AND {column_prefix}person_id = ?"
             params.append(person_id)
-        sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
+        sql += f" ORDER BY {column_prefix}created_at DESC, {column_prefix}id DESC LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         items: list[dict] = []

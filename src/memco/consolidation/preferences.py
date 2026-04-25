@@ -19,6 +19,17 @@ class PreferencesConsolidationPolicy(ConsolidationPolicy):
             )
         return super().semantic_duplicate_key(category=category, payload=payload)
 
+    def current_state_key(self, *, category: str, canonical_key: str, payload: dict) -> str:
+        if category == "preference":
+            return ":".join(
+                [
+                    "preference",
+                    self._first_value(payload, "preference_domain", "preference_category"),
+                    self._first_value(payload, "value"),
+                ]
+            )
+        return super().current_state_key(category=category, canonical_key=canonical_key, payload=payload)
+
     def resolve(
         self,
         *,

@@ -134,6 +134,52 @@ def test_backup_audit_export_redacts_raw_text_and_verifies(settings, tmp_path):
     assert verification["migration_compatibility"]["compatible"] is True
 
 
+def test_backup_runbook_reports_sqlite_backup_restore_and_integrity_commands(settings):
+    runner = CliRunner()
+    command = get_command(app)
+
+    result = runner.invoke(
+        command,
+        ["backup", "runbook", "--root", str(settings.root)],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "backup_restore_runbook"
+    assert payload["storage_engine"] == "sqlite"
+    assert payload["native_backup"]["kind"] == "sqlite_backup"
+    assert ".backup" in payload["native_backup"]["command"]
+    assert payload["native_restore"]["kind"] == "sqlite_file_restore"
+    assert payload["native_restore"]["command"].startswith("cp ")
+    assert payload["corruption_check"]["kind"] == "sqlite_integrity_check"
+    assert "PRAGMA integrity_check" in payload["corruption_check"]["command"]
+    assert "--mode full --encrypted" in payload["json_exports"]["full_encrypted"]["command"]
+    assert "restore-dry-run" in payload["json_exports"]["full_encrypted"]["restore_dry_run"]
+
+
+def test_backup_runbook_reports_postgres_dump_restore_and_dump_check(settings):
+    runner = CliRunner()
+    command = get_command(app)
+
+    result = runner.invoke(
+        command,
+        ["backup", "runbook", "--root", str(settings.root), "--storage-engine", "postgres"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["storage_engine"] == "postgres"
+    assert payload["native_backup"]["kind"] == "postgres_dump"
+    assert "pg_dump" in payload["native_backup"]["command"]
+    assert "$MEMCO_POSTGRES_DATABASE_URL" in payload["native_backup"]["command"]
+    assert payload["native_restore"]["kind"] == "postgres_restore"
+    assert "pg_restore --clean --if-exists" in payload["native_restore"]["command"]
+    assert payload["corruption_check"]["kind"] == "postgres_dump_list_check"
+    assert "pg_restore --list" in payload["corruption_check"]["command"]
+
+
 def test_backup_encrypted_full_export_verifies_and_restore_dry_run(settings, tmp_path, monkeypatch):
     _seed_backup_persona(settings)
     monkeypatch.setenv("MEMCO_BACKUP_PASSPHRASE", "correct horse battery staple")

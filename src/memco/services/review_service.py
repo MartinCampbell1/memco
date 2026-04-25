@@ -35,6 +35,7 @@ class ReviewService:
         workspace_slug: str,
         status: str | None = None,
         person_id: int | None = None,
+        domain: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
         items = self.review_repository.list_items(
@@ -42,6 +43,7 @@ class ReviewService:
             workspace_slug=workspace_slug,
             status=status,
             person_id=person_id,
+            domain=domain,
             limit=limit,
         )
         return [self._enrich_review_item(item) for item in items]
@@ -53,6 +55,7 @@ class ReviewService:
         workspace_slug: str,
         status: str | None = "pending",
         person_id: int | None = None,
+        domain: str | None = None,
         limit: int = 50,
         low_confidence_threshold: float = MIN_REVIEW_APPROVED_CONFIDENCE,
     ) -> dict:
@@ -61,12 +64,14 @@ class ReviewService:
             workspace_slug=workspace_slug,
             status=status,
             person_id=person_id,
+            domain=domain,
             limit=limit,
         )
         candidates = self.candidate_repository.list_candidates(
             conn,
             workspace_slug=workspace_slug,
             person_id=person_id,
+            domain=domain,
             limit=limit,
         )
         candidates_by_id: dict[int, dict] = {
@@ -107,6 +112,7 @@ class ReviewService:
             "filters": {
                 "status": status,
                 "person_id": person_id,
+                "domain": domain,
                 "limit": limit,
                 "low_confidence_threshold": low_confidence_threshold,
             },
@@ -321,6 +327,7 @@ class ReviewService:
             domain=domain,
             category=category,
             canonical_key=canonical_key,
+            payload=payload,
         )
         decision = get_policy(domain).resolve(
             category=category,

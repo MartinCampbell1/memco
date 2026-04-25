@@ -1,8 +1,11 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Contract Compliance Matrix
 
 Date: 2026-04-24
 Status: historical pre-remediation contract matrix, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Audit package index: `docs/2026-04-24_memco_audit_package_index.md`
 Source audit: `docs/2026-04-24_memco_final_release_audit.md`
 Russian summary: `docs/2026-04-24_memco_final_release_audit_ru.md`
@@ -15,7 +18,7 @@ Docs status map: `docs/2026-04-24_memco_docs_status_map.md`
 
 This matrix maps documented requirements to the pre-remediation checkout audited on 2026-04-24.
 
-For the current remediated private single-user verdict, use `docs/2026-04-24_memco_release_closure.md`.
+For the current checkout status, use `docs/CURRENT_STATUS.md`.
 
 It separates:
 

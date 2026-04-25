@@ -43,6 +43,22 @@ def test_planner_marks_temporal_reasoning_and_anchor():
     assert plan.question_type == "temporal"
 
 
+def test_planner_treats_use_to_phrase_as_history():
+    planner = PlannerService()
+
+    plan = planner.plan(
+        RetrievalRequest(
+            workspace="default",
+            person_slug="alice",
+            query="Where did Alice use to live?",
+        )
+    )
+
+    assert plan.temporal_mode == "history"
+    assert plan.requires_temporal_reasoning is True
+    assert plan.question_type == "temporal"
+
+
 def test_planner_marks_when_queries_with_when_temporal_mode():
     planner = PlannerService()
 
@@ -306,6 +322,38 @@ def test_planner_drops_provider_answer_slot_claim_checks():
 
     assert plan.plan_version == "v2_llm"
     assert not plan.claim_checks
+
+
+def test_planner_guards_obvious_single_hop_domain_when_provider_misroutes():
+    planner = PlannerService(
+        llm_provider=MockLLMProvider(
+            json_handler=lambda **_: {
+                "target_person": "alice",
+                "domains": [
+                    {
+                        "domain": "preferences",
+                        "categories": ["preference"],
+                        "field_query": "What does Alice like?",
+                        "reason": "bad provider route",
+                        "priority": 1,
+                    }
+                ],
+                "claim_checks": [],
+                "temporal_mode": "current",
+                "false_premise_risk": "low",
+                "requires_temporal_reasoning": False,
+                "requires_cross_domain_synthesis": False,
+                "must_not_answer_without_evidence": True,
+                "question_type": "single_hop",
+            }
+        )
+    )
+
+    plan = planner.plan(RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live?"))
+
+    assert plan.plan_version == "v2_llm"
+    assert [(item.domain, item.category) for item in plan.domain_queries] == [("biography", "residence")]
+    assert "deterministic guard" in plan.domain_queries[0].reason
 
 
 def test_planner_bad_provider_output_fails_closed_by_default():

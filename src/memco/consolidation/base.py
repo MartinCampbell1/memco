@@ -19,6 +19,11 @@ class ConsolidationPolicy:
     def is_current_state(self, category: str) -> bool:
         return category in self.current_state_categories
 
+    def current_state_key(self, *, category: str, canonical_key: str, payload: dict) -> str:
+        if not self.is_current_state(category):
+            return ""
+        return category
+
     def publish_block_reason(self, *, category: str, payload: dict) -> str | None:
         return None
 

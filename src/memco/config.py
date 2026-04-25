@@ -14,6 +14,7 @@ PRIMARY_STORAGE_ENGINE = "postgres"
 SQLITE_FALLBACK_ENGINE = "sqlite"
 SUPPORTED_STORAGE_ENGINES = {PRIMARY_STORAGE_ENGINE, SQLITE_FALLBACK_ENGINE}
 AttributionPolicy = Literal["strict_speaker_only", "owner_first_person_fallback", "manual_review_only"]
+ExtractionMode = Literal["per_domain", "combined_legacy"]
 
 
 class ApiActorPolicy(BaseModel):
@@ -72,9 +73,27 @@ class IngestSettings(BaseModel):
     overlap_tokens: int = 40
     session_gap_minutes: int = 240
     attribution_policy: AttributionPolicy = "owner_first_person_fallback"
+    whatsapp_date_order: Literal["DMY", "MDY"] = "DMY"
+    pdf_ocr_enabled: bool = False
     source_types: list[str] = Field(
-        default_factory=lambda: ["note", "chat", "json", "csv", "markdown", "text", "email", "pdf", "html"]
+        default_factory=lambda: [
+            "note",
+            "chat",
+            "json",
+            "csv",
+            "markdown",
+            "text",
+            "email",
+            "pdf",
+            "html",
+            "whatsapp",
+            "telegram",
+        ]
     )
+
+
+class ExtractionSettings(BaseModel):
+    mode: ExtractionMode = "per_domain"
 
 
 class OwnerSettings(BaseModel):
@@ -99,6 +118,7 @@ class Settings(BaseModel):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
+    extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     owner: OwnerSettings = Field(default_factory=OwnerSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
@@ -155,6 +175,7 @@ def _settings_payload(settings: Settings) -> dict:
         "llm": settings.llm.model_dump(),
         "storage": settings.storage.model_dump(),
         "ingest": settings.ingest.model_dump(),
+        "extraction": settings.extraction.model_dump(),
         "owner": settings.owner.model_dump(),
         "logging": settings.logging.model_dump(),
         "runtime": settings.runtime.model_dump(),
@@ -234,6 +255,7 @@ def load_settings(root: str | Path | None = None, *, apply_env: bool = True) -> 
     env_enable_retrieval_logs = os.environ.get("MEMCO_ENABLE_RETRIEVAL_LOGS") if apply_env else None
     env_query_hash_salt = os.environ.get("MEMCO_QUERY_HASH_SALT") if apply_env else None
     env_runtime_profile = os.environ.get("MEMCO_RUNTIME_PROFILE") if apply_env else None
+    env_extraction_mode = os.environ.get("MEMCO_EXTRACTION_MODE") if apply_env else None
 
     if env_timezone:
         raw_data["timezone"] = env_timezone
@@ -282,6 +304,9 @@ def load_settings(root: str | Path | None = None, *, apply_env: bool = True) -> 
     if env_runtime_profile:
         runtime = raw_data.setdefault("runtime", {})
         runtime["profile"] = env_runtime_profile
+    if env_extraction_mode:
+        extraction = raw_data.setdefault("extraction", {})
+        extraction["mode"] = env_extraction_mode
 
     raw_data["root"] = resolved_root
     settings = Settings.model_validate(raw_data)

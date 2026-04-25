@@ -93,3 +93,33 @@ def test_archive_scanner_rejects_runtime_paths_and_live_keys(tmp_path):
     assert scan.returncode == 1
     assert "forbidden_path" in scan.stdout
     assert "openai_style_api_key" in scan.stdout
+
+
+def test_current_repo_sanitized_archive_scans_clean(tmp_path):
+    output = tmp_path / "memco_repo_safe.zip"
+
+    sanitize = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "sanitize_release_archive.py"),
+            "--root",
+            str(REPO_ROOT),
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert sanitize.returncode == 0, sanitize.stderr
+    scan = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "scan_archive_for_secrets.py"), str(output)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert scan.returncode == 0, scan.stdout
+    assert "no secrets found" in scan.stdout
+    assert "no forbidden runtime paths found" in scan.stdout

@@ -8,9 +8,18 @@ import time
 from memco.llm_usage import LLMUsageEvent, LLMUsageTracker, estimate_token_count
 from memco.models.relationships import canonical_relation_type
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
-from memco.models.retrieval import DetailPolicy, RefusalCategory, RetrievalHit, RetrievalPlan, RetrievalRequest, RetrievalResult
+from memco.models.retrieval import (
+    DetailPolicy,
+    RefusalCategory,
+    RetrievalClaimCheck,
+    RetrievalHit,
+    RetrievalPlan,
+    RetrievalRequest,
+    RetrievalResult,
+)
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.retrieval_repository import RetrievalRepository
+from memco.retrievers import DomainRetriever, build_domain_retrievers
 from memco.services.planner_service import PlannerService
 
 
@@ -24,6 +33,7 @@ EXPLICIT_SUBJECT_PATTERNS = (
     re.compile(r"^\s*(?:(?i:who))\s+(?:(?i:is))\s+([A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*)\b"),
     re.compile(r"^\s*(?:(?i:tell me about|describe|show me))\s+([A-Z][A-Za-z0-9&.\-]*(?:\s+(?:[A-Z][A-Za-z0-9&.\-]*|\d+))*)\b"),
 )
+RELATED_RESIDENCE_RE = re.compile(r"\bwhere\b.+\b(?:live|lives|living|residence|home)\b", re.IGNORECASE)
 
 
 class RetrievalService:
@@ -58,12 +68,14 @@ class RetrievalService:
         retrieval_log_repository: RetrievalLogRepository | None = None,
         planner_service: PlannerService | None = None,
         usage_tracker: LLMUsageTracker | None = None,
+        domain_retrievers: dict[str, DomainRetriever] | None = None,
     ) -> None:
         self.retrieval_repository = retrieval_repository or RetrievalRepository()
         self.fact_repository = fact_repository or FactRepository()
         self.retrieval_log_repository = retrieval_log_repository or RetrievalLogRepository()
         self.usage_tracker = usage_tracker
         self.planner_service = planner_service or PlannerService(usage_tracker=usage_tracker)
+        self.domain_retrievers = domain_retrievers or build_domain_retrievers()
 
     def _record_usage(self, *, query: str, result: RetrievalResult) -> None:
         if self.usage_tracker is None:
@@ -407,39 +419,44 @@ class RetrievalService:
                 )
                 self._record_usage(query=payload.query, result=result)
                 return result
+        requested_only_non_factual = bool(payload.domain) and payload.domain in self.NON_FACTUAL_DOMAINS
         raw_hits: list[dict] = []
         for domain_query in domain_queries:
             if not domain_query.domain or domain_query.domain == "unknown":
                 continue
-            if domain_query.domain in self.NON_FACTUAL_DOMAINS:
+            retriever = self.domain_retrievers.get(domain_query.domain)
+            if retriever is None or not retriever.factual:
                 continue
-            hits_for_query = self.retrieval_repository.retrieve_facts(
+            hits_for_query = retriever.retrieve(
+                self.retrieval_repository,
                 conn,
                 workspace_slug=payload.workspace,
                 person_id=person_id,
                 query=payload.query,
-                domain=domain_query.domain,
                 category=domain_query.category,
                 temporal_mode=planner.temporal_mode,
                 limit=payload.limit,
             )
-            if not hits_for_query and domain_query.domain == "work" and domain_query.category:
-                for fallback_category in self._work_fallback_categories(domain_query.category):
-                    hits_for_query.extend(
-                        self.retrieval_repository.retrieve_facts(
-                            conn,
-                            workspace_slug=payload.workspace,
-                            person_id=person_id,
-                            query=payload.query,
-                            domain="work",
-                            category=fallback_category,
-                            temporal_mode=planner.temporal_mode,
-                            limit=payload.limit,
-                        )
-                    )
-                    if hits_for_query:
-                        break
             raw_hits.extend(hits_for_query)
+        allow_cross_domain_fallback = (
+            not payload.domain
+            and not planner.claim_checks
+            and not self._is_yes_no_query(payload.query)
+            and not requested_only_non_factual
+        )
+        if not raw_hits and domain_queries and allow_cross_domain_fallback:
+            raw_hits.extend(
+                hit
+                for hit in self.retrieval_repository.retrieve_facts(
+                    conn,
+                    workspace_slug=payload.workspace,
+                    person_id=person_id,
+                    query=payload.query,
+                    temporal_mode=planner.temporal_mode,
+                    limit=payload.limit,
+                )
+                if hit.get("domain") not in self.NON_FACTUAL_DOMAINS
+            )
         deduped_hits: list[dict] = []
         seen_fact_ids: set[int] = set()
         for hit in sorted(raw_hits, key=lambda item: (-item["score"], -item["confidence"], item["fact_id"])):
@@ -455,9 +472,23 @@ class RetrievalService:
         hits = deduped_hits[: payload.limit]
         hits = self._filter_relationship_hits_for_requested_relation(planner=planner, hits=hits)
         hits = self._dedupe_relationship_mirror_hits(hits=hits)
+        hits, multi_hop_unsupported_claims = self._augment_relationship_residence_hits(
+            conn,
+            workspace_slug=payload.workspace,
+            query=payload.query,
+            planner=planner,
+            hits=hits,
+            limit=payload.limit,
+            actor=actor,
+        )
         fallback_hits = []
-        requested_only_non_factual = bool(payload.domain) and payload.domain in self.NON_FACTUAL_DOMAINS
-        if not hits and payload.include_fallback and not requested_only_non_factual and self._actor_can_view_sensitive(actor):
+        allow_raw_fallback = (
+            not payload.domain
+            and not planner.claim_checks
+            and not self._is_yes_no_query(payload.query)
+            and not requested_only_non_factual
+        )
+        if not hits and payload.include_fallback and allow_raw_fallback and self._actor_can_view_sensitive(actor):
             fallback_hits = self.retrieval_repository.retrieve_fallback_chunks(
                 conn,
                 workspace_slug=payload.workspace,
@@ -465,9 +496,13 @@ class RetrievalService:
                 query=payload.query,
                 limit=min(payload.limit, 5),
             )
-        unsupported_checks = self._unsupported_checks(planner=planner, hits=hits)
+        unsupported_checks = [
+            *self._unsupported_checks(planner=planner, hits=hits),
+            *self._missing_planned_facet_checks(planner=planner, hits=hits),
+        ]
         temporal_conflict_reason = self._temporal_conflict_reason(hits=hits) if planner.temporal_mode == "when" else ""
         unsupported_claims = self._detect_unsupported_claims(unsupported_checks=unsupported_checks)
+        unsupported_claims.extend(multi_hop_unsupported_claims)
         if temporal_conflict_reason:
             unsupported_claims.append(temporal_conflict_reason)
         support_level = self._support_level(
@@ -479,11 +514,16 @@ class RetrievalService:
         unsupported_flag = support_level in {"unsupported", "ambiguous", "contradicted"} or bool(unsupported_checks)
         if temporal_conflict_reason:
             unsupported_flag = True
+        if multi_hop_unsupported_claims and support_level == "supported":
+            support_level = "partial"
+            unsupported_flag = True
         answerable = self._answerable_from_support(
             query=payload.query,
             support_level=support_level,
             unsupported_checks=unsupported_checks,
         )
+        if multi_hop_unsupported_claims:
+            answerable = False
         refusal_category = self._refusal_category(
             query=payload.query,
             planner=planner,
@@ -491,6 +531,8 @@ class RetrievalService:
             unsupported_checks=unsupported_checks,
             unsupported_claims=unsupported_claims,
         )
+        if multi_hop_unsupported_claims and not refusal_category:
+            refusal_category = "unsupported_no_evidence"
         safe_known_facts = self._safe_known_facts(hits=hits)
         result = RetrievalResult(
             query=payload.query,
@@ -532,7 +574,11 @@ class RetrievalService:
         if support_level == "supported":
             return True
         if support_level == "partial":
-            return not unsupported_checks
+            if not unsupported_checks:
+                return True
+            return not self._is_yes_no_query(query) and all(
+                getattr(check, "label", "") == "missing_planned_domain" for check in unsupported_checks
+            )
         return False
 
     def _refusal_category(
@@ -551,7 +597,11 @@ class RetrievalService:
         if support_level == "contradicted":
             return "contradicted_by_memory"
         if support_level == "partial":
-            if unsupported_checks:
+            if unsupported_checks and not self._answerable_from_support(
+                query=query,
+                support_level=support_level,
+                unsupported_checks=unsupported_checks,
+            ):
                 return "unsupported_no_evidence"
             return ""
         if support_level == "ambiguous":
@@ -650,6 +700,87 @@ class RetrievalService:
                 deduped[existing_index] = hit
         return deduped
 
+    def _relationship_residence_requested(self, *, query: str, planner: RetrievalPlan) -> bool:
+        if not RELATED_RESIDENCE_RE.search(query):
+            return False
+        return any(
+            domain_query.domain in {"social_circle", "biography"} and domain_query.category in {None, "family"}
+            for domain_query in planner.domain_queries
+        )
+
+    def _related_person_id_from_hit(self, conn, *, workspace_slug: str, hit: dict) -> tuple[int | None, str]:
+        payload = hit.get("payload", {})
+        target_label = str(payload.get("target_label") or payload.get("name") or "").strip()
+        target_person_id = payload.get("target_person_id")
+        if target_person_id is not None:
+            return int(target_person_id), target_label
+        if not target_label:
+            return None, ""
+        try:
+            return self.fact_repository.resolve_person_id(
+                conn,
+                workspace_slug=workspace_slug,
+                person_slug=target_label,
+            ), target_label
+        except ValueError:
+            return None, target_label
+
+    def _augment_relationship_residence_hits(
+        self,
+        conn,
+        *,
+        workspace_slug: str,
+        query: str,
+        planner: RetrievalPlan,
+        hits: list[dict],
+        limit: int,
+        actor,
+    ) -> tuple[list[dict], list[str]]:
+        if not self._relationship_residence_requested(query=query, planner=planner):
+            return hits, []
+        augmented = list(hits)
+        seen_fact_ids = {int(hit["fact_id"]) for hit in augmented}
+        unsupported: list[str] = []
+        relationship_hits = [
+            hit
+            for hit in hits
+            if hit.get("domain") == "social_circle" or (hit.get("domain") == "biography" and hit.get("category") == "family")
+        ]
+        for relationship_hit in relationship_hits:
+            target_person_id, target_label = self._related_person_id_from_hit(
+                conn,
+                workspace_slug=workspace_slug,
+                hit=relationship_hit,
+            )
+            if target_person_id is None:
+                if target_label:
+                    unsupported.append(f"No evidence for residence of related person: {target_label}.")
+                continue
+            if actor is not None and actor.allowed_person_ids and target_person_id not in actor.allowed_person_ids:
+                unsupported.append(f"Actor scope prevents retrieving residence for related person: {target_label}.")
+                continue
+            related_hits = self.retrieval_repository.retrieve_facts(
+                conn,
+                workspace_slug=workspace_slug,
+                person_id=target_person_id,
+                query=f"{target_label} lives residence home",
+                domain="biography",
+                category="residence",
+                temporal_mode="current",
+                limit=limit,
+            )
+            if not related_hits:
+                if target_label:
+                    unsupported.append(f"No evidence for residence of related person: {target_label}.")
+                continue
+            for related_hit in related_hits:
+                fact_id = int(related_hit["fact_id"])
+                if fact_id in seen_fact_ids:
+                    continue
+                seen_fact_ids.add(fact_id)
+                augmented.append(related_hit)
+        return augmented[:limit], unsupported
+
     def _hit_haystacks(self, *, hits: list[dict]) -> list[str]:
         haystacks = []
         for hit in hits:
@@ -676,6 +807,24 @@ class RetrievalService:
                 continue
             unsupported.append(check)
         return unsupported
+
+    def _missing_planned_facet_checks(self, *, planner: RetrievalPlan, hits: list[dict]) -> list[RetrievalClaimCheck]:
+        if not hits:
+            return []
+        if not (planner.requires_cross_domain_synthesis or planner.support_expectation == "multi_domain_fact"):
+            return []
+        hit_domains = {str(hit.get("domain") or "") for hit in hits}
+        planned_domains = {domain_query.domain for domain_query in planner.domain_queries if domain_query.domain}
+        checks: list[RetrievalClaimCheck] = []
+        if "work" in planned_domains and "work" not in hit_domains:
+            checks.append(
+                RetrievalClaimCheck(
+                    label="missing_planned_domain",
+                    value="work",
+                    claim_type="employer",
+                )
+            )
+        return checks
 
     def _detect_unsupported_claims(self, *, unsupported_checks: list) -> list[str]:
         claims: list[str] = []

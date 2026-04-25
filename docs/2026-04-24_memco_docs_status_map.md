@@ -1,3 +1,6 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Docs Status Map
 
 Date: 2026-04-24
@@ -7,15 +10,15 @@ Audit package index: `docs/2026-04-24_memco_audit_package_index.md`
 
 This map classifies the docs tree so future agents do not treat historical plans or stale green snapshots as current release proof.
 
-Rule: for the current remediated checkout, start with `docs/2026-04-24_memco_release_closure.md`.
+Rule: for the current checkout, start with `docs/CURRENT_STATUS.md`.
 
-## Current Release Closure
+## Historical Release Closure
 
 | File | Role | Current use |
 |---|---|---|
-| `docs/2026-04-24_memco_release_closure.md` | Current private release closure | Use for the current private Hermes/API-backed verdict and fresh evidence summary. |
+| `docs/2026-04-24_memco_release_closure.md` | Historical private release closure | Use as dated evidence only; current verdict lives in `docs/CURRENT_STATUS.md`. |
 
-Current private verdict:
+Historical private verdict in that dated closure:
 
 ```text
 Final private Hermes/API-backed verdict: `GO`
@@ -47,7 +50,7 @@ NO-GO for honest private Hermes/API-backed use until P0 blockers are fixed and f
 
 ## Active Contract Documents
 
-These define the accepted repo-local private/single-user scope. Use them with the current release closure and fresh artifact checks, not by treating older dated status language as standalone proof.
+These define the accepted repo-local private/single-user scope. Use them with `docs/CURRENT_STATUS.md` and fresh artifact checks, not by treating older dated status language as standalone proof.
 
 | File | Role | Current use | Caution |
 |---|---|---|---|
@@ -93,8 +96,8 @@ These are useful evidence of prior states. Do not use them as current release st
 
 | File | Role | Current use | Caution |
 |---|---|---|---|
-| `docs/2026-04-24_memco_release_remediation_plan.md` | Pre-remediation staged plan | Historical plan for how the private release blockers were fixed. | Do not treat as current verdict; use release closure for current status. |
-| `docs/2026-04-24_memco_blocker_ticket_pack.md` | Pre-remediation ticket pack | Historical ticket queue for the private release blockers. | Do not treat as current work queue without rechecking against release closure. |
+| `docs/2026-04-24_memco_release_remediation_plan.md` | Pre-remediation staged plan | Historical plan for how the private release blockers were fixed. | Do not treat as current verdict; use `docs/CURRENT_STATUS.md`. |
+| `docs/2026-04-24_memco_blocker_ticket_pack.md` | Pre-remediation ticket pack | Historical ticket queue for the private release blockers. | Do not treat as current work queue without rechecking `docs/CURRENT_STATUS.md`. |
 | `docs/programmer_agent_no_shortcuts_release_plan.md` | Prior no-shortcuts plan | Useful supporting plan. | Some items may be partially remediated or superseded; compare against 2026-04-24 audit package. |
 | `docs/agent_memory_go_live_plan.md` | Prior go-live remediation plan | Historical/supporting plan. | Its runtime claims can be stale relative to current checkout. |
 | `docs/plans/2026-04-21_memco_full_fix_plan.md` | Earlier canonical full fix plan | Supporting context. | Superseded by 2026-04-24 audit package for current blockers. |
@@ -102,23 +105,22 @@ These are useful evidence of prior states. Do not use them as current release st
 
 ## Resolved Post-Remediation State
 
-Current private-release remediation state:
+This section previously carried dated proof details from an older snapshot. For the current checkout, do not use this map as proof and do not rely on hardcoded pass counts, clean/dirty state, or artifact names from historical runs.
 
-| Area | Current state |
-|---|---|
-| Implementation notes | root `IMPLEMENTATION_NOTES.md` is restored and `docs/IMPLEMENTATION_NOTES.md` is available as supporting docs context. |
-| Test suite | `uv run pytest -q` passed with `441 passed` on current clean HEAD. |
-| API actor docs | README HTTP examples include required actor payloads and shared API token guidance. |
-| Runtime config | live OpenAI-compatible provider is configured in ignored local `var/config/settings.yaml`. |
-| Release artifacts | `release-readiness-check-current.json` is fresh for checkout/config when artifact freshness reports `dirty=false` and `stale_relative_to_current_checkout=false`; read the exact current git head from the artifact. |
-| Live smoke artifact | `live-operator-smoke-current.json` is fresh for checkout/config when artifact freshness reports `dirty=false` and `stale_relative_to_current_checkout=false`; `api_queries.ok=true` is required. |
-| Operator preflight artifact | `operator-preflight-current.json` is fresh for checkout/config when artifact freshness reports `dirty=false` and `stale_relative_to_current_checkout=false`; read the exact current git head from the artifact. |
+Current private-release remediation state lives in `docs/CURRENT_STATUS.md` and must be validated against the current `var/reports/*current*.json` artifacts with `memco.artifact_semantics.evaluate_artifact_freshness(...)`.
+
+Stable resolved facts that remain useful without acting as proof:
+
+- root `IMPLEMENTATION_NOTES.md` is restored and `docs/IMPLEMENTATION_NOTES.md` is available as supporting docs context.
+- README HTTP examples include required actor payloads and shared API token guidance.
+- `release-readiness-check-current.json` and `live-operator-smoke-current.json` are proof only when artifact freshness reports `current_for_checkout_config: true`; read the exact current git head from the artifact.
+- `live-operator-smoke-current.json` must have `api_queries.ok=true`.
 
 This resolved state is scoped to the private single-user Hermes/API-backed release path. It is not strict original-brief or public SaaS closure.
 
 ## Reading Rules For Future Agents
 
-1. Start with `docs/2026-04-24_memco_release_closure.md` for the current verdict.
+1. Start with `docs/CURRENT_STATUS.md` for the current verdict.
 2. Use `docs/2026-04-24_memco_audit_package_index.md` only for pre-remediation baseline context.
 3. Treat `var/reports/*current*` artifacts as proof only after freshness validation.
 4. Keep active private release scope separate from strict original brief completion.
@@ -131,5 +133,5 @@ This resolved state is scoped to the private single-user Hermes/API-backed relea
 |---|---|
 | Resolve `IMPLEMENTATION_NOTES.md` canonical location. | Root file restored; docs/tests now agree. |
 | Add actor payloads to README HTTP examples. | API examples now include shared token plus actor block. |
-| Add historical/superseded headers to old plans as needed. | Old plans/audits point to the release closure. |
-| Refresh active gate/status docs after remediation. | Current private release closure records fresh artifact-backed evidence. |
+| Add historical/superseded headers to old plans as needed. | Old plans/audits point to `docs/CURRENT_STATUS.md`. |
+| Refresh active gate/status docs after remediation. | `docs/CURRENT_STATUS.md` is the current entrypoint; dated release-closure artifacts remain historical evidence. |

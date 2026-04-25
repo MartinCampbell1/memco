@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from shlex import quote
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit, urlunsplit
 
 import typer
 
 from memco.api.deps import build_internal_actor
+from memco.artifact_semantics import attach_artifact_context
 from memco.config import SQLITE_FALLBACK_ENGINE, Settings, load_settings, write_settings
 from memco.db import get_connection
 from memco.models.candidate import CandidateListRequest
@@ -30,10 +32,12 @@ from memco.services.ingest_service import IngestService
 from memco.services.extraction_service import ExtractionService
 from memco.services.publish_service import PublishService
 from memco.services.eval_service import EvalService
+from memco.services.explorer_service import MemoryExplorerService
 from memco.services.export_service import ExportService
 from memco.services.backup_service import BackupService
 from memco.services.chat_runtime import build_chat_services
 from memco.services.review_service import ReviewService
+from memco.repositories.candidate_repository import CandidateRepository
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.retrieval_log_repository import RetrievalLogRepository
 from memco.postgres_smoke import run_postgres_smoke
@@ -48,6 +52,10 @@ eval_app = typer.Typer(help="Evaluation commands.")
 app.add_typer(eval_app, name="eval")
 backup_app = typer.Typer(help="Backup, export, verification, and restore dry-run commands.")
 app.add_typer(backup_app, name="backup")
+review_app = typer.Typer(help="Short review queue commands.")
+app.add_typer(review_app, name="review")
+
+IMPORT_SOURCE_SHORTCUTS = {"whatsapp", "telegram", "pdf", "note"}
 
 
 def _settings(root: str | None) -> Settings:
@@ -172,6 +180,40 @@ def _backup_passphrase(*, encrypted_or_required: bool, passphrase_env: str | Non
     if encrypted_or_required and not value:
         raise typer.BadParameter(f"{env_name} must be set for encrypted backup operations.")
     return value
+
+
+def _owner_display_name(owner: str) -> str:
+    parts = owner.replace("_", " ").replace("-", " ").split()
+    return " ".join(part[:1].upper() + part[1:] for part in parts) or owner
+
+
+def _next_operator_commands(*, source_id: int, root: str | None) -> dict:
+    root_suffix = f" --root {root}" if root else ""
+    return {
+        "conversation_import": f"memco conversation-import {source_id}{root_suffix}",
+        "candidate_extract": f"memco candidate-extract --latest-conversation{root_suffix}",
+        "review_pending": f"memco review pending{root_suffix}",
+        "publish_all_safe": f"memco publish --all-safe{root_suffix}",
+    }
+
+
+def _resolve_import_shortcut(
+    *,
+    path: str,
+    extra_args: list[str],
+    source_type: str,
+) -> tuple[str, str, str]:
+    if path in IMPORT_SOURCE_SHORTCUTS:
+        if not extra_args:
+            return path, source_type, "legacy"
+        if len(extra_args) > 1:
+            raise typer.BadParameter("Import shortcuts accept exactly one path argument.")
+        if source_type not in {"note", path}:
+            raise typer.BadParameter("Use either an import shortcut or --source-type, not both.")
+        return extra_args[0], path, f"import_{path}_shortcut"
+    if extra_args:
+        raise typer.BadParameter(f"Unexpected extra import argument: {extra_args[0]}")
+    return path, source_type, "legacy"
 
 
 def _resolve_cli_id(
@@ -362,14 +404,22 @@ def doctor_command(
 
 @app.command(
     "import",
-    help="Import a source file into the workspace. For conversations, next step: `conversation-import SOURCE_ID`.",
+    help="Import a source file into the workspace. Shortcuts: `import whatsapp PATH`, `import telegram PATH`, `import pdf PATH`, `import note PATH --owner martin`. For conversations, next step: `conversation-import SOURCE_ID`.",
+    context_settings={"allow_extra_args": True},
 )
 def import_command(
+    ctx: typer.Context,
     path: str,
     source_type: str = typer.Option("note", help="Source type."),
+    owner: str | None = typer.Option(None, help="Optional owner slug/display name to upsert for note-style imports."),
     workspace: str = typer.Option("default", help="Workspace slug."),
     root: str | None = typer.Option(None, help="Project root."),
 ) -> None:
+    resolved_path, resolved_source_type, command_shape = _resolve_import_shortcut(
+        path=path,
+        extra_args=list(ctx.args),
+        source_type=source_type,
+    )
     settings = _settings(root)
     service = IngestService()
     with get_connection(settings.db_path) as conn:
@@ -377,10 +427,27 @@ def import_command(
             settings,
             conn,
             workspace_slug=workspace,
-            path=Path(path),
-            source_type=source_type,
-    )
-    typer.echo(json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2))
+            path=Path(resolved_path),
+            source_type=resolved_source_type,
+        )
+        payload = result.model_dump(mode="json")
+        payload["command_shape"] = command_shape
+        payload["next_commands"] = _next_operator_commands(source_id=result.source_id, root=root)
+        if owner:
+            owner_person = FactRepository().upsert_person(
+                conn,
+                workspace_slug=workspace,
+                display_name=_owner_display_name(owner),
+                slug=owner,
+                person_type="human",
+                aliases=[owner],
+            )
+            payload["owner"] = {
+                "person_id": int(owner_person["id"]),
+                "slug": owner_person["slug"],
+                "display_name": owner_person["display_name"],
+            }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 @app.command(
@@ -888,6 +955,77 @@ def candidate_publish_command(
 
 
 @app.command(
+    "publish",
+    help="Bulk publish validated candidates that pass the normal safe publish checks. Use `publish --all-safe`; review uncertain items first with `review pending`.",
+)
+def publish_command(
+    all_safe: bool = typer.Option(False, "--all-safe", help="Publish every currently validated candidate that passes publish safety checks."),
+    workspace: str = typer.Option("default", help="Workspace slug."),
+    person_id: int | None = typer.Option(None, help="Optional person filter."),
+    person_slug: str | None = typer.Option(None, help="Optional person slug filter."),
+    domain: str | None = typer.Option(None, help="Optional domain filter."),
+    limit: int = typer.Option(100, help="Maximum validated candidates to inspect."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    if not all_safe:
+        raise typer.BadParameter("Use --all-safe, or use candidate-publish for one explicit candidate.")
+    settings = _settings(root)
+    candidate_repository = CandidateRepository()
+    service = PublishService()
+    with get_connection(settings.db_path) as conn:
+        resolved_person_id = _resolve_person_option(
+            conn=conn,
+            workspace_slug=workspace,
+            person_id=person_id,
+            person_slug=person_slug,
+            option_name="person",
+        )
+        candidates = candidate_repository.list_candidates(
+            conn,
+            workspace_slug=workspace,
+            person_id=resolved_person_id,
+            candidate_status="validated_candidate",
+            domain=domain,
+            limit=limit,
+        )
+        published: list[dict] = []
+        skipped: list[dict] = []
+        for candidate in candidates:
+            try:
+                published.append(
+                    service.publish_candidate(
+                        conn,
+                        workspace_slug=workspace,
+                        candidate_id=int(candidate["id"]),
+                    )
+                )
+            except ValueError as exc:
+                skipped.append({"candidate_id": int(candidate["id"]), "reason": str(exc)})
+    payload = {
+        "artifact_type": "publish_all_safe_result",
+        "workspace": workspace,
+        "filters": {
+            "person_id": resolved_person_id,
+            "domain": domain,
+            "limit": limit,
+            "candidate_status": "validated_candidate",
+        },
+        "counts": {
+            "inspected": len(candidates),
+            "published": len(published),
+            "skipped": len(skipped),
+        },
+        "published": published,
+        "skipped": skipped,
+        "next_commands": {
+            "review_pending": f"memco review pending --workspace {workspace}",
+            "memory_explorer": f"memco memory-explorer --workspace {workspace}",
+        },
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+@app.command(
     "candidate-reject",
     help="Reject a candidate. Next step: `candidate-list` or `review-list`. Omit CANDIDATE_ID with `--latest-candidate` to target the newest matching candidate in the current scope.",
 )
@@ -1023,6 +1161,7 @@ def review_list_command(
     status: str | None = typer.Option(None, help="Review status filter."),
     person_id: int | None = typer.Option(None, help="Person id filter."),
     person_slug: str | None = typer.Option(None, help="Person slug filter."),
+    domain: str | None = typer.Option(None, help="Domain filter."),
     limit: int = typer.Option(50, help="Result limit."),
     root: str | None = typer.Option(None, help="Project root."),
 ) -> None:
@@ -1041,6 +1180,37 @@ def review_list_command(
             workspace_slug=workspace,
             status=status,
             person_id=resolved_person_id,
+            domain=domain,
+            limit=limit,
+        )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+@review_app.command("pending", help="List pending review items. Next step: `review-resolve approved|rejected` or `publish --all-safe`.")
+def review_pending_command(
+    workspace: str = typer.Option("default", help="Workspace slug."),
+    person_id: int | None = typer.Option(None, help="Person id filter."),
+    person_slug: str | None = typer.Option(None, help="Person slug filter."),
+    domain: str | None = typer.Option(None, help="Domain filter."),
+    limit: int = typer.Option(50, help="Result limit."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    service = ReviewService()
+    with get_connection(settings.db_path) as conn:
+        resolved_person_id = _resolve_person_option(
+            conn=conn,
+            workspace_slug=workspace,
+            person_id=person_id,
+            person_slug=person_slug,
+            option_name="person",
+        )
+        result = service.list_items(
+            conn,
+            workspace_slug=workspace,
+            status="pending",
+            person_id=resolved_person_id,
+            domain=domain,
             limit=limit,
         )
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
@@ -1055,6 +1225,7 @@ def review_dashboard_command(
     status: str | None = typer.Option("pending", help="Review status filter."),
     person_id: int | None = typer.Option(None, help="Person id filter."),
     person_slug: str | None = typer.Option(None, help="Person slug filter."),
+    domain: str | None = typer.Option(None, help="Domain filter."),
     limit: int = typer.Option(50, help="Result limit."),
     low_confidence_threshold: float = typer.Option(0.6, help="Flag candidates below this confidence."),
     root: str | None = typer.Option(None, help="Project root."),
@@ -1074,6 +1245,7 @@ def review_dashboard_command(
             workspace_slug=workspace,
             status=status,
             person_id=resolved_person_id,
+            domain=domain,
             limit=limit,
             low_confidence_threshold=low_confidence_threshold,
         )
@@ -1118,6 +1290,42 @@ def fact_list_command(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+@app.command(
+    "memory-explorer",
+    help="Local memory explorer snapshot: facts with evidence, review candidates, lifecycle changes, rollback hints, and domain filters.",
+)
+def memory_explorer_command(
+    workspace: str = typer.Option("default", help="Workspace slug."),
+    person_id: int | None = typer.Option(None, help="Person id filter."),
+    person_slug: str | None = typer.Option(None, help="Person slug filter."),
+    fact_status: str | None = typer.Option(None, "--fact-status", help="Fact status filter."),
+    domain: str | None = typer.Option(None, help="Domain filter."),
+    review_status: str | None = typer.Option("pending", help="Review status filter."),
+    limit: int = typer.Option(50, help="Result limit."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    service = MemoryExplorerService()
+    with get_connection(settings.db_path) as conn:
+        resolved_person_id = _resolve_person_option(
+            conn=conn,
+            workspace_slug=workspace,
+            person_id=person_id,
+            person_slug=person_slug,
+            option_name="person",
+        )
+        result = service.snapshot(
+            conn,
+            workspace_slug=workspace,
+            person_id=resolved_person_id,
+            fact_status=fact_status,
+            domain=domain,
+            review_status=review_status,
+            limit=limit,
+        )
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 @app.command("persona-export", help="Export one persona as structured JSON without raw source content.")
 def persona_export_command(
     person_id: int | None = typer.Option(None, help="Person id."),
@@ -1150,11 +1358,90 @@ def _default_backup_output(settings: Settings, *, mode: str, encrypted: bool) ->
     return settings.root / "var" / "backups" / f"{stem}{suffix}"
 
 
+def _backup_runbook(settings: Settings, *, storage_engine: str | None = None) -> dict:
+    engine = (storage_engine or settings.storage.engine).strip().lower()
+    if engine not in {"sqlite", "postgres"}:
+        raise typer.BadParameter("storage_engine must be sqlite or postgres")
+    sqlite_db_path = settings.db_path
+    sqlite_backup_path = settings.root / "var" / "backups" / "memco-sqlite.backup"
+    postgres_dump_path = settings.backup_path
+    audit_json_path = settings.root / "var" / "backups" / "memco-audit-export.json"
+    encrypted_json_path = settings.root / "var" / "backups" / "memco-full-backup.json.enc"
+    if engine == "sqlite":
+        native_backup = {
+            "kind": "sqlite_backup",
+            "command": f"sqlite3 {quote(str(sqlite_db_path))} \".backup {quote(str(sqlite_backup_path))}\"",
+            "output_path": str(sqlite_backup_path),
+        }
+        native_restore = {
+            "kind": "sqlite_file_restore",
+            "command": f"cp {quote(str(sqlite_backup_path))} {quote(str(sqlite_db_path))}",
+            "requires": ["stop memco writers first", "keep a pre-restore copy of the current db file"],
+        }
+        corruption_check = {
+            "kind": "sqlite_integrity_check",
+            "command": f"sqlite3 {quote(str(sqlite_db_path))} \"PRAGMA integrity_check;\"",
+            "expected_output": "ok",
+        }
+    else:
+        native_backup = {
+            "kind": "postgres_dump",
+            "command": f"pg_dump \"$MEMCO_POSTGRES_DATABASE_URL\" --format=custom --file {quote(str(postgres_dump_path))}",
+            "output_path": str(postgres_dump_path),
+        }
+        native_restore = {
+            "kind": "postgres_restore",
+            "command": f"pg_restore --clean --if-exists --no-owner --dbname \"$MEMCO_POSTGRES_DATABASE_URL\" {quote(str(postgres_dump_path))}",
+            "requires": ["target database selected through MEMCO_POSTGRES_DATABASE_URL", "operator has confirmed this is the intended restore target"],
+        }
+        corruption_check = {
+            "kind": "postgres_dump_list_check",
+            "command": f"pg_restore --list {quote(str(postgres_dump_path))}",
+            "expected_output": "table-of-contents listing exits 0",
+        }
+    return {
+        "artifact_type": "backup_restore_runbook",
+        "storage_engine": engine,
+        "root": str(settings.root),
+        "native_backup": native_backup,
+        "native_restore": native_restore,
+        "corruption_check": corruption_check,
+        "json_exports": {
+            "audit_redacted": {
+                "command": f"uv run memco backup export --mode audit --output {quote(str(audit_json_path))} --root {quote(str(settings.root))}",
+                "verify": f"uv run memco backup verify {quote(str(audit_json_path))}",
+                "restorable": False,
+            },
+            "full_encrypted": {
+                "command": f"MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup export --mode full --encrypted --output {quote(str(encrypted_json_path))} --root {quote(str(settings.root))}",
+                "verify": f"MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup verify {quote(str(encrypted_json_path))}",
+                "restore_dry_run": f"MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup restore-dry-run {quote(str(encrypted_json_path))}",
+                "restorable": True,
+            },
+        },
+        "notes": [
+            "Audit JSON exports are redacted and are not restore sources.",
+            "Full encrypted JSON exports are verified with restore-dry-run before any native restore.",
+            "Native restore commands are destructive; run them only after stopping Memco writers and confirming the target.",
+        ],
+    }
+
+
 def _backup_encrypted_flag(path: Path) -> bool:
     try:
         return BackupService().is_encrypted_backup(path)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+@backup_app.command("runbook", help="Print engine-specific backup, restore, encryption, and corruption-check commands.")
+def backup_runbook_command(
+    storage_engine: str | None = typer.Option(None, help="Override storage engine for the runbook: sqlite|postgres."),
+    root: str | None = typer.Option(None, help="Project root."),
+) -> None:
+    settings = _settings(root)
+    result = _backup_runbook(settings, storage_engine=storage_engine)
+    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 @backup_app.command("export", help="Write an audit or full backup export. Use --encrypted for passphrase-protected output.")
@@ -1451,25 +1738,56 @@ def eval_run_command(
     typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
 
 
-@eval_app.command("personal-memory", help="Run the personal-memory golden eval gate.")
-def eval_personal_memory_command(
-    goldens: str = typer.Option("eval/personal_memory_goldens", help="Directory containing personal-memory JSONL goldens."),
-    output: str | None = typer.Option(None, help="Optional JSON artifact output path."),
-    root: str | None = typer.Option(None, help="Optional isolated fixture runtime root. Defaults to a temporary root."),
-) -> None:
-    goldens_dir = Path(goldens).expanduser().resolve()
+def _resolve_personal_goldens_dir(goldens: str) -> Path:
+    requested = Path(goldens).expanduser()
+    candidates = [requested] if requested.is_absolute() else [Path.cwd() / requested]
+    if not requested.is_absolute():
+        candidates.append(Path.cwd() / "eval" / "personal_memory_goldens" / requested.name)
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file():
+            return resolved.parent
+        if resolved.is_dir():
+            return resolved
+    return candidates[0].resolve()
+
+
+def _run_personal_memory_eval_command(*, goldens: str, output: str | None, root: str | None) -> None:
+    goldens_dir = _resolve_personal_goldens_dir(goldens)
     service = EvalService()
     if root:
         settings = _eval_settings(root)
         result = service.run_personal_memory(project_root=settings.root, goldens_dir=goldens_dir)
-        _emit_json_artifact(result, output=output)
     else:
         with TemporaryDirectory(prefix="memco-personal-memory-eval-") as tmpdir:
             settings = _eval_settings(tmpdir)
             result = service.run_personal_memory(project_root=settings.root, goldens_dir=goldens_dir)
-            _emit_json_artifact(result, output=output)
+    try:
+        context_root = _project_root(None)
+    except typer.BadParameter:
+        context_root = settings.root
+    attach_artifact_context(result, project_root=context_root)
+    _emit_json_artifact(result, output=output)
     if not result["ok"]:
         raise typer.Exit(1)
+
+
+@eval_app.command("personal-memory", help="Run the personal-memory golden eval gate.")
+def eval_personal_memory_command(
+    goldens: str = typer.Option("eval/personal_memory_goldens", help="Directory or JSONL file containing personal-memory goldens."),
+    output: str | None = typer.Option(None, help="Optional JSON artifact output path."),
+    root: str | None = typer.Option(None, help="Optional isolated fixture runtime root. Defaults to a temporary root."),
+) -> None:
+    _run_personal_memory_eval_command(goldens=goldens, output=output, root=root)
+
+
+@app.command("personal-memory-eval", help="Compatibility alias for `eval personal-memory`.")
+def personal_memory_eval_command(
+    goldens: str = typer.Option("eval/personal_memory_goldens", help="Directory or JSONL file containing personal-memory goldens."),
+    output: str | None = typer.Option(None, help="Optional JSON artifact output path."),
+    root: str | None = typer.Option(None, help="Optional isolated fixture runtime root. Defaults to a temporary root."),
+) -> None:
+    _run_personal_memory_eval_command(goldens=goldens, output=output, root=root)
 
 
 @app.command(

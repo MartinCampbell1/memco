@@ -1,14 +1,17 @@
 # Memco Private Release Gate
 
+Status note: checklist definition, not current checkout verdict.
+Current verdict: see docs/CURRENT_STATUS.md.
+
 ## Phase 8 Private Gate
 
-This document is the explicit Phase 8 gate for the current local private operator-controlled review-gated single-user release.
+This document is the explicit Phase 8 gate checklist for the local private operator-controlled review-gated single-user release.
 
 Date: 2026-04-21
 
 ## Scope
 
-This document is the acceptance checklist for the current local private operator-controlled review-gated single-user release.
+This document is the acceptance checklist for the local private operator-controlled review-gated single-user release.
 
 It is intentionally not a strict original execution-brief gate.
 It assumes the current Stage A owner-only actor exception.
@@ -79,8 +82,8 @@ Current recorded result:
 - acceptance-scale eval/reporting
 - PostgreSQL + Docker Compose + migration-layer readiness
 
-## Current Verdict
+## Gate Interpretation
 
-Private release readiness: green for the current local private operator-controlled review-gated slice.
+Private release readiness: evaluate against this checklist with fresh current checkout/config evidence.
 
 Full brief readiness: not established by this gate.

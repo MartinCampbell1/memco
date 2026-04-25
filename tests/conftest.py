@@ -27,6 +27,7 @@ def isolate_memco_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "MEMCO_ENABLE_RETRIEVAL_LOGS",
         "MEMCO_QUERY_HASH_SALT",
         "MEMCO_RUNTIME_PROFILE",
+        "MEMCO_EXTRACTION_MODE",
         "MEMCO_RUN_LIVE_SMOKE",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",

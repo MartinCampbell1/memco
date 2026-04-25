@@ -1,3 +1,6 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Single-User Operator Check
 
 Date: 2026-04-21  
@@ -8,7 +11,7 @@ Historical note:
 
 - This check reflects the earlier operator surface before the CLI was completed.
 - It is kept as evidence of the pre-remediation operator experience.
-- For the current private operator verdict, use [2026-04-21_memco_private_release_gate.md](2026-04-21_memco_private_release_gate.md).
+- For the current status entrypoint, use [CURRENT_STATUS.md](CURRENT_STATUS.md).
 
 ## Result
 

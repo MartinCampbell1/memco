@@ -1,10 +1,13 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Final Release Audit
 
 Date: 2026-04-24
 Auditor: Codex
 Scope: current working tree at `/Users/martin/memco`
 Status: historical pre-remediation audit baseline, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 
 Related follow-up artifacts:
 

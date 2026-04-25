@@ -58,10 +58,11 @@ That means:
 - The current `sources` table remains the underlying storage table for the shipped slice, with `source_documents` as the explicit source-document contract surface.
 - Conversation tables remain an indexed/convenience projection on top of that source-document/source-segment layer.
 - This materially closes the generic source-layer gap for the current architecture, even though broader future ingestion formats may still add more segment types later.
-- Current implemented ingestion sources for the accepted repo-local contract are `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, and `html`.
+- Current implemented ingestion sources for the accepted repo-local contract are `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`, `whatsapp`, and `telegram`.
 - Markdown parsing stores YAML frontmatter in source metadata while keeping only the body in searchable parsed text.
 - HTML parsing stores page title metadata and searchable visible text while dropping script/style-like noise.
-- `WhatsApp` and `Telegram` parser support remain roadmap/reference-track items, not current repo-local contract claims.
+- PDF parsing stores page-level `pdf_page` source segments with page locators, so published evidence can carry quote text plus source segment and page provenance.
+- `WhatsApp` and `Telegram` parser support is implemented for common export shapes: WhatsApp text exports, Telegram JSON exports, and Telegram HTML exports. Parser claims beyond those shapes need fixture-backed validation.
 
 ### LLM / Provider Architecture
 
@@ -74,10 +75,17 @@ That means:
 ### Evaluation Surface
 
 - The repository now ships an acceptance-style eval artifact for the private slice.
+- The personal-memory eval is an internal LoCoMo-like gate, not a paper-equivalent benchmark claim; it records overall/core/adversarial/temporal/cross-person/unsupported-answer thresholds, coverage dimensions, 10 linked long-conversation fixtures, 2+ speakers per conversation, and full case-to-conversation linkage.
+- The personal-memory eval now includes an explicit memory-evolution/update-fidelity gate covering incremental import, repeated reprocessing idempotency, conflict supersede, delete/restore, rollback, stale current-state exclusion, and current-vs-historical retrieval.
 - The current eval artifact includes tracked token-usage summaries.
 - Token usage is now tracked for both:
   - the explicit mock/deterministic fixture path
   - the OpenAI-compatible provider path exercised in tests
+
+### Psychometrics And Style
+
+- Psychometrics remain disabled by default and are non-factual: retrieval/chat must not return psychometric records as factual answers.
+- Psychometric generation hints require multiple supporting evidence signals, no counterevidence, and a conservative threshold; single signals stay internal and non-factual.
 - `token_accounting.production_accounting` now breaks usage down by extraction/planner/retrieval/answer stage, event-summed retrieved context tokens, amortized extraction cost per candidate, and source/person/domain cost groups. Unknown live-provider pricing is reported as `null` with `cost_status: "unknown"` rather than as zero; source/domain/person groups are attribution groups, not additive billing totals.
 - This is still not the final strict original-brief acceptance/reporting closure.
 
@@ -90,7 +98,12 @@ That means:
 ### Operator Surface
 
 - The current private release now has a CLI-only operator flow, including a dedicated `conversation-import` command for the `source -> conversation` step.
+- Agent integrations can use `POST /v1/agent/memory-context` for retrieval-only structured facts plus safety instructions, avoiding natural-language chat answers as the agent memory substrate.
+- `memory-explorer` provides a local CLI explorer snapshot for facts/evidence, review candidates, lifecycle changes, rollback hints, and domain filters.
 - `review-dashboard` provides the minimum review UX for the private slice: queue items, candidate cards, evidence preview, proposed merge/supersede action, and flags for sensitive, low-confidence, and psychometrics candidates.
+- Import/review/publish UX has shortcut commands for the private operator path: `import whatsapp|telegram|pdf|note`, `review pending`, and `publish --all-safe`.
+- Backup/restore operations have a dedicated runbook plus `backup runbook` JSON output covering SQLite backup, Postgres dump, encryption, restore commands, and corruption checks.
+- Documentation cleanup now has explicit current entrypoints: `docs/CURRENT_STATUS.md`, `docs/PRIVATE_SINGLE_USER_CONTRACT.md`, `docs/PDF_PARITY_GAPS.md`, and `docs/LOCAL_REPRODUCTION.md`; historical verdict documents are marked as non-current.
 - The operator surface is still intentionally narrow and optimized for a technical single-user local workflow, not for a broader multi-user or service-managed product shape.
 
 ## Practical Reading Guide

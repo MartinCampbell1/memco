@@ -760,7 +760,7 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
         if payload.get("use_in_generation") != scored_profile.get("use_in_generation"):
             raise ValueError("payload.use_in_generation must match payload.scored_profile.use_in_generation")
         allowed_generation = (
-            (extracted_signal.get("evidence_count", 0) >= 2 or extracted_signal.get("explicit_self_description"))
+            extracted_signal.get("evidence_count", 0) >= 2
             and extracted_signal.get("counterevidence_count", 0) == 0
             and float(scored_profile.get("confidence", 0.0)) >= float(scored_profile.get("framework_threshold", 0.0))
         )

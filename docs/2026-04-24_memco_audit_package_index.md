@@ -1,13 +1,16 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Audit Package Index
 
 Date: 2026-04-24
 Status: historical pre-remediation audit package, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Scope: pre-remediation audited checkout at `/Users/martin/memco`
 
 ## Reading Order
 
-For the current remediated private-release verdict, read `docs/2026-04-24_memco_release_closure.md` first.
+For the current checkout status, read `docs/CURRENT_STATUS.md` first.
 
 Use the files below as the pre-remediation audit baseline and evidence trail.
 
@@ -105,7 +108,7 @@ Do not use any of the following as final release proof by itself:
 
 ## Minimum Evidence Before GO
 
-The current release closure records that the private-release remediation has produced this evidence. Keep this list as the baseline criteria, not as a claim that the current checkout is still red.
+The dated release closure records that private-release remediation produced historical evidence. Keep this list as baseline criteria, not as a claim about the current checkout.
 
 Before claiming private GO, produce all of:
 

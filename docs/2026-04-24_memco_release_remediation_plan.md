@@ -1,8 +1,11 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Release Remediation Plan
 
 Date: 2026-04-24
 Status: historical pre-remediation plan, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Audit package index: `docs/2026-04-24_memco_audit_package_index.md`
 Source audit: `docs/2026-04-24_memco_final_release_audit.md`
 Russian executive summary: `docs/2026-04-24_memco_final_release_audit_ru.md`
@@ -14,7 +17,7 @@ Scope: fix only the blockers required for honest private owner/operator GO.
 
 ## Goal
 
-This plan records the staged remediation path that was needed after the pre-remediation audit. For the current private release state, use the release closure document instead of treating this file as an active verdict.
+This plan records the staged remediation path that was needed after the pre-remediation audit. For the current checkout status, use `docs/CURRENT_STATUS.md` instead of treating this file as an active verdict.
 
 Bring the current Memco checkout from:
 
@@ -259,7 +262,7 @@ Required updates:
 
 ```text
 Status: historical remediation plan, not current release verdict.
-Current verdict lives in docs/2026-04-24_memco_release_closure.md and the active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
+Current verdict: see docs/CURRENT_STATUS.md. The active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
 ```
 
 2. Do not rewrite history. Keep old evidence, but stop it from looking current.

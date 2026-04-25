@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from typer.main import get_command
 
 from memco.cli.main import app
+from memco.models.source import ImportResult
 from memco.repositories.candidate_repository import CandidateRepository
 from memco.db import get_connection
 from memco.repositories.fact_repository import FactRepository
@@ -738,6 +739,10 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert result.exit_code == 0, result.output
     import_help = _plain(result.output)
     assert "conversation-import SOURCE_ID" in import_help
+    assert "import whatsapp PATH" in import_help
+    assert "import telegram PATH" in import_help
+    assert "import pdf PATH" in import_help
+    assert "import note PATH --owner martin" in import_help
 
     result = runner.invoke(command, ["conversation-import", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
@@ -761,6 +766,12 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert "--latest-candidate" in publish_help
     assert "--person-slug" in publish_help
     assert "--domain" in publish_help
+
+    result = runner.invoke(command, ["publish", "--help"], prog_name="memco")
+    assert result.exit_code == 0, result.output
+    all_safe_help = _plain(result.output)
+    assert "--all-safe" in all_safe_help
+    assert "review pending" in all_safe_help
 
     result = runner.invoke(command, ["candidate-reject", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
@@ -803,6 +814,12 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert "review-resolve" in review_list_help
     assert "candidate-list" in review_list_help
     assert "--person-slug" in review_list_help
+
+    result = runner.invoke(command, ["review", "pending", "--help"], prog_name="memco")
+    assert result.exit_code == 0, result.output
+    review_pending_help = _plain(result.output)
+    assert "review-resolve approved|rejected" in review_pending_help
+    assert "--domain" in review_pending_help
 
     result = runner.invoke(command, ["review-dashboard", "--help"], prog_name="memco")
     assert result.exit_code == 0, result.output
@@ -887,6 +904,60 @@ def test_cli_flow_commands_advertise_next_steps(settings):
     assert "Resolved target" in review_resolve_help
     assert "--publish" in review_resolve_help
     assert "--person-slug" in review_resolve_help
+
+
+def test_cli_import_shortcuts_dispatch_source_types_and_owner(monkeypatch, settings, tmp_path):
+    runner = CliRunner()
+    command = get_command(app)
+    captured: list[dict] = []
+
+    def fake_import_file(self, settings_arg, conn, *, workspace_slug, path, source_type):
+        captured.append({"workspace": workspace_slug, "path": str(path), "source_type": source_type})
+        return ImportResult(
+            source_id=len(captured),
+            source_path=str(path),
+            normalized_path=str(path),
+            source_type=source_type,
+            title=f"{source_type}-source",
+        )
+
+    monkeypatch.setattr("memco.cli.main.IngestService.import_file", fake_import_file)
+
+    for source_type in ("whatsapp", "telegram", "pdf"):
+        source = tmp_path / f"{source_type}-export.txt"
+        result = runner.invoke(
+            command,
+            ["import", source_type, str(source), "--root", str(settings.root)],
+            prog_name="memco",
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["source_type"] == source_type
+        assert payload["command_shape"] == f"import_{source_type}_shortcut"
+        assert payload["next_commands"]["review_pending"].startswith("memco review pending")
+
+    note_source = tmp_path / "owner-note.txt"
+    result = runner.invoke(
+        command,
+        ["import", "note", "--owner", "martin", str(note_source), "--root", str(settings.root)],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["source_type"] == "note"
+    assert payload["owner"]["slug"] == "martin"
+    assert captured[-1]["path"] == str(note_source)
+
+    legacy_source = tmp_path / "legacy.json"
+    result = runner.invoke(
+        command,
+        ["import", str(legacy_source), "--source-type", "json", "--root", str(settings.root)],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["source_type"] == "json"
+    assert payload["command_shape"] == "legacy"
 
 
 def test_cli_operator_flow_supports_latest_shortcuts(settings, tmp_path):
@@ -1025,6 +1096,126 @@ def test_cli_latest_candidate_publish_fails_closed_on_newer_non_publishable_cand
     )
     assert result.exit_code != 0
     assert "Cannot publish candidate with status needs_review" in result.output
+
+
+def test_cli_publish_all_safe_publishes_validated_candidates_and_skips_unsafe(settings):
+    runner = CliRunner()
+    command = get_command(app)
+
+    with get_connection(settings.db_path) as conn:
+        fact_repo = FactRepository()
+        source_repo = SourceRepository()
+        candidate_repo = CandidateRepository()
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/publish-all-safe.md",
+            source_type="note",
+            origin_uri="/tmp/publish-all-safe.md",
+            title="publish-all-safe",
+            sha256="publish-all-safe-sha",
+            parsed_text="Alice lives in Lisbon. Alice lives in Porto.",
+        )
+        source_repo.replace_chunks(conn, source_id=source_id, parsed_text="Alice lives in Lisbon. Alice lives in Porto.")
+        chunk_id = int(
+            conn.execute(
+                "SELECT id FROM source_chunks WHERE source_id = ? ORDER BY chunk_index ASC LIMIT 1",
+                (source_id,),
+            ).fetchone()["id"]
+        )
+        source_segment_id = int(source_repo.get_segment_by_chunk_id(conn, chunk_id=chunk_id)["id"])
+        safe_candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=source_id,
+            conversation_id=None,
+            chunk_kind="source",
+            chunk_id=chunk_id,
+            domain="biography",
+            category="residence",
+            subcategory="",
+            canonical_key="alice:biography:residence:lisbon",
+            payload={"city": "Lisbon"},
+            summary="Alice lives in Lisbon.",
+            confidence=0.92,
+            reason="safe publish",
+        )
+        safe_candidate = candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(safe_candidate["id"]),
+            evidence=[
+                {
+                    "quote": "Alice lives in Lisbon.",
+                    "message_ids": [],
+                    "source_segment_ids": [source_segment_id],
+                    "chunk_kind": "source",
+                }
+            ],
+        )
+        candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(safe_candidate["id"]),
+            candidate_status="validated_candidate",
+            reason="safe publish",
+        )
+        unsafe_candidate = candidate_repo.add_candidate(
+            conn,
+            workspace_slug="default",
+            person_id=int(person["id"]),
+            source_id=source_id,
+            conversation_id=None,
+            chunk_kind="source",
+            chunk_id=chunk_id,
+            domain="biography",
+            category="residence",
+            subcategory="",
+            canonical_key="alice:biography:residence:porto",
+            payload={"city": "Porto"},
+            summary="Alice lives in Porto.",
+            confidence=0.55,
+            reason="below publish threshold",
+        )
+        unsafe_candidate = candidate_repo.update_candidate_evidence(
+            conn,
+            candidate_id=int(unsafe_candidate["id"]),
+            evidence=[
+                {
+                    "quote": "Alice lives in Porto.",
+                    "message_ids": [],
+                    "source_segment_ids": [source_segment_id],
+                    "chunk_kind": "source",
+                }
+            ],
+        )
+        candidate_repo.mark_candidate_status(
+            conn,
+            candidate_id=int(unsafe_candidate["id"]),
+            candidate_status="validated_candidate",
+            reason="below publish threshold",
+        )
+
+    result = runner.invoke(
+        command,
+        ["publish", "--all-safe", "--root", str(settings.root), "--person-slug", "alice"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["artifact_type"] == "publish_all_safe_result"
+    assert payload["counts"] == {"inspected": 2, "published": 1, "skipped": 1}
+    assert payload["published"][0]["fact"]["payload"]["city"] == "Lisbon"
+    assert payload["skipped"][0]["candidate_id"] == int(unsafe_candidate["id"])
+    assert "confidence threshold" in payload["skipped"][0]["reason"]
 
 
 def test_cli_latest_candidate_publish_can_be_scoped_by_person_slug(settings, tmp_path):
@@ -1599,6 +1790,17 @@ def test_cli_review_flow_supports_latest_review_and_slug_resolution(settings, tm
     assert "candidate_summary" in review_items[0]
     assert "candidate_reason_codes" in review_items[0]
     assert review_items[0]["next_action_hint"] == "review-resolve approved|rejected"
+
+    result = runner.invoke(
+        command,
+        ["review", "pending", "--root", str(settings.root), "--person-slug", "alice", "--domain", "social_circle"],
+        prog_name="memco",
+    )
+    assert result.exit_code == 0, result.output
+    pending_items = json.loads(result.output)
+    assert len(pending_items) >= 1
+    assert pending_items[0]["status"] == "pending"
+    assert pending_items[0]["candidate_domain"] == "social_circle"
 
     result = runner.invoke(
         command,

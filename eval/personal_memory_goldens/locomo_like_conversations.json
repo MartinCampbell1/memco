@@ -1,0 +1,4231 @@
+{
+  "conversations": [
+    {
+      "conversation_id": "locomo_like_001",
+      "coverage": [
+        "single_hop",
+        "cross_person"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_001",
+        "adversarial_false_premise_011",
+        "adversarial_false_premise_021",
+        "adversarial_false_premise_031",
+        "adversarial_false_premise_041",
+        "core_fact_001",
+        "core_fact_011",
+        "core_fact_021",
+        "core_fact_031",
+        "core_fact_041",
+        "core_fact_051",
+        "core_fact_061",
+        "core_fact_071",
+        "core_fact_081",
+        "core_fact_091",
+        "cross_person_contamination_001",
+        "cross_person_contamination_011",
+        "cross_person_contamination_021",
+        "preference_001",
+        "preference_011",
+        "preference_021",
+        "preference_031",
+        "preference_041",
+        "realistic_adversarial_001",
+        "realistic_adversarial_011",
+        "realistic_adversarial_021",
+        "realistic_adversarial_031",
+        "realistic_adversarial_041",
+        "realistic_biography_001",
+        "realistic_biography_011",
+        "realistic_biography_021",
+        "realistic_cross_person_001",
+        "realistic_cross_person_011",
+        "realistic_cross_person_021",
+        "realistic_experiences_001",
+        "realistic_experiences_011",
+        "realistic_experiences_021",
+        "realistic_negation_hypothetical_006",
+        "realistic_negation_hypothetical_016",
+        "realistic_preference_006",
+        "realistic_preference_016",
+        "realistic_social_001",
+        "realistic_social_011",
+        "realistic_social_021",
+        "realistic_speakerless_001",
+        "realistic_speakerless_011",
+        "realistic_speakerless_021",
+        "realistic_temporal_006",
+        "realistic_temporal_016",
+        "realistic_update_006",
+        "realistic_update_016",
+        "realistic_work_006",
+        "realistic_work_016",
+        "rollback_update_001",
+        "rollback_update_011",
+        "social_family_001",
+        "social_family_011",
+        "social_family_021",
+        "social_family_031",
+        "social_family_041",
+        "speakerless_note_001",
+        "speakerless_note_011",
+        "speakerless_note_021",
+        "temporal_001",
+        "temporal_011",
+        "temporal_021",
+        "temporal_031",
+        "temporal_041"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-001",
+        "personal-cross-alice-011",
+        "personal-cross-alice-021",
+        "personal-preference-001",
+        "personal-preference-011",
+        "personal-preference-021",
+        "personal-preference-031",
+        "personal-preference-041",
+        "personal-rollback-001",
+        "personal-rollback-011",
+        "realistic-adversarial-001",
+        "realistic-adversarial-011",
+        "realistic-adversarial-021",
+        "realistic-adversarial-031",
+        "realistic-adversarial-041",
+        "realistic-biography-001",
+        "realistic-biography-011",
+        "realistic-biography-021",
+        "realistic-cross-alice-001",
+        "realistic-cross-alice-011",
+        "realistic-cross-alice-021",
+        "realistic-experiences-001",
+        "realistic-experiences-011",
+        "realistic-experiences-021",
+        "realistic-negation-006",
+        "realistic-negation-016",
+        "realistic-preferences-006",
+        "realistic-preferences-016",
+        "realistic-social-001",
+        "realistic-social-011",
+        "realistic-social-021",
+        "realistic-speakerless-001",
+        "realistic-speakerless-011",
+        "realistic-speakerless-021",
+        "realistic-temporal-006",
+        "realistic-temporal-016",
+        "realistic-update-006",
+        "realistic-update-016",
+        "realistic-work-006",
+        "realistic-work-016"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 001 is core-value-001.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 001",
+          "speaker_slug": "personal-cross-alice-001",
+          "text": "Personal Cross Alice 001 isolation preference is AliceIso001.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 011",
+          "speaker_slug": "personal-cross-alice-011",
+          "text": "Personal Cross Alice 011 isolation preference is AliceIso011.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 021",
+          "speaker_slug": "personal-cross-alice-021",
+          "text": "Personal Cross Alice 021 isolation preference is AliceIso021.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 001",
+          "speaker_slug": "personal-preference-001",
+          "text": "Personal Preference 001 preference is PreferenceValue001.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 011",
+          "speaker_slug": "personal-preference-011",
+          "text": "Personal Preference 011 preference is PreferenceValue011.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 021",
+          "speaker_slug": "personal-preference-021",
+          "text": "Personal Preference 021 preference is PreferenceValue021.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 031",
+          "speaker_slug": "personal-preference-031",
+          "text": "Personal Preference 031 preference is PreferenceValue031.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 041",
+          "speaker_slug": "personal-preference-041",
+          "text": "Personal Preference 041 preference is PreferenceValue041.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 001",
+          "speaker_slug": "personal-rollback-001",
+          "text": "Personal Rollback 001 lives in OldCity001.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 011",
+          "speaker_slug": "personal-rollback-011",
+          "text": "Personal Rollback 011 lives in OldCity011.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-adversarial-001",
+          "text": "Maya Okafor lives in Porto.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Nadia Okafor",
+          "speaker_slug": "realistic-adversarial-011",
+          "text": "Nadia Okafor lives in Madrid.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-adversarial-021",
+          "text": "Maya Okafor lives in Porto.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Nadia Okafor",
+          "speaker_slug": "realistic-adversarial-031",
+          "text": "Nadia Okafor lives in Madrid.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-adversarial-041",
+          "text": "Maya Okafor lives in Porto.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Maya Ivanov",
+          "speaker_slug": "realistic-biography-001",
+          "text": "Maya Ivanov stores recovery codes in the family 1Password vault.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Nadia Ivanov",
+          "speaker_slug": "realistic-biography-011",
+          "text": "Nadia Ivanov stores recovery codes in the family 1Password vault.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Maya Ivanov",
+          "speaker_slug": "realistic-biography-021",
+          "text": "Maya Ivanov stores recovery codes in the family 1Password vault.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-cross-alice-001",
+          "text": "Maya Okafor lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Nadia Okafor",
+          "speaker_slug": "realistic-cross-alice-011",
+          "text": "Nadia Okafor lives in Lisbon.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-cross-alice-021",
+          "text": "Maya Okafor lives in Lisbon.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-experiences-001",
+          "text": "Maya Okafor had a serious accident at the Grand Canyon in October 2023.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Nadia Okafor",
+          "speaker_slug": "realistic-experiences-011",
+          "text": "Nadia Okafor attended October 2023 serious accident on 2025-11-15.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-experiences-021",
+          "text": "Maya Okafor attended October 2023 serious accident on 2025-09-15.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Owen Nguyen",
+          "speaker_slug": "realistic-negation-006",
+          "text": "Owen Nguyen shared a personal-memory detail.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Rafael Nguyen",
+          "speaker_slug": "realistic-negation-016",
+          "text": "Rafael Nguyen shared a personal-memory detail.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-preferences-006",
+          "text": "Owen Okafor prefers vegetarian ramen.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Rafael Okafor",
+          "speaker_slug": "realistic-preferences-016",
+          "text": "Rafael Okafor prefers vegetarian ramen.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Maya Stone",
+          "speaker_slug": "realistic-social-001",
+          "text": "Maya Stone's sister is Maria in Porto.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Nadia Stone",
+          "speaker_slug": "realistic-social-011",
+          "text": "Nadia Stone's sister is Maria in Porto.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Maya Stone",
+          "speaker_slug": "realistic-social-021",
+          "text": "Maya Stone's sister is Maria in Porto.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-speakerless-001",
+          "text": "Maya Okafor speakerless note says renew passport before the May trip.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Nadia Okafor",
+          "speaker_slug": "realistic-speakerless-011",
+          "text": "Nadia Okafor speakerless note says renew passport before the May trip.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-speakerless-021",
+          "text": "Maya Okafor speakerless note says renew passport before the May trip.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Owen Nguyen",
+          "speaker_slug": "realistic-temporal-006",
+          "text": "Owen Nguyen attended winter residency.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Rafael Nguyen",
+          "speaker_slug": "realistic-temporal-016",
+          "text": "Rafael Nguyen attended winter residency.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Owen Stone",
+          "speaker_slug": "realistic-update-006",
+          "text": "Owen Stone lived in Paris.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Rafael Stone",
+          "speaker_slug": "realistic-update-016",
+          "text": "Rafael Stone lived in Paris.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Owen Shah",
+          "speaker_slug": "realistic-work-006",
+          "text": "Owen Shah shipped Kite onboarding.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Rafael Shah",
+          "speaker_slug": "realistic-work-016",
+          "text": "Rafael Shah shipped Project Phoenix.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_001 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 001",
+          "speaker_slug": "personal-cross-alice-001",
+          "text": "Personal Cross Alice 001 adds follow-up context for locomo_like_001 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 011",
+          "speaker_slug": "personal-cross-alice-011",
+          "text": "Personal Cross Alice 011 adds follow-up context for locomo_like_001 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 021",
+          "speaker_slug": "personal-cross-alice-021",
+          "text": "Personal Cross Alice 021 adds follow-up context for locomo_like_001 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 001",
+          "speaker_slug": "personal-preference-001",
+          "text": "Personal Preference 001 adds follow-up context for locomo_like_001 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 011",
+          "speaker_slug": "personal-preference-011",
+          "text": "Personal Preference 011 adds follow-up context for locomo_like_001 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 021",
+          "speaker_slug": "personal-preference-021",
+          "text": "Personal Preference 021 adds follow-up context for locomo_like_001 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 031",
+          "speaker_slug": "personal-preference-031",
+          "text": "Personal Preference 031 adds follow-up context for locomo_like_001 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 041",
+          "speaker_slug": "personal-preference-041",
+          "text": "Personal Preference 041 adds follow-up context for locomo_like_001 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_002",
+      "coverage": [
+        "single_hop",
+        "open_inference"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_002",
+        "adversarial_false_premise_012",
+        "adversarial_false_premise_022",
+        "adversarial_false_premise_032",
+        "adversarial_false_premise_042",
+        "core_fact_002",
+        "core_fact_012",
+        "core_fact_022",
+        "core_fact_032",
+        "core_fact_042",
+        "core_fact_052",
+        "core_fact_062",
+        "core_fact_072",
+        "core_fact_082",
+        "core_fact_092",
+        "cross_person_contamination_002",
+        "cross_person_contamination_012",
+        "cross_person_contamination_022",
+        "preference_002",
+        "preference_012",
+        "preference_022",
+        "preference_032",
+        "preference_042",
+        "realistic_adversarial_002",
+        "realistic_adversarial_012",
+        "realistic_adversarial_022",
+        "realistic_adversarial_032",
+        "realistic_adversarial_042",
+        "realistic_biography_002",
+        "realistic_biography_012",
+        "realistic_biography_022",
+        "realistic_cross_person_002",
+        "realistic_cross_person_012",
+        "realistic_cross_person_022",
+        "realistic_experiences_002",
+        "realistic_experiences_012",
+        "realistic_experiences_022",
+        "realistic_negation_hypothetical_007",
+        "realistic_negation_hypothetical_017",
+        "realistic_preference_007",
+        "realistic_preference_017",
+        "realistic_social_002",
+        "realistic_social_012",
+        "realistic_social_022",
+        "realistic_speakerless_002",
+        "realistic_speakerless_012",
+        "realistic_speakerless_022",
+        "realistic_temporal_007",
+        "realistic_temporal_017",
+        "realistic_update_007",
+        "realistic_update_017",
+        "realistic_work_007",
+        "realistic_work_017",
+        "rollback_update_002",
+        "rollback_update_012",
+        "social_family_002",
+        "social_family_012",
+        "social_family_022",
+        "social_family_032",
+        "social_family_042",
+        "speakerless_note_002",
+        "speakerless_note_012",
+        "speakerless_note_022",
+        "temporal_002",
+        "temporal_012",
+        "temporal_022",
+        "temporal_032",
+        "temporal_042"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-002",
+        "personal-cross-alice-012",
+        "personal-cross-alice-022",
+        "personal-preference-002",
+        "personal-preference-012",
+        "personal-preference-022",
+        "personal-preference-032",
+        "personal-preference-042",
+        "personal-rollback-002",
+        "personal-rollback-012",
+        "realistic-adversarial-002",
+        "realistic-adversarial-012",
+        "realistic-adversarial-022",
+        "realistic-adversarial-032",
+        "realistic-adversarial-042",
+        "realistic-biography-002",
+        "realistic-biography-012",
+        "realistic-biography-022",
+        "realistic-cross-alice-002",
+        "realistic-cross-alice-012",
+        "realistic-cross-alice-022",
+        "realistic-experiences-002",
+        "realistic-experiences-012",
+        "realistic-experiences-022",
+        "realistic-negation-007",
+        "realistic-negation-017",
+        "realistic-preferences-007",
+        "realistic-preferences-017",
+        "realistic-social-002",
+        "realistic-social-012",
+        "realistic-social-022",
+        "realistic-speakerless-002",
+        "realistic-speakerless-012",
+        "realistic-speakerless-022",
+        "realistic-temporal-007",
+        "realistic-temporal-017",
+        "realistic-update-007",
+        "realistic-update-017",
+        "realistic-work-007",
+        "realistic-work-017"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 002 is core-value-002.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 002",
+          "speaker_slug": "personal-cross-alice-002",
+          "text": "Personal Cross Alice 002 isolation preference is AliceIso002.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 012",
+          "speaker_slug": "personal-cross-alice-012",
+          "text": "Personal Cross Alice 012 isolation preference is AliceIso012.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 022",
+          "speaker_slug": "personal-cross-alice-022",
+          "text": "Personal Cross Alice 022 isolation preference is AliceIso022.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 002",
+          "speaker_slug": "personal-preference-002",
+          "text": "Personal Preference 002 preference is PreferenceValue002.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 012",
+          "speaker_slug": "personal-preference-012",
+          "text": "Personal Preference 012 preference is PreferenceValue012.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 022",
+          "speaker_slug": "personal-preference-022",
+          "text": "Personal Preference 022 preference is PreferenceValue022.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 032",
+          "speaker_slug": "personal-preference-032",
+          "text": "Personal Preference 032 preference is PreferenceValue032.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 042",
+          "speaker_slug": "personal-preference-042",
+          "text": "Personal Preference 042 preference is PreferenceValue042.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 002",
+          "speaker_slug": "personal-rollback-002",
+          "text": "Personal Rollback 002 lives in OldCity002.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 012",
+          "speaker_slug": "personal-rollback-012",
+          "text": "Personal Rollback 012 lives in OldCity012.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-adversarial-002",
+          "text": "Jonas Kowalski lives in Coimbra.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Elias Kowalski",
+          "speaker_slug": "realistic-adversarial-012",
+          "text": "Elias Kowalski lives in Lisbon.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-adversarial-022",
+          "text": "Jonas Kowalski lives in Coimbra.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Elias Kowalski",
+          "speaker_slug": "realistic-adversarial-032",
+          "text": "Elias Kowalski lives in Lisbon.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-adversarial-042",
+          "text": "Jonas Kowalski lives in Coimbra.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Jonas Hughes",
+          "speaker_slug": "realistic-biography-002",
+          "text": "Jonas Hughes keeps the passport in a blue travel pouch.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Elias Hughes",
+          "speaker_slug": "realistic-biography-012",
+          "text": "Elias Hughes keeps the passport in a blue travel pouch.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Jonas Hughes",
+          "speaker_slug": "realistic-biography-022",
+          "text": "Jonas Hughes keeps the passport in a blue travel pouch.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-cross-alice-002",
+          "text": "Jonas Kowalski lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Elias Kowalski",
+          "speaker_slug": "realistic-cross-alice-012",
+          "text": "Elias Kowalski lives in Lisbon.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-cross-alice-022",
+          "text": "Jonas Kowalski lives in Lisbon.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-experiences-002",
+          "text": "Jonas Kowalski attended Lisbon design retreat on 2025-02-15.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Elias Kowalski",
+          "speaker_slug": "realistic-experiences-012",
+          "text": "Elias Kowalski attended Lisbon design retreat on 2025-12-15.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-experiences-022",
+          "text": "Jonas Kowalski attended Lisbon design retreat on 2025-10-15.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Clara Okafor",
+          "speaker_slug": "realistic-negation-007",
+          "text": "Clara Okafor shared a personal-memory detail.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Anika Okafor",
+          "speaker_slug": "realistic-negation-017",
+          "text": "Anika Okafor shared a personal-memory detail.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-preferences-007",
+          "text": "Clara Kowalski prefers paper boarding passes.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Anika Kowalski",
+          "speaker_slug": "realistic-preferences-017",
+          "text": "Anika Kowalski prefers paper boarding passes.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Jonas Ivanov",
+          "speaker_slug": "realistic-social-002",
+          "text": "Jonas Ivanov's friend is Owen Park.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Elias Ivanov",
+          "speaker_slug": "realistic-social-012",
+          "text": "Elias Ivanov's friend is Owen Park.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Jonas Ivanov",
+          "speaker_slug": "realistic-social-022",
+          "text": "Jonas Ivanov's friend is Owen Park.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-speakerless-002",
+          "text": "Jonas Kowalski speakerless note says call the clinic before noon.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Elias Kowalski",
+          "speaker_slug": "realistic-speakerless-012",
+          "text": "Elias Kowalski speakerless note says call the clinic before noon.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-speakerless-022",
+          "text": "Jonas Kowalski speakerless note says call the clinic before noon.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Clara Okafor",
+          "speaker_slug": "realistic-temporal-007",
+          "text": "Clara Okafor attended portfolio workshop.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Anika Okafor",
+          "speaker_slug": "realistic-temporal-017",
+          "text": "Anika Okafor attended portfolio workshop.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Clara Ivanov",
+          "speaker_slug": "realistic-update-007",
+          "text": "Clara Ivanov lived in Vienna.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Anika Ivanov",
+          "speaker_slug": "realistic-update-017",
+          "text": "Anika Ivanov lived in Vienna.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Clara Costa",
+          "speaker_slug": "realistic-work-007",
+          "text": "Clara Costa uses dbt.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Anika Costa",
+          "speaker_slug": "realistic-work-017",
+          "text": "Anika Costa uses dbt.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_002 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 002",
+          "speaker_slug": "personal-cross-alice-002",
+          "text": "Personal Cross Alice 002 adds follow-up context for locomo_like_002 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 012",
+          "speaker_slug": "personal-cross-alice-012",
+          "text": "Personal Cross Alice 012 adds follow-up context for locomo_like_002 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 022",
+          "speaker_slug": "personal-cross-alice-022",
+          "text": "Personal Cross Alice 022 adds follow-up context for locomo_like_002 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 002",
+          "speaker_slug": "personal-preference-002",
+          "text": "Personal Preference 002 adds follow-up context for locomo_like_002 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 012",
+          "speaker_slug": "personal-preference-012",
+          "text": "Personal Preference 012 adds follow-up context for locomo_like_002 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 022",
+          "speaker_slug": "personal-preference-022",
+          "text": "Personal Preference 022 adds follow-up context for locomo_like_002 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 032",
+          "speaker_slug": "personal-preference-032",
+          "text": "Personal Preference 032 adds follow-up context for locomo_like_002 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 042",
+          "speaker_slug": "personal-preference-042",
+          "text": "Personal Preference 042 adds follow-up context for locomo_like_002 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_003",
+      "coverage": [
+        "temporal",
+        "single_hop"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_003",
+        "adversarial_false_premise_013",
+        "adversarial_false_premise_023",
+        "adversarial_false_premise_033",
+        "adversarial_false_premise_043",
+        "core_fact_003",
+        "core_fact_013",
+        "core_fact_023",
+        "core_fact_033",
+        "core_fact_043",
+        "core_fact_053",
+        "core_fact_063",
+        "core_fact_073",
+        "core_fact_083",
+        "core_fact_093",
+        "cross_person_contamination_003",
+        "cross_person_contamination_013",
+        "cross_person_contamination_023",
+        "preference_003",
+        "preference_013",
+        "preference_023",
+        "preference_033",
+        "preference_043",
+        "realistic_adversarial_003",
+        "realistic_adversarial_013",
+        "realistic_adversarial_023",
+        "realistic_adversarial_033",
+        "realistic_adversarial_043",
+        "realistic_biography_003",
+        "realistic_biography_013",
+        "realistic_biography_023",
+        "realistic_cross_person_003",
+        "realistic_cross_person_013",
+        "realistic_cross_person_023",
+        "realistic_experiences_003",
+        "realistic_experiences_013",
+        "realistic_experiences_023",
+        "realistic_negation_hypothetical_008",
+        "realistic_negation_hypothetical_018",
+        "realistic_preference_008",
+        "realistic_preference_018",
+        "realistic_social_003",
+        "realistic_social_013",
+        "realistic_social_023",
+        "realistic_speakerless_003",
+        "realistic_speakerless_013",
+        "realistic_speakerless_023",
+        "realistic_temporal_008",
+        "realistic_temporal_018",
+        "realistic_update_008",
+        "realistic_update_018",
+        "realistic_work_008",
+        "realistic_work_018",
+        "rollback_update_003",
+        "rollback_update_013",
+        "social_family_003",
+        "social_family_013",
+        "social_family_023",
+        "social_family_033",
+        "social_family_043",
+        "speakerless_note_003",
+        "speakerless_note_013",
+        "speakerless_note_023",
+        "temporal_003",
+        "temporal_013",
+        "temporal_023",
+        "temporal_033",
+        "temporal_043"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-003",
+        "personal-cross-alice-013",
+        "personal-cross-alice-023",
+        "personal-preference-003",
+        "personal-preference-013",
+        "personal-preference-023",
+        "personal-preference-033",
+        "personal-preference-043",
+        "personal-rollback-003",
+        "personal-rollback-013",
+        "realistic-adversarial-003",
+        "realistic-adversarial-013",
+        "realistic-adversarial-023",
+        "realistic-adversarial-033",
+        "realistic-adversarial-043",
+        "realistic-biography-003",
+        "realistic-biography-013",
+        "realistic-biography-023",
+        "realistic-cross-alice-003",
+        "realistic-cross-alice-013",
+        "realistic-cross-alice-023",
+        "realistic-experiences-003",
+        "realistic-experiences-013",
+        "realistic-experiences-023",
+        "realistic-negation-008",
+        "realistic-negation-018",
+        "realistic-preferences-008",
+        "realistic-preferences-018",
+        "realistic-social-003",
+        "realistic-social-013",
+        "realistic-social-023",
+        "realistic-speakerless-003",
+        "realistic-speakerless-013",
+        "realistic-speakerless-023",
+        "realistic-temporal-008",
+        "realistic-temporal-018",
+        "realistic-update-008",
+        "realistic-update-018",
+        "realistic-work-008",
+        "realistic-work-018"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 003 is core-value-003.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 003",
+          "speaker_slug": "personal-cross-alice-003",
+          "text": "Personal Cross Alice 003 isolation preference is AliceIso003.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 013",
+          "speaker_slug": "personal-cross-alice-013",
+          "text": "Personal Cross Alice 013 isolation preference is AliceIso013.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 023",
+          "speaker_slug": "personal-cross-alice-023",
+          "text": "Personal Cross Alice 023 isolation preference is AliceIso023.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 003",
+          "speaker_slug": "personal-preference-003",
+          "text": "Personal Preference 003 preference is PreferenceValue003.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 013",
+          "speaker_slug": "personal-preference-013",
+          "text": "Personal Preference 013 preference is PreferenceValue013.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 023",
+          "speaker_slug": "personal-preference-023",
+          "text": "Personal Preference 023 preference is PreferenceValue023.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 033",
+          "speaker_slug": "personal-preference-033",
+          "text": "Personal Preference 033 preference is PreferenceValue033.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 043",
+          "speaker_slug": "personal-preference-043",
+          "text": "Personal Preference 043 preference is PreferenceValue043.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 003",
+          "speaker_slug": "personal-rollback-003",
+          "text": "Personal Rollback 003 lives in OldCity003.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 013",
+          "speaker_slug": "personal-rollback-013",
+          "text": "Personal Rollback 013 lives in OldCity013.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-adversarial-003",
+          "text": "Leila Patel lives in Madrid.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Amara Patel",
+          "speaker_slug": "realistic-adversarial-013",
+          "text": "Amara Patel lives in Porto.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-adversarial-023",
+          "text": "Leila Patel lives in Madrid.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Amara Patel",
+          "speaker_slug": "realistic-adversarial-033",
+          "text": "Amara Patel lives in Porto.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-adversarial-043",
+          "text": "Leila Patel lives in Madrid.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Leila Rivera",
+          "speaker_slug": "realistic-biography-003",
+          "text": "Leila Rivera uses the downstairs office for late client calls.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Amara Rivera",
+          "speaker_slug": "realistic-biography-013",
+          "text": "Amara Rivera uses the downstairs office for late client calls.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Leila Rivera",
+          "speaker_slug": "realistic-biography-023",
+          "text": "Leila Rivera uses the downstairs office for late client calls.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-cross-alice-003",
+          "text": "Leila Patel lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Amara Patel",
+          "speaker_slug": "realistic-cross-alice-013",
+          "text": "Amara Patel lives in Lisbon.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-cross-alice-023",
+          "text": "Leila Patel lives in Lisbon.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-experiences-003",
+          "text": "Leila Patel attended PyCon mentoring day on 2025-03-15.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Amara Patel",
+          "speaker_slug": "realistic-experiences-013",
+          "text": "Amara Patel attended PyCon mentoring day on 2025-01-15.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-experiences-023",
+          "text": "Leila Patel attended PyCon mentoring day on 2025-11-15.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Mateo Kowalski",
+          "speaker_slug": "realistic-negation-008",
+          "text": "Mateo Kowalski shared a personal-memory detail.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Theo Kowalski",
+          "speaker_slug": "realistic-negation-018",
+          "text": "Theo Kowalski shared a personal-memory detail.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-preferences-008",
+          "text": "Mateo Patel prefers dark roast coffee.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Theo Patel",
+          "speaker_slug": "realistic-preferences-018",
+          "text": "Theo Patel prefers dark roast coffee.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Leila Hughes",
+          "speaker_slug": "realistic-social-003",
+          "text": "Leila Hughes's mother is Elena Rivera.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Amara Hughes",
+          "speaker_slug": "realistic-social-013",
+          "text": "Amara Hughes's mother is Elena Rivera.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Leila Hughes",
+          "speaker_slug": "realistic-social-023",
+          "text": "Leila Hughes's mother is Elena Rivera.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-speakerless-003",
+          "text": "Leila Patel speakerless note says bring the blue notebook to Lisbon.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Amara Patel",
+          "speaker_slug": "realistic-speakerless-013",
+          "text": "Amara Patel speakerless note says bring the blue notebook to Lisbon.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-speakerless-023",
+          "text": "Leila Patel speakerless note says bring the blue notebook to Lisbon.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Mateo Kowalski",
+          "speaker_slug": "realistic-temporal-008",
+          "text": "Mateo Kowalski attended security tabletop.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Theo Kowalski",
+          "speaker_slug": "realistic-temporal-018",
+          "text": "Theo Kowalski attended security tabletop.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Mateo Hughes",
+          "speaker_slug": "realistic-update-008",
+          "text": "Mateo Hughes lived in Lisbon.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Theo Hughes",
+          "speaker_slug": "realistic-update-018",
+          "text": "Theo Hughes lived in Lisbon.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Mateo Marin",
+          "speaker_slug": "realistic-work-008",
+          "text": "Mateo Marin shipped Project Phoenix.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Theo Marin",
+          "speaker_slug": "realistic-work-018",
+          "text": "Theo Marin shipped Care dashboard.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_003 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 003",
+          "speaker_slug": "personal-cross-alice-003",
+          "text": "Personal Cross Alice 003 adds follow-up context for locomo_like_003 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 013",
+          "speaker_slug": "personal-cross-alice-013",
+          "text": "Personal Cross Alice 013 adds follow-up context for locomo_like_003 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 023",
+          "speaker_slug": "personal-cross-alice-023",
+          "text": "Personal Cross Alice 023 adds follow-up context for locomo_like_003 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 003",
+          "speaker_slug": "personal-preference-003",
+          "text": "Personal Preference 003 adds follow-up context for locomo_like_003 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 013",
+          "speaker_slug": "personal-preference-013",
+          "text": "Personal Preference 013 adds follow-up context for locomo_like_003 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 023",
+          "speaker_slug": "personal-preference-023",
+          "text": "Personal Preference 023 adds follow-up context for locomo_like_003 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 033",
+          "speaker_slug": "personal-preference-033",
+          "text": "Personal Preference 033 adds follow-up context for locomo_like_003 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 043",
+          "speaker_slug": "personal-preference-043",
+          "text": "Personal Preference 043 adds follow-up context for locomo_like_003 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_004",
+      "coverage": [
+        "multi_hop"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_004",
+        "adversarial_false_premise_014",
+        "adversarial_false_premise_024",
+        "adversarial_false_premise_034",
+        "adversarial_false_premise_044",
+        "core_fact_004",
+        "core_fact_014",
+        "core_fact_024",
+        "core_fact_034",
+        "core_fact_044",
+        "core_fact_054",
+        "core_fact_064",
+        "core_fact_074",
+        "core_fact_084",
+        "core_fact_094",
+        "cross_person_contamination_004",
+        "cross_person_contamination_014",
+        "cross_person_contamination_024",
+        "preference_004",
+        "preference_014",
+        "preference_024",
+        "preference_034",
+        "preference_044",
+        "realistic_adversarial_004",
+        "realistic_adversarial_014",
+        "realistic_adversarial_024",
+        "realistic_adversarial_034",
+        "realistic_adversarial_044",
+        "realistic_biography_004",
+        "realistic_biography_014",
+        "realistic_biography_024",
+        "realistic_cross_person_004",
+        "realistic_cross_person_014",
+        "realistic_cross_person_024",
+        "realistic_experiences_004",
+        "realistic_experiences_014",
+        "realistic_experiences_024",
+        "realistic_negation_hypothetical_009",
+        "realistic_negation_hypothetical_019",
+        "realistic_preference_009",
+        "realistic_preference_019",
+        "realistic_social_004",
+        "realistic_social_014",
+        "realistic_social_024",
+        "realistic_speakerless_004",
+        "realistic_speakerless_014",
+        "realistic_speakerless_024",
+        "realistic_temporal_009",
+        "realistic_temporal_019",
+        "realistic_update_009",
+        "realistic_update_019",
+        "realistic_work_009",
+        "realistic_work_019",
+        "rollback_update_004",
+        "rollback_update_014",
+        "social_family_004",
+        "social_family_014",
+        "social_family_024",
+        "social_family_034",
+        "social_family_044",
+        "speakerless_note_004",
+        "speakerless_note_014",
+        "speakerless_note_024",
+        "temporal_004",
+        "temporal_014",
+        "temporal_024",
+        "temporal_034",
+        "temporal_044"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-004",
+        "personal-cross-alice-014",
+        "personal-cross-alice-024",
+        "personal-preference-004",
+        "personal-preference-014",
+        "personal-preference-024",
+        "personal-preference-034",
+        "personal-preference-044",
+        "personal-rollback-004",
+        "personal-rollback-014",
+        "realistic-adversarial-004",
+        "realistic-adversarial-014",
+        "realistic-adversarial-024",
+        "realistic-adversarial-034",
+        "realistic-adversarial-044",
+        "realistic-biography-004",
+        "realistic-biography-014",
+        "realistic-biography-024",
+        "realistic-cross-alice-004",
+        "realistic-cross-alice-014",
+        "realistic-cross-alice-024",
+        "realistic-experiences-004",
+        "realistic-experiences-014",
+        "realistic-experiences-024",
+        "realistic-negation-009",
+        "realistic-negation-019",
+        "realistic-preferences-009",
+        "realistic-preferences-019",
+        "realistic-social-004",
+        "realistic-social-014",
+        "realistic-social-024",
+        "realistic-speakerless-004",
+        "realistic-speakerless-014",
+        "realistic-speakerless-024",
+        "realistic-temporal-009",
+        "realistic-temporal-019",
+        "realistic-update-009",
+        "realistic-update-019",
+        "realistic-work-009",
+        "realistic-work-019"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 004 is core-value-004.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 004",
+          "speaker_slug": "personal-cross-alice-004",
+          "text": "Personal Cross Alice 004 isolation preference is AliceIso004.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 014",
+          "speaker_slug": "personal-cross-alice-014",
+          "text": "Personal Cross Alice 014 isolation preference is AliceIso014.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 024",
+          "speaker_slug": "personal-cross-alice-024",
+          "text": "Personal Cross Alice 024 isolation preference is AliceIso024.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 004",
+          "speaker_slug": "personal-preference-004",
+          "text": "Personal Preference 004 preference is PreferenceValue004.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 014",
+          "speaker_slug": "personal-preference-014",
+          "text": "Personal Preference 014 preference is PreferenceValue014.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 024",
+          "speaker_slug": "personal-preference-024",
+          "text": "Personal Preference 024 preference is PreferenceValue024.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 034",
+          "speaker_slug": "personal-preference-034",
+          "text": "Personal Preference 034 preference is PreferenceValue034.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 044",
+          "speaker_slug": "personal-preference-044",
+          "text": "Personal Preference 044 preference is PreferenceValue044.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 004",
+          "speaker_slug": "personal-rollback-004",
+          "text": "Personal Rollback 004 lives in OldCity004.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 014",
+          "speaker_slug": "personal-rollback-014",
+          "text": "Personal Rollback 014 lives in OldCity014.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-adversarial-004",
+          "text": "Noah Kim lives in Lisbon.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Victor Kim",
+          "speaker_slug": "realistic-adversarial-014",
+          "text": "Victor Kim lives in Coimbra.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-adversarial-024",
+          "text": "Noah Kim lives in Lisbon.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Victor Kim",
+          "speaker_slug": "realistic-adversarial-034",
+          "text": "Victor Kim lives in Coimbra.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-adversarial-044",
+          "text": "Noah Kim lives in Lisbon.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Noah Brooks",
+          "speaker_slug": "realistic-biography-004",
+          "text": "Noah Brooks keeps project receipts in the annual tax folder.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Victor Brooks",
+          "speaker_slug": "realistic-biography-014",
+          "text": "Victor Brooks keeps project receipts in the annual tax folder.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Noah Brooks",
+          "speaker_slug": "realistic-biography-024",
+          "text": "Noah Brooks keeps project receipts in the annual tax folder.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-cross-alice-004",
+          "text": "Noah Kim lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Victor Kim",
+          "speaker_slug": "realistic-cross-alice-014",
+          "text": "Victor Kim lives in Lisbon.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-cross-alice-024",
+          "text": "Noah Kim lives in Lisbon.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-experiences-004",
+          "text": "Noah Kim attended founder dinner on 2025-04-15.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Victor Kim",
+          "speaker_slug": "realistic-experiences-014",
+          "text": "Victor Kim attended founder dinner on 2025-02-15.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-experiences-024",
+          "text": "Noah Kim attended founder dinner on 2025-12-15.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Sofia Patel",
+          "speaker_slug": "realistic-negation-009",
+          "text": "Sofia Patel shared a personal-memory detail.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Selin Patel",
+          "speaker_slug": "realistic-negation-019",
+          "text": "Selin Patel shared a personal-memory detail.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-preferences-009",
+          "text": "Sofia Kim prefers standing desks.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Selin Kim",
+          "speaker_slug": "realistic-preferences-019",
+          "text": "Selin Kim prefers standing desks.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Noah Rivera",
+          "speaker_slug": "realistic-social-004",
+          "text": "Noah Rivera's partner is Noah Kim.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Victor Rivera",
+          "speaker_slug": "realistic-social-014",
+          "text": "Victor Rivera's partner is Noah Kim.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Noah Rivera",
+          "speaker_slug": "realistic-social-024",
+          "text": "Noah Rivera's partner is Noah Kim.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-speakerless-004",
+          "text": "Noah Kim speakerless note says renew the coworking pass next month.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Victor Kim",
+          "speaker_slug": "realistic-speakerless-014",
+          "text": "Victor Kim speakerless note says renew the coworking pass next month.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-speakerless-024",
+          "text": "Noah Kim speakerless note says renew the coworking pass next month.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Sofia Patel",
+          "speaker_slug": "realistic-temporal-009",
+          "text": "Sofia Patel attended product offsite.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Selin Patel",
+          "speaker_slug": "realistic-temporal-019",
+          "text": "Selin Patel attended product offsite.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Sofia Rivera",
+          "speaker_slug": "realistic-update-009",
+          "text": "Sofia Rivera lived in Porto.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Selin Rivera",
+          "speaker_slug": "realistic-update-019",
+          "text": "Selin Rivera lived in Porto.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Sofia Silva",
+          "speaker_slug": "realistic-work-009",
+          "text": "Sofia Silva uses TypeScript.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Selin Silva",
+          "speaker_slug": "realistic-work-019",
+          "text": "Selin Silva uses TypeScript.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_004 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 004",
+          "speaker_slug": "personal-cross-alice-004",
+          "text": "Personal Cross Alice 004 adds follow-up context for locomo_like_004 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 014",
+          "speaker_slug": "personal-cross-alice-014",
+          "text": "Personal Cross Alice 014 adds follow-up context for locomo_like_004 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 024",
+          "speaker_slug": "personal-cross-alice-024",
+          "text": "Personal Cross Alice 024 adds follow-up context for locomo_like_004 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 004",
+          "speaker_slug": "personal-preference-004",
+          "text": "Personal Preference 004 adds follow-up context for locomo_like_004 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 014",
+          "speaker_slug": "personal-preference-014",
+          "text": "Personal Preference 014 adds follow-up context for locomo_like_004 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 024",
+          "speaker_slug": "personal-preference-024",
+          "text": "Personal Preference 024 adds follow-up context for locomo_like_004 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 034",
+          "speaker_slug": "personal-preference-034",
+          "text": "Personal Preference 034 adds follow-up context for locomo_like_004 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 044",
+          "speaker_slug": "personal-preference-044",
+          "text": "Personal Preference 044 adds follow-up context for locomo_like_004 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_005",
+      "coverage": [
+        "temporal",
+        "single_hop"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_005",
+        "adversarial_false_premise_015",
+        "adversarial_false_premise_025",
+        "adversarial_false_premise_035",
+        "adversarial_false_premise_045",
+        "core_fact_005",
+        "core_fact_015",
+        "core_fact_025",
+        "core_fact_035",
+        "core_fact_045",
+        "core_fact_055",
+        "core_fact_065",
+        "core_fact_075",
+        "core_fact_085",
+        "core_fact_095",
+        "cross_person_contamination_005",
+        "cross_person_contamination_015",
+        "cross_person_contamination_025",
+        "preference_005",
+        "preference_015",
+        "preference_025",
+        "preference_035",
+        "preference_045",
+        "realistic_adversarial_005",
+        "realistic_adversarial_015",
+        "realistic_adversarial_025",
+        "realistic_adversarial_035",
+        "realistic_adversarial_045",
+        "realistic_biography_005",
+        "realistic_biography_015",
+        "realistic_biography_025",
+        "realistic_cross_person_005",
+        "realistic_cross_person_015",
+        "realistic_cross_person_025",
+        "realistic_experiences_005",
+        "realistic_experiences_015",
+        "realistic_experiences_025",
+        "realistic_negation_hypothetical_010",
+        "realistic_negation_hypothetical_020",
+        "realistic_preference_010",
+        "realistic_preference_020",
+        "realistic_social_005",
+        "realistic_social_015",
+        "realistic_social_025",
+        "realistic_speakerless_005",
+        "realistic_speakerless_015",
+        "realistic_speakerless_025",
+        "realistic_temporal_010",
+        "realistic_temporal_020",
+        "realistic_update_010",
+        "realistic_update_020",
+        "realistic_work_010",
+        "realistic_work_020",
+        "rollback_update_005",
+        "rollback_update_015",
+        "social_family_005",
+        "social_family_015",
+        "social_family_025",
+        "social_family_035",
+        "social_family_045",
+        "speakerless_note_005",
+        "speakerless_note_015",
+        "speakerless_note_025",
+        "temporal_005",
+        "temporal_015",
+        "temporal_025",
+        "temporal_035",
+        "temporal_045"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-005",
+        "personal-cross-alice-015",
+        "personal-cross-alice-025",
+        "personal-preference-005",
+        "personal-preference-015",
+        "personal-preference-025",
+        "personal-preference-035",
+        "personal-preference-045",
+        "personal-rollback-005",
+        "personal-rollback-015",
+        "realistic-adversarial-005",
+        "realistic-adversarial-015",
+        "realistic-adversarial-025",
+        "realistic-adversarial-035",
+        "realistic-adversarial-045",
+        "realistic-biography-005",
+        "realistic-biography-015",
+        "realistic-biography-025",
+        "realistic-cross-alice-005",
+        "realistic-cross-alice-015",
+        "realistic-cross-alice-025",
+        "realistic-experiences-005",
+        "realistic-experiences-015",
+        "realistic-experiences-025",
+        "realistic-negation-010",
+        "realistic-negation-020",
+        "realistic-preferences-010",
+        "realistic-preferences-020",
+        "realistic-social-005",
+        "realistic-social-015",
+        "realistic-social-025",
+        "realistic-speakerless-005",
+        "realistic-speakerless-015",
+        "realistic-speakerless-025",
+        "realistic-temporal-010",
+        "realistic-temporal-020",
+        "realistic-update-010",
+        "realistic-update-020",
+        "realistic-work-010",
+        "realistic-work-020"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 005 is core-value-005.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 005",
+          "speaker_slug": "personal-cross-alice-005",
+          "text": "Personal Cross Alice 005 isolation preference is AliceIso005.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 015",
+          "speaker_slug": "personal-cross-alice-015",
+          "text": "Personal Cross Alice 015 isolation preference is AliceIso015.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 025",
+          "speaker_slug": "personal-cross-alice-025",
+          "text": "Personal Cross Alice 025 isolation preference is AliceIso025.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 005",
+          "speaker_slug": "personal-preference-005",
+          "text": "Personal Preference 005 preference is PreferenceValue005.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 015",
+          "speaker_slug": "personal-preference-015",
+          "text": "Personal Preference 015 preference is PreferenceValue015.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 025",
+          "speaker_slug": "personal-preference-025",
+          "text": "Personal Preference 025 preference is PreferenceValue025.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 035",
+          "speaker_slug": "personal-preference-035",
+          "text": "Personal Preference 035 preference is PreferenceValue035.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 045",
+          "speaker_slug": "personal-preference-045",
+          "text": "Personal Preference 045 preference is PreferenceValue045.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 005",
+          "speaker_slug": "personal-rollback-005",
+          "text": "Personal Rollback 005 lives in OldCity005.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 015",
+          "speaker_slug": "personal-rollback-015",
+          "text": "Personal Rollback 015 lives in OldCity015.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-adversarial-005",
+          "text": "Priya Nguyen lives in Porto.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Helena Nguyen",
+          "speaker_slug": "realistic-adversarial-015",
+          "text": "Helena Nguyen lives in Madrid.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-adversarial-025",
+          "text": "Priya Nguyen lives in Porto.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Helena Nguyen",
+          "speaker_slug": "realistic-adversarial-035",
+          "text": "Helena Nguyen lives in Madrid.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-adversarial-045",
+          "text": "Priya Nguyen lives in Porto.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Priya Stone",
+          "speaker_slug": "realistic-biography-005",
+          "text": "Priya Stone stores bike keys in the kitchen drawer.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Helena Stone",
+          "speaker_slug": "realistic-biography-015",
+          "text": "Helena Stone stores bike keys in the kitchen drawer.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Priya Stone",
+          "speaker_slug": "realistic-biography-025",
+          "text": "Priya Stone stores bike keys in the kitchen drawer.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-cross-alice-005",
+          "text": "Priya Nguyen lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Helena Nguyen",
+          "speaker_slug": "realistic-cross-alice-015",
+          "text": "Helena Nguyen lives in Lisbon.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-cross-alice-025",
+          "text": "Priya Nguyen lives in Lisbon.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-experiences-005",
+          "text": "Priya Nguyen attended migration review on 2025-05-15.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Helena Nguyen",
+          "speaker_slug": "realistic-experiences-015",
+          "text": "Helena Nguyen attended migration review on 2025-03-15.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-experiences-025",
+          "text": "Priya Nguyen attended migration review on 2025-01-15.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Iris Kim",
+          "speaker_slug": "realistic-negation-010",
+          "text": "Iris Kim shared a personal-memory detail.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "David Kim",
+          "speaker_slug": "realistic-negation-020",
+          "text": "David Kim shared a personal-memory detail.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-preferences-010",
+          "text": "Iris Nguyen prefers noise cancelling headphones.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "David Nguyen",
+          "speaker_slug": "realistic-preferences-020",
+          "text": "David Nguyen prefers noise cancelling headphones.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Priya Brooks",
+          "speaker_slug": "realistic-social-005",
+          "text": "Priya Brooks's colleague is Priya Shah.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Helena Brooks",
+          "speaker_slug": "realistic-social-015",
+          "text": "Helena Brooks's colleague is Priya Shah.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Priya Brooks",
+          "speaker_slug": "realistic-social-025",
+          "text": "Priya Brooks's colleague is Priya Shah.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-speakerless-005",
+          "text": "Priya Nguyen speakerless note says save the tax receipt after payment.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Helena Nguyen",
+          "speaker_slug": "realistic-speakerless-015",
+          "text": "Helena Nguyen speakerless note says save the tax receipt after payment.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-speakerless-025",
+          "text": "Priya Nguyen speakerless note says save the tax receipt after payment.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Iris Kim",
+          "speaker_slug": "realistic-temporal-010",
+          "text": "Iris Kim attended October 2023 serious accident.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "David Kim",
+          "speaker_slug": "realistic-temporal-020",
+          "text": "David Kim attended October 2023 serious accident.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Iris Brooks",
+          "speaker_slug": "realistic-update-010",
+          "text": "Iris Brooks lived in Coimbra.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "David Brooks",
+          "speaker_slug": "realistic-update-020",
+          "text": "David Brooks lived in Coimbra.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Iris Morgan",
+          "speaker_slug": "realistic-work-010",
+          "text": "Iris Morgan shipped Care dashboard.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "David Morgan",
+          "speaker_slug": "realistic-work-020",
+          "text": "David Morgan shipped Hermes importer.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_005 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 005",
+          "speaker_slug": "personal-cross-alice-005",
+          "text": "Personal Cross Alice 005 adds follow-up context for locomo_like_005 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 015",
+          "speaker_slug": "personal-cross-alice-015",
+          "text": "Personal Cross Alice 015 adds follow-up context for locomo_like_005 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 025",
+          "speaker_slug": "personal-cross-alice-025",
+          "text": "Personal Cross Alice 025 adds follow-up context for locomo_like_005 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 005",
+          "speaker_slug": "personal-preference-005",
+          "text": "Personal Preference 005 adds follow-up context for locomo_like_005 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 015",
+          "speaker_slug": "personal-preference-015",
+          "text": "Personal Preference 015 adds follow-up context for locomo_like_005 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 025",
+          "speaker_slug": "personal-preference-025",
+          "text": "Personal Preference 025 adds follow-up context for locomo_like_005 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 035",
+          "speaker_slug": "personal-preference-035",
+          "text": "Personal Preference 035 adds follow-up context for locomo_like_005 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 045",
+          "speaker_slug": "personal-preference-045",
+          "text": "Personal Preference 045 adds follow-up context for locomo_like_005 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_006",
+      "coverage": [
+        "adversarial_false_premise"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_006",
+        "adversarial_false_premise_016",
+        "adversarial_false_premise_026",
+        "adversarial_false_premise_036",
+        "adversarial_false_premise_046",
+        "core_fact_006",
+        "core_fact_016",
+        "core_fact_026",
+        "core_fact_036",
+        "core_fact_046",
+        "core_fact_056",
+        "core_fact_066",
+        "core_fact_076",
+        "core_fact_086",
+        "core_fact_096",
+        "cross_person_contamination_006",
+        "cross_person_contamination_016",
+        "cross_person_contamination_026",
+        "preference_006",
+        "preference_016",
+        "preference_026",
+        "preference_036",
+        "preference_046",
+        "realistic_adversarial_006",
+        "realistic_adversarial_016",
+        "realistic_adversarial_026",
+        "realistic_adversarial_036",
+        "realistic_adversarial_046",
+        "realistic_biography_006",
+        "realistic_biography_016",
+        "realistic_cross_person_006",
+        "realistic_cross_person_016",
+        "realistic_experiences_006",
+        "realistic_experiences_016",
+        "realistic_negation_hypothetical_001",
+        "realistic_negation_hypothetical_011",
+        "realistic_negation_hypothetical_021",
+        "realistic_preference_001",
+        "realistic_preference_011",
+        "realistic_preference_021",
+        "realistic_social_006",
+        "realistic_social_016",
+        "realistic_speakerless_006",
+        "realistic_speakerless_016",
+        "realistic_temporal_001",
+        "realistic_temporal_011",
+        "realistic_temporal_021",
+        "realistic_update_001",
+        "realistic_update_011",
+        "realistic_update_021",
+        "realistic_work_001",
+        "realistic_work_011",
+        "realistic_work_021",
+        "rollback_update_006",
+        "rollback_update_016",
+        "social_family_006",
+        "social_family_016",
+        "social_family_026",
+        "social_family_036",
+        "social_family_046",
+        "speakerless_note_006",
+        "speakerless_note_016",
+        "speakerless_note_026",
+        "temporal_006",
+        "temporal_016",
+        "temporal_026",
+        "temporal_036",
+        "temporal_046"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-006",
+        "personal-cross-alice-016",
+        "personal-cross-alice-026",
+        "personal-preference-006",
+        "personal-preference-016",
+        "personal-preference-026",
+        "personal-preference-036",
+        "personal-preference-046",
+        "personal-rollback-006",
+        "personal-rollback-016",
+        "realistic-adversarial-006",
+        "realistic-adversarial-016",
+        "realistic-adversarial-026",
+        "realistic-adversarial-036",
+        "realistic-adversarial-046",
+        "realistic-biography-006",
+        "realistic-biography-016",
+        "realistic-cross-alice-006",
+        "realistic-cross-alice-016",
+        "realistic-experiences-006",
+        "realistic-experiences-016",
+        "realistic-negation-001",
+        "realistic-negation-011",
+        "realistic-negation-021",
+        "realistic-preferences-001",
+        "realistic-preferences-011",
+        "realistic-preferences-021",
+        "realistic-social-006",
+        "realistic-social-016",
+        "realistic-speakerless-006",
+        "realistic-speakerless-016",
+        "realistic-temporal-001",
+        "realistic-temporal-011",
+        "realistic-temporal-021",
+        "realistic-update-001",
+        "realistic-update-011",
+        "realistic-update-021",
+        "realistic-work-001",
+        "realistic-work-011",
+        "realistic-work-021"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 006 is core-value-006.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 006",
+          "speaker_slug": "personal-cross-alice-006",
+          "text": "Personal Cross Alice 006 isolation preference is AliceIso006.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 016",
+          "speaker_slug": "personal-cross-alice-016",
+          "text": "Personal Cross Alice 016 isolation preference is AliceIso016.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 026",
+          "speaker_slug": "personal-cross-alice-026",
+          "text": "Personal Cross Alice 026 isolation preference is AliceIso026.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 006",
+          "speaker_slug": "personal-preference-006",
+          "text": "Personal Preference 006 preference is PreferenceValue006.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 016",
+          "speaker_slug": "personal-preference-016",
+          "text": "Personal Preference 016 preference is PreferenceValue016.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 026",
+          "speaker_slug": "personal-preference-026",
+          "text": "Personal Preference 026 preference is PreferenceValue026.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 036",
+          "speaker_slug": "personal-preference-036",
+          "text": "Personal Preference 036 preference is PreferenceValue036.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 046",
+          "speaker_slug": "personal-preference-046",
+          "text": "Personal Preference 046 preference is PreferenceValue046.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 006",
+          "speaker_slug": "personal-rollback-006",
+          "text": "Personal Rollback 006 lives in OldCity006.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 016",
+          "speaker_slug": "personal-rollback-016",
+          "text": "Personal Rollback 016 lives in OldCity016.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-adversarial-006",
+          "text": "Owen Okafor lives in Coimbra.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Rafael Okafor",
+          "speaker_slug": "realistic-adversarial-016",
+          "text": "Rafael Okafor lives in Lisbon.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-adversarial-026",
+          "text": "Owen Okafor lives in Coimbra.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Rafael Okafor",
+          "speaker_slug": "realistic-adversarial-036",
+          "text": "Rafael Okafor lives in Lisbon.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-adversarial-046",
+          "text": "Owen Okafor lives in Coimbra.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Owen Ivanov",
+          "speaker_slug": "realistic-biography-006",
+          "text": "Owen Ivanov stores recovery codes in the family 1Password vault.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Rafael Ivanov",
+          "speaker_slug": "realistic-biography-016",
+          "text": "Rafael Ivanov stores recovery codes in the family 1Password vault.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-cross-alice-006",
+          "text": "Owen Okafor lives in Lisbon.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Rafael Okafor",
+          "speaker_slug": "realistic-cross-alice-016",
+          "text": "Rafael Okafor lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-experiences-006",
+          "text": "Owen Okafor attended customer interview sprint on 2025-06-15.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Rafael Okafor",
+          "speaker_slug": "realistic-experiences-016",
+          "text": "Rafael Okafor attended customer interview sprint on 2025-04-15.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Maya Nguyen",
+          "speaker_slug": "realistic-negation-001",
+          "text": "Maya Nguyen shared a personal-memory detail.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Nadia Nguyen",
+          "speaker_slug": "realistic-negation-011",
+          "text": "Nadia Nguyen shared a personal-memory detail.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Maya Nguyen",
+          "speaker_slug": "realistic-negation-021",
+          "text": "Maya Nguyen shared a personal-memory detail.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-preferences-001",
+          "text": "Maya Okafor used to prefer tea.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Nadia Okafor",
+          "speaker_slug": "realistic-preferences-011",
+          "text": "Nadia Okafor prefers coffee now after previously preferring tea.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Maya Okafor",
+          "speaker_slug": "realistic-preferences-021",
+          "text": "Maya Okafor prefers coffee now after previously preferring tea.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Owen Stone",
+          "speaker_slug": "realistic-social-006",
+          "text": "Owen Stone's sister is Maria in Porto.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Rafael Stone",
+          "speaker_slug": "realistic-social-016",
+          "text": "Rafael Stone's sister is Maria in Porto.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Owen Okafor",
+          "speaker_slug": "realistic-speakerless-006",
+          "text": "Owen Okafor speakerless note says renew passport before the May trip.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Rafael Okafor",
+          "speaker_slug": "realistic-speakerless-016",
+          "text": "Rafael Okafor speakerless note says renew passport before the May trip.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Maya Nguyen",
+          "speaker_slug": "realistic-temporal-001",
+          "text": "Maya Nguyen attended Lisbon design retreat.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Nadia Nguyen",
+          "speaker_slug": "realistic-temporal-011",
+          "text": "Nadia Nguyen attended Lisbon design retreat.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Maya Nguyen",
+          "speaker_slug": "realistic-temporal-021",
+          "text": "Maya Nguyen attended Lisbon design retreat.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Maya Stone",
+          "speaker_slug": "realistic-update-001",
+          "text": "Maya Stone lived in Berlin.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Nadia Stone",
+          "speaker_slug": "realistic-update-011",
+          "text": "Nadia Stone lived in Madrid.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Maya Stone",
+          "speaker_slug": "realistic-update-021",
+          "text": "Maya Stone lived in Madrid.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Maya Shah",
+          "speaker_slug": "realistic-work-001",
+          "text": "Maya Shah uses Python.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Nadia Shah",
+          "speaker_slug": "realistic-work-011",
+          "text": "Nadia Shah uses Postgres.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Maya Shah",
+          "speaker_slug": "realistic-work-021",
+          "text": "Maya Shah uses Postgres.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_006 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 006",
+          "speaker_slug": "personal-cross-alice-006",
+          "text": "Personal Cross Alice 006 adds follow-up context for locomo_like_006 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 016",
+          "speaker_slug": "personal-cross-alice-016",
+          "text": "Personal Cross Alice 016 adds follow-up context for locomo_like_006 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 026",
+          "speaker_slug": "personal-cross-alice-026",
+          "text": "Personal Cross Alice 026 adds follow-up context for locomo_like_006 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 006",
+          "speaker_slug": "personal-preference-006",
+          "text": "Personal Preference 006 adds follow-up context for locomo_like_006 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 016",
+          "speaker_slug": "personal-preference-016",
+          "text": "Personal Preference 016 adds follow-up context for locomo_like_006 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 026",
+          "speaker_slug": "personal-preference-026",
+          "text": "Personal Preference 026 adds follow-up context for locomo_like_006 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 036",
+          "speaker_slug": "personal-preference-036",
+          "text": "Personal Preference 036 adds follow-up context for locomo_like_006 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 046",
+          "speaker_slug": "personal-preference-046",
+          "text": "Personal Preference 046 adds follow-up context for locomo_like_006 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_007",
+      "coverage": [
+        "open_inference",
+        "single_hop"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_007",
+        "adversarial_false_premise_017",
+        "adversarial_false_premise_027",
+        "adversarial_false_premise_037",
+        "adversarial_false_premise_047",
+        "core_fact_007",
+        "core_fact_017",
+        "core_fact_027",
+        "core_fact_037",
+        "core_fact_047",
+        "core_fact_057",
+        "core_fact_067",
+        "core_fact_077",
+        "core_fact_087",
+        "core_fact_097",
+        "cross_person_contamination_007",
+        "cross_person_contamination_017",
+        "cross_person_contamination_027",
+        "preference_007",
+        "preference_017",
+        "preference_027",
+        "preference_037",
+        "preference_047",
+        "realistic_adversarial_007",
+        "realistic_adversarial_017",
+        "realistic_adversarial_027",
+        "realistic_adversarial_037",
+        "realistic_adversarial_047",
+        "realistic_biography_007",
+        "realistic_biography_017",
+        "realistic_cross_person_007",
+        "realistic_cross_person_017",
+        "realistic_experiences_007",
+        "realistic_experiences_017",
+        "realistic_negation_hypothetical_002",
+        "realistic_negation_hypothetical_012",
+        "realistic_negation_hypothetical_022",
+        "realistic_preference_002",
+        "realistic_preference_012",
+        "realistic_preference_022",
+        "realistic_social_007",
+        "realistic_social_017",
+        "realistic_speakerless_007",
+        "realistic_speakerless_017",
+        "realistic_temporal_002",
+        "realistic_temporal_012",
+        "realistic_temporal_022",
+        "realistic_update_002",
+        "realistic_update_012",
+        "realistic_update_022",
+        "realistic_work_002",
+        "realistic_work_012",
+        "realistic_work_022",
+        "rollback_update_007",
+        "rollback_update_017",
+        "social_family_007",
+        "social_family_017",
+        "social_family_027",
+        "social_family_037",
+        "social_family_047",
+        "speakerless_note_007",
+        "speakerless_note_017",
+        "speakerless_note_027",
+        "temporal_007",
+        "temporal_017",
+        "temporal_027",
+        "temporal_037",
+        "temporal_047"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-007",
+        "personal-cross-alice-017",
+        "personal-cross-alice-027",
+        "personal-preference-007",
+        "personal-preference-017",
+        "personal-preference-027",
+        "personal-preference-037",
+        "personal-preference-047",
+        "personal-rollback-007",
+        "personal-rollback-017",
+        "realistic-adversarial-007",
+        "realistic-adversarial-017",
+        "realistic-adversarial-027",
+        "realistic-adversarial-037",
+        "realistic-adversarial-047",
+        "realistic-biography-007",
+        "realistic-biography-017",
+        "realistic-cross-alice-007",
+        "realistic-cross-alice-017",
+        "realistic-experiences-007",
+        "realistic-experiences-017",
+        "realistic-negation-002",
+        "realistic-negation-012",
+        "realistic-negation-022",
+        "realistic-preferences-002",
+        "realistic-preferences-012",
+        "realistic-preferences-022",
+        "realistic-social-007",
+        "realistic-social-017",
+        "realistic-speakerless-007",
+        "realistic-speakerless-017",
+        "realistic-temporal-002",
+        "realistic-temporal-012",
+        "realistic-temporal-022",
+        "realistic-update-002",
+        "realistic-update-012",
+        "realistic-update-022",
+        "realistic-work-002",
+        "realistic-work-012",
+        "realistic-work-022"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 007 is core-value-007.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 007",
+          "speaker_slug": "personal-cross-alice-007",
+          "text": "Personal Cross Alice 007 isolation preference is AliceIso007.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 017",
+          "speaker_slug": "personal-cross-alice-017",
+          "text": "Personal Cross Alice 017 isolation preference is AliceIso017.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 027",
+          "speaker_slug": "personal-cross-alice-027",
+          "text": "Personal Cross Alice 027 isolation preference is AliceIso027.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 007",
+          "speaker_slug": "personal-preference-007",
+          "text": "Personal Preference 007 preference is PreferenceValue007.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 017",
+          "speaker_slug": "personal-preference-017",
+          "text": "Personal Preference 017 preference is PreferenceValue017.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 027",
+          "speaker_slug": "personal-preference-027",
+          "text": "Personal Preference 027 preference is PreferenceValue027.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 037",
+          "speaker_slug": "personal-preference-037",
+          "text": "Personal Preference 037 preference is PreferenceValue037.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 047",
+          "speaker_slug": "personal-preference-047",
+          "text": "Personal Preference 047 preference is PreferenceValue047.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 007",
+          "speaker_slug": "personal-rollback-007",
+          "text": "Personal Rollback 007 lives in OldCity007.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 017",
+          "speaker_slug": "personal-rollback-017",
+          "text": "Personal Rollback 017 lives in OldCity017.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-adversarial-007",
+          "text": "Clara Kowalski lives in Madrid.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Anika Kowalski",
+          "speaker_slug": "realistic-adversarial-017",
+          "text": "Anika Kowalski lives in Porto.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-adversarial-027",
+          "text": "Clara Kowalski lives in Madrid.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Anika Kowalski",
+          "speaker_slug": "realistic-adversarial-037",
+          "text": "Anika Kowalski lives in Porto.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-adversarial-047",
+          "text": "Clara Kowalski lives in Madrid.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Clara Hughes",
+          "speaker_slug": "realistic-biography-007",
+          "text": "Clara Hughes keeps the passport in a blue travel pouch.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Anika Hughes",
+          "speaker_slug": "realistic-biography-017",
+          "text": "Anika Hughes keeps the passport in a blue travel pouch.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-cross-alice-007",
+          "text": "Clara Kowalski lives in Lisbon.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Anika Kowalski",
+          "speaker_slug": "realistic-cross-alice-017",
+          "text": "Anika Kowalski lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-experiences-007",
+          "text": "Clara Kowalski attended winter residency on 2025-07-15.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Anika Kowalski",
+          "speaker_slug": "realistic-experiences-017",
+          "text": "Anika Kowalski attended winter residency on 2025-05-15.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Jonas Okafor",
+          "speaker_slug": "realistic-negation-002",
+          "text": "Jonas Okafor shared a personal-memory detail.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Elias Okafor",
+          "speaker_slug": "realistic-negation-012",
+          "text": "Elias Okafor shared a personal-memory detail.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Jonas Okafor",
+          "speaker_slug": "realistic-negation-022",
+          "text": "Jonas Okafor shared a personal-memory detail.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-preferences-002",
+          "text": "Jonas Kowalski prefers window seats on morning flights.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Elias Kowalski",
+          "speaker_slug": "realistic-preferences-012",
+          "text": "Elias Kowalski prefers window seats on morning flights.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Jonas Kowalski",
+          "speaker_slug": "realistic-preferences-022",
+          "text": "Jonas Kowalski prefers window seats on morning flights.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Clara Ivanov",
+          "speaker_slug": "realistic-social-007",
+          "text": "Clara Ivanov's friend is Owen Park.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Anika Ivanov",
+          "speaker_slug": "realistic-social-017",
+          "text": "Anika Ivanov's friend is Owen Park.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Clara Kowalski",
+          "speaker_slug": "realistic-speakerless-007",
+          "text": "Clara Kowalski speakerless note says call the clinic before noon.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Anika Kowalski",
+          "speaker_slug": "realistic-speakerless-017",
+          "text": "Anika Kowalski speakerless note says call the clinic before noon.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Jonas Okafor",
+          "speaker_slug": "realistic-temporal-002",
+          "text": "Jonas Okafor attended PyCon mentoring day.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Elias Okafor",
+          "speaker_slug": "realistic-temporal-012",
+          "text": "Elias Okafor attended PyCon mentoring day.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Jonas Okafor",
+          "speaker_slug": "realistic-temporal-022",
+          "text": "Jonas Okafor attended PyCon mentoring day.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Jonas Ivanov",
+          "speaker_slug": "realistic-update-002",
+          "text": "Jonas Ivanov lived in Berlin.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Elias Ivanov",
+          "speaker_slug": "realistic-update-012",
+          "text": "Elias Ivanov lived in Berlin.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Jonas Ivanov",
+          "speaker_slug": "realistic-update-022",
+          "text": "Jonas Ivanov lived in Berlin.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Jonas Costa",
+          "speaker_slug": "realistic-work-002",
+          "text": "Jonas Costa worked on Project Phoenix and launched it in March.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Elias Costa",
+          "speaker_slug": "realistic-work-012",
+          "text": "Elias Costa shipped Hermes importer.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Jonas Costa",
+          "speaker_slug": "realistic-work-022",
+          "text": "Jonas Costa shipped Kite onboarding.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_007 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 007",
+          "speaker_slug": "personal-cross-alice-007",
+          "text": "Personal Cross Alice 007 adds follow-up context for locomo_like_007 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 017",
+          "speaker_slug": "personal-cross-alice-017",
+          "text": "Personal Cross Alice 017 adds follow-up context for locomo_like_007 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 027",
+          "speaker_slug": "personal-cross-alice-027",
+          "text": "Personal Cross Alice 027 adds follow-up context for locomo_like_007 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 007",
+          "speaker_slug": "personal-preference-007",
+          "text": "Personal Preference 007 adds follow-up context for locomo_like_007 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 017",
+          "speaker_slug": "personal-preference-017",
+          "text": "Personal Preference 017 adds follow-up context for locomo_like_007 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 027",
+          "speaker_slug": "personal-preference-027",
+          "text": "Personal Preference 027 adds follow-up context for locomo_like_007 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 037",
+          "speaker_slug": "personal-preference-037",
+          "text": "Personal Preference 037 adds follow-up context for locomo_like_007 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 047",
+          "speaker_slug": "personal-preference-047",
+          "text": "Personal Preference 047 adds follow-up context for locomo_like_007 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_008",
+      "coverage": [
+        "cross_person"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_008",
+        "adversarial_false_premise_018",
+        "adversarial_false_premise_028",
+        "adversarial_false_premise_038",
+        "adversarial_false_premise_048",
+        "core_fact_008",
+        "core_fact_018",
+        "core_fact_028",
+        "core_fact_038",
+        "core_fact_048",
+        "core_fact_058",
+        "core_fact_068",
+        "core_fact_078",
+        "core_fact_088",
+        "core_fact_098",
+        "cross_person_contamination_008",
+        "cross_person_contamination_018",
+        "cross_person_contamination_028",
+        "preference_008",
+        "preference_018",
+        "preference_028",
+        "preference_038",
+        "preference_048",
+        "realistic_adversarial_008",
+        "realistic_adversarial_018",
+        "realistic_adversarial_028",
+        "realistic_adversarial_038",
+        "realistic_adversarial_048",
+        "realistic_biography_008",
+        "realistic_biography_018",
+        "realistic_cross_person_008",
+        "realistic_cross_person_018",
+        "realistic_experiences_008",
+        "realistic_experiences_018",
+        "realistic_negation_hypothetical_003",
+        "realistic_negation_hypothetical_013",
+        "realistic_negation_hypothetical_023",
+        "realistic_preference_003",
+        "realistic_preference_013",
+        "realistic_preference_023",
+        "realistic_social_008",
+        "realistic_social_018",
+        "realistic_speakerless_008",
+        "realistic_speakerless_018",
+        "realistic_temporal_003",
+        "realistic_temporal_013",
+        "realistic_temporal_023",
+        "realistic_update_003",
+        "realistic_update_013",
+        "realistic_update_023",
+        "realistic_work_003",
+        "realistic_work_013",
+        "realistic_work_023",
+        "rollback_update_008",
+        "rollback_update_018",
+        "social_family_008",
+        "social_family_018",
+        "social_family_028",
+        "social_family_038",
+        "social_family_048",
+        "speakerless_note_008",
+        "speakerless_note_018",
+        "speakerless_note_028",
+        "temporal_008",
+        "temporal_018",
+        "temporal_028",
+        "temporal_038",
+        "temporal_048"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-008",
+        "personal-cross-alice-018",
+        "personal-cross-alice-028",
+        "personal-preference-008",
+        "personal-preference-018",
+        "personal-preference-028",
+        "personal-preference-038",
+        "personal-preference-048",
+        "personal-rollback-008",
+        "personal-rollback-018",
+        "realistic-adversarial-008",
+        "realistic-adversarial-018",
+        "realistic-adversarial-028",
+        "realistic-adversarial-038",
+        "realistic-adversarial-048",
+        "realistic-biography-008",
+        "realistic-biography-018",
+        "realistic-cross-alice-008",
+        "realistic-cross-alice-018",
+        "realistic-experiences-008",
+        "realistic-experiences-018",
+        "realistic-negation-003",
+        "realistic-negation-013",
+        "realistic-negation-023",
+        "realistic-preferences-003",
+        "realistic-preferences-013",
+        "realistic-preferences-023",
+        "realistic-social-008",
+        "realistic-social-018",
+        "realistic-speakerless-008",
+        "realistic-speakerless-018",
+        "realistic-temporal-003",
+        "realistic-temporal-013",
+        "realistic-temporal-023",
+        "realistic-update-003",
+        "realistic-update-013",
+        "realistic-update-023",
+        "realistic-work-003",
+        "realistic-work-013",
+        "realistic-work-023"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 008 is core-value-008.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 008",
+          "speaker_slug": "personal-cross-alice-008",
+          "text": "Personal Cross Alice 008 isolation preference is AliceIso008.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 018",
+          "speaker_slug": "personal-cross-alice-018",
+          "text": "Personal Cross Alice 018 isolation preference is AliceIso018.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 028",
+          "speaker_slug": "personal-cross-alice-028",
+          "text": "Personal Cross Alice 028 isolation preference is AliceIso028.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 008",
+          "speaker_slug": "personal-preference-008",
+          "text": "Personal Preference 008 preference is PreferenceValue008.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 018",
+          "speaker_slug": "personal-preference-018",
+          "text": "Personal Preference 018 preference is PreferenceValue018.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 028",
+          "speaker_slug": "personal-preference-028",
+          "text": "Personal Preference 028 preference is PreferenceValue028.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 038",
+          "speaker_slug": "personal-preference-038",
+          "text": "Personal Preference 038 preference is PreferenceValue038.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 048",
+          "speaker_slug": "personal-preference-048",
+          "text": "Personal Preference 048 preference is PreferenceValue048.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 008",
+          "speaker_slug": "personal-rollback-008",
+          "text": "Personal Rollback 008 lives in OldCity008.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 018",
+          "speaker_slug": "personal-rollback-018",
+          "text": "Personal Rollback 018 lives in OldCity018.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-adversarial-008",
+          "text": "Mateo Patel lives in Lisbon.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Theo Patel",
+          "speaker_slug": "realistic-adversarial-018",
+          "text": "Theo Patel lives in Coimbra.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-adversarial-028",
+          "text": "Mateo Patel lives in Lisbon.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Theo Patel",
+          "speaker_slug": "realistic-adversarial-038",
+          "text": "Theo Patel lives in Coimbra.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-adversarial-048",
+          "text": "Mateo Patel lives in Lisbon.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Mateo Rivera",
+          "speaker_slug": "realistic-biography-008",
+          "text": "Mateo Rivera uses the downstairs office for late client calls.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Theo Rivera",
+          "speaker_slug": "realistic-biography-018",
+          "text": "Theo Rivera uses the downstairs office for late client calls.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-cross-alice-008",
+          "text": "Mateo Patel lives in Lisbon.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Theo Patel",
+          "speaker_slug": "realistic-cross-alice-018",
+          "text": "Theo Patel lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-experiences-008",
+          "text": "Mateo Patel attended portfolio workshop on 2025-08-15.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Theo Patel",
+          "speaker_slug": "realistic-experiences-018",
+          "text": "Theo Patel attended portfolio workshop on 2025-06-15.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Leila Kowalski",
+          "speaker_slug": "realistic-negation-003",
+          "text": "Leila Kowalski shared a personal-memory detail.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Amara Kowalski",
+          "speaker_slug": "realistic-negation-013",
+          "text": "Amara Kowalski shared a personal-memory detail.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Leila Kowalski",
+          "speaker_slug": "realistic-negation-023",
+          "text": "Leila Kowalski shared a personal-memory detail.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-preferences-003",
+          "text": "Leila Patel prefers quiet hotels near transit.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Amara Patel",
+          "speaker_slug": "realistic-preferences-013",
+          "text": "Amara Patel prefers quiet hotels near transit.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Leila Patel",
+          "speaker_slug": "realistic-preferences-023",
+          "text": "Leila Patel prefers quiet hotels near transit.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Mateo Hughes",
+          "speaker_slug": "realistic-social-008",
+          "text": "Mateo Hughes's mother is Elena Rivera.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Theo Hughes",
+          "speaker_slug": "realistic-social-018",
+          "text": "Theo Hughes's mother is Elena Rivera.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Mateo Patel",
+          "speaker_slug": "realistic-speakerless-008",
+          "text": "Mateo Patel speakerless note says bring the blue notebook to Lisbon.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Theo Patel",
+          "speaker_slug": "realistic-speakerless-018",
+          "text": "Theo Patel speakerless note says bring the blue notebook to Lisbon.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Leila Kowalski",
+          "speaker_slug": "realistic-temporal-003",
+          "text": "Leila Kowalski attended founder dinner.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Amara Kowalski",
+          "speaker_slug": "realistic-temporal-013",
+          "text": "Amara Kowalski attended founder dinner.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Leila Kowalski",
+          "speaker_slug": "realistic-temporal-023",
+          "text": "Leila Kowalski attended founder dinner.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Leila Hughes",
+          "speaker_slug": "realistic-update-003",
+          "text": "Leila Hughes lived in Prague.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Amara Hughes",
+          "speaker_slug": "realistic-update-013",
+          "text": "Amara Hughes lived in Prague.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Leila Hughes",
+          "speaker_slug": "realistic-update-023",
+          "text": "Leila Hughes lived in Prague.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Leila Marin",
+          "speaker_slug": "realistic-work-003",
+          "text": "Leila Marin uses Linear.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Amara Marin",
+          "speaker_slug": "realistic-work-013",
+          "text": "Amara Marin uses Linear.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Leila Marin",
+          "speaker_slug": "realistic-work-023",
+          "text": "Leila Marin uses Linear.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_008 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 008",
+          "speaker_slug": "personal-cross-alice-008",
+          "text": "Personal Cross Alice 008 adds follow-up context for locomo_like_008 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 018",
+          "speaker_slug": "personal-cross-alice-018",
+          "text": "Personal Cross Alice 018 adds follow-up context for locomo_like_008 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 028",
+          "speaker_slug": "personal-cross-alice-028",
+          "text": "Personal Cross Alice 028 adds follow-up context for locomo_like_008 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 008",
+          "speaker_slug": "personal-preference-008",
+          "text": "Personal Preference 008 adds follow-up context for locomo_like_008 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 018",
+          "speaker_slug": "personal-preference-018",
+          "text": "Personal Preference 018 adds follow-up context for locomo_like_008 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 028",
+          "speaker_slug": "personal-preference-028",
+          "text": "Personal Preference 028 adds follow-up context for locomo_like_008 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 038",
+          "speaker_slug": "personal-preference-038",
+          "text": "Personal Preference 038 adds follow-up context for locomo_like_008 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 048",
+          "speaker_slug": "personal-preference-048",
+          "text": "Personal Preference 048 adds follow-up context for locomo_like_008 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_009",
+      "coverage": [
+        "temporal"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_009",
+        "adversarial_false_premise_019",
+        "adversarial_false_premise_029",
+        "adversarial_false_premise_039",
+        "adversarial_false_premise_049",
+        "core_fact_009",
+        "core_fact_019",
+        "core_fact_029",
+        "core_fact_039",
+        "core_fact_049",
+        "core_fact_059",
+        "core_fact_069",
+        "core_fact_079",
+        "core_fact_089",
+        "core_fact_099",
+        "cross_person_contamination_009",
+        "cross_person_contamination_019",
+        "cross_person_contamination_029",
+        "preference_009",
+        "preference_019",
+        "preference_029",
+        "preference_039",
+        "preference_049",
+        "realistic_adversarial_009",
+        "realistic_adversarial_019",
+        "realistic_adversarial_029",
+        "realistic_adversarial_039",
+        "realistic_adversarial_049",
+        "realistic_biography_009",
+        "realistic_biography_019",
+        "realistic_cross_person_009",
+        "realistic_cross_person_019",
+        "realistic_experiences_009",
+        "realistic_experiences_019",
+        "realistic_negation_hypothetical_004",
+        "realistic_negation_hypothetical_014",
+        "realistic_negation_hypothetical_024",
+        "realistic_preference_004",
+        "realistic_preference_014",
+        "realistic_preference_024",
+        "realistic_social_009",
+        "realistic_social_019",
+        "realistic_speakerless_009",
+        "realistic_speakerless_019",
+        "realistic_temporal_004",
+        "realistic_temporal_014",
+        "realistic_temporal_024",
+        "realistic_update_004",
+        "realistic_update_014",
+        "realistic_update_024",
+        "realistic_work_004",
+        "realistic_work_014",
+        "realistic_work_024",
+        "rollback_update_009",
+        "rollback_update_019",
+        "social_family_009",
+        "social_family_019",
+        "social_family_029",
+        "social_family_039",
+        "social_family_049",
+        "speakerless_note_009",
+        "speakerless_note_019",
+        "speakerless_note_029",
+        "temporal_009",
+        "temporal_019",
+        "temporal_029",
+        "temporal_039",
+        "temporal_049"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-009",
+        "personal-cross-alice-019",
+        "personal-cross-alice-029",
+        "personal-preference-009",
+        "personal-preference-019",
+        "personal-preference-029",
+        "personal-preference-039",
+        "personal-preference-049",
+        "personal-rollback-009",
+        "personal-rollback-019",
+        "realistic-adversarial-009",
+        "realistic-adversarial-019",
+        "realistic-adversarial-029",
+        "realistic-adversarial-039",
+        "realistic-adversarial-049",
+        "realistic-biography-009",
+        "realistic-biography-019",
+        "realistic-cross-alice-009",
+        "realistic-cross-alice-019",
+        "realistic-experiences-009",
+        "realistic-experiences-019",
+        "realistic-negation-004",
+        "realistic-negation-014",
+        "realistic-negation-024",
+        "realistic-preferences-004",
+        "realistic-preferences-014",
+        "realistic-preferences-024",
+        "realistic-social-009",
+        "realistic-social-019",
+        "realistic-speakerless-009",
+        "realistic-speakerless-019",
+        "realistic-temporal-004",
+        "realistic-temporal-014",
+        "realistic-temporal-024",
+        "realistic-update-004",
+        "realistic-update-014",
+        "realistic-update-024",
+        "realistic-work-004",
+        "realistic-work-014",
+        "realistic-work-024"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 009 is core-value-009.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 009",
+          "speaker_slug": "personal-cross-alice-009",
+          "text": "Personal Cross Alice 009 isolation preference is AliceIso009.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 019",
+          "speaker_slug": "personal-cross-alice-019",
+          "text": "Personal Cross Alice 019 isolation preference is AliceIso019.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 029",
+          "speaker_slug": "personal-cross-alice-029",
+          "text": "Personal Cross Alice 029 isolation preference is AliceIso029.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 009",
+          "speaker_slug": "personal-preference-009",
+          "text": "Personal Preference 009 preference is PreferenceValue009.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 019",
+          "speaker_slug": "personal-preference-019",
+          "text": "Personal Preference 019 preference is PreferenceValue019.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 029",
+          "speaker_slug": "personal-preference-029",
+          "text": "Personal Preference 029 preference is PreferenceValue029.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 039",
+          "speaker_slug": "personal-preference-039",
+          "text": "Personal Preference 039 preference is PreferenceValue039.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 049",
+          "speaker_slug": "personal-preference-049",
+          "text": "Personal Preference 049 preference is PreferenceValue049.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 009",
+          "speaker_slug": "personal-rollback-009",
+          "text": "Personal Rollback 009 lives in OldCity009.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 019",
+          "speaker_slug": "personal-rollback-019",
+          "text": "Personal Rollback 019 lives in OldCity019.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-adversarial-009",
+          "text": "Sofia Kim lives in Porto.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "Selin Kim",
+          "speaker_slug": "realistic-adversarial-019",
+          "text": "Selin Kim lives in Madrid.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-adversarial-029",
+          "text": "Sofia Kim lives in Porto.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "Selin Kim",
+          "speaker_slug": "realistic-adversarial-039",
+          "text": "Selin Kim lives in Madrid.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-adversarial-049",
+          "text": "Sofia Kim lives in Porto.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Sofia Brooks",
+          "speaker_slug": "realistic-biography-009",
+          "text": "Sofia Brooks keeps project receipts in the annual tax folder.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "Selin Brooks",
+          "speaker_slug": "realistic-biography-019",
+          "text": "Selin Brooks keeps project receipts in the annual tax folder.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-cross-alice-009",
+          "text": "Sofia Kim lives in Lisbon.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "Selin Kim",
+          "speaker_slug": "realistic-cross-alice-019",
+          "text": "Selin Kim lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-experiences-009",
+          "text": "Sofia Kim attended security tabletop on 2025-09-15.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "Selin Kim",
+          "speaker_slug": "realistic-experiences-019",
+          "text": "Selin Kim attended security tabletop on 2025-07-15.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Noah Patel",
+          "speaker_slug": "realistic-negation-004",
+          "text": "Noah Patel shared a personal-memory detail.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Victor Patel",
+          "speaker_slug": "realistic-negation-014",
+          "text": "Victor Patel shared a personal-memory detail.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Noah Patel",
+          "speaker_slug": "realistic-negation-024",
+          "text": "Noah Patel shared a personal-memory detail.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-preferences-004",
+          "text": "Noah Kim prefers black notebooks for planning.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Victor Kim",
+          "speaker_slug": "realistic-preferences-014",
+          "text": "Victor Kim prefers black notebooks for planning.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Noah Kim",
+          "speaker_slug": "realistic-preferences-024",
+          "text": "Noah Kim prefers black notebooks for planning.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Sofia Rivera",
+          "speaker_slug": "realistic-social-009",
+          "text": "Sofia Rivera's partner is Noah Kim.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "Selin Rivera",
+          "speaker_slug": "realistic-social-019",
+          "text": "Selin Rivera's partner is Noah Kim.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Sofia Kim",
+          "speaker_slug": "realistic-speakerless-009",
+          "text": "Sofia Kim speakerless note says renew the coworking pass next month.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "Selin Kim",
+          "speaker_slug": "realistic-speakerless-019",
+          "text": "Selin Kim speakerless note says renew the coworking pass next month.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Noah Patel",
+          "speaker_slug": "realistic-temporal-004",
+          "text": "Noah Patel attended migration review.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Victor Patel",
+          "speaker_slug": "realistic-temporal-014",
+          "text": "Victor Patel attended migration review.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Noah Patel",
+          "speaker_slug": "realistic-temporal-024",
+          "text": "Noah Patel attended migration review.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Noah Rivera",
+          "speaker_slug": "realistic-update-004",
+          "text": "Noah Rivera lived in Tallinn.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Victor Rivera",
+          "speaker_slug": "realistic-update-014",
+          "text": "Victor Rivera lived in Tallinn.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Noah Rivera",
+          "speaker_slug": "realistic-update-024",
+          "text": "Noah Rivera lived in Tallinn.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Noah Silva",
+          "speaker_slug": "realistic-work-004",
+          "text": "Noah Silva shipped Hermes importer.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Victor Silva",
+          "speaker_slug": "realistic-work-014",
+          "text": "Victor Silva shipped Kite onboarding.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Noah Silva",
+          "speaker_slug": "realistic-work-024",
+          "text": "Noah Silva shipped Project Phoenix.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_009 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 009",
+          "speaker_slug": "personal-cross-alice-009",
+          "text": "Personal Cross Alice 009 adds follow-up context for locomo_like_009 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 019",
+          "speaker_slug": "personal-cross-alice-019",
+          "text": "Personal Cross Alice 019 adds follow-up context for locomo_like_009 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 029",
+          "speaker_slug": "personal-cross-alice-029",
+          "text": "Personal Cross Alice 029 adds follow-up context for locomo_like_009 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 009",
+          "speaker_slug": "personal-preference-009",
+          "text": "Personal Preference 009 adds follow-up context for locomo_like_009 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 019",
+          "speaker_slug": "personal-preference-019",
+          "text": "Personal Preference 019 adds follow-up context for locomo_like_009 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 029",
+          "speaker_slug": "personal-preference-029",
+          "text": "Personal Preference 029 adds follow-up context for locomo_like_009 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 039",
+          "speaker_slug": "personal-preference-039",
+          "text": "Personal Preference 039 adds follow-up context for locomo_like_009 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 049",
+          "speaker_slug": "personal-preference-049",
+          "text": "Personal Preference 049 adds follow-up context for locomo_like_009 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    },
+    {
+      "conversation_id": "locomo_like_010",
+      "coverage": [
+        "multi_hop",
+        "single_hop"
+      ],
+      "linked_case_ids": [
+        "adversarial_false_premise_010",
+        "adversarial_false_premise_020",
+        "adversarial_false_premise_030",
+        "adversarial_false_premise_040",
+        "adversarial_false_premise_050",
+        "core_fact_010",
+        "core_fact_020",
+        "core_fact_030",
+        "core_fact_040",
+        "core_fact_050",
+        "core_fact_060",
+        "core_fact_070",
+        "core_fact_080",
+        "core_fact_090",
+        "core_fact_100",
+        "cross_person_contamination_010",
+        "cross_person_contamination_020",
+        "cross_person_contamination_030",
+        "preference_010",
+        "preference_020",
+        "preference_030",
+        "preference_040",
+        "preference_050",
+        "realistic_adversarial_010",
+        "realistic_adversarial_020",
+        "realistic_adversarial_030",
+        "realistic_adversarial_040",
+        "realistic_adversarial_050",
+        "realistic_biography_010",
+        "realistic_biography_020",
+        "realistic_cross_person_010",
+        "realistic_cross_person_020",
+        "realistic_experiences_010",
+        "realistic_experiences_020",
+        "realistic_negation_hypothetical_005",
+        "realistic_negation_hypothetical_015",
+        "realistic_negation_hypothetical_025",
+        "realistic_preference_005",
+        "realistic_preference_015",
+        "realistic_preference_025",
+        "realistic_social_010",
+        "realistic_social_020",
+        "realistic_speakerless_010",
+        "realistic_speakerless_020",
+        "realistic_temporal_005",
+        "realistic_temporal_015",
+        "realistic_temporal_025",
+        "realistic_update_005",
+        "realistic_update_015",
+        "realistic_update_025",
+        "realistic_work_005",
+        "realistic_work_015",
+        "realistic_work_025",
+        "rollback_update_010",
+        "rollback_update_020",
+        "social_family_010",
+        "social_family_020",
+        "social_family_030",
+        "social_family_040",
+        "social_family_050",
+        "speakerless_note_010",
+        "speakerless_note_020",
+        "speakerless_note_030",
+        "temporal_010",
+        "temporal_020",
+        "temporal_030",
+        "temporal_040",
+        "temporal_050"
+      ],
+      "person_slugs": [
+        "personal-alice",
+        "personal-cross-alice-010",
+        "personal-cross-alice-020",
+        "personal-cross-alice-030",
+        "personal-preference-010",
+        "personal-preference-020",
+        "personal-preference-030",
+        "personal-preference-040",
+        "personal-preference-050",
+        "personal-rollback-010",
+        "personal-rollback-020",
+        "realistic-adversarial-010",
+        "realistic-adversarial-020",
+        "realistic-adversarial-030",
+        "realistic-adversarial-040",
+        "realistic-adversarial-050",
+        "realistic-biography-010",
+        "realistic-biography-020",
+        "realistic-cross-alice-010",
+        "realistic-cross-alice-020",
+        "realistic-experiences-010",
+        "realistic-experiences-020",
+        "realistic-negation-005",
+        "realistic-negation-015",
+        "realistic-negation-025",
+        "realistic-preferences-005",
+        "realistic-preferences-015",
+        "realistic-preferences-025",
+        "realistic-social-010",
+        "realistic-social-020",
+        "realistic-speakerless-010",
+        "realistic-speakerless-020",
+        "realistic-temporal-005",
+        "realistic-temporal-015",
+        "realistic-temporal-025",
+        "realistic-update-005",
+        "realistic-update-015",
+        "realistic-update-025",
+        "realistic-work-005",
+        "realistic-work-015",
+        "realistic-work-025"
+      ],
+      "turn_count": 50,
+      "turns": [
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice core fact 010 is core-value-010.",
+          "turn_index": 1
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 010",
+          "speaker_slug": "personal-cross-alice-010",
+          "text": "Personal Cross Alice 010 isolation preference is AliceIso010.",
+          "turn_index": 2
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 020",
+          "speaker_slug": "personal-cross-alice-020",
+          "text": "Personal Cross Alice 020 isolation preference is AliceIso020.",
+          "turn_index": 3
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 030",
+          "speaker_slug": "personal-cross-alice-030",
+          "text": "Personal Cross Alice 030 isolation preference is AliceIso030.",
+          "turn_index": 4
+        },
+        {
+          "speaker_display_name": "Personal Preference 010",
+          "speaker_slug": "personal-preference-010",
+          "text": "Personal Preference 010 preference is PreferenceValue010.",
+          "turn_index": 5
+        },
+        {
+          "speaker_display_name": "Personal Preference 020",
+          "speaker_slug": "personal-preference-020",
+          "text": "Personal Preference 020 preference is PreferenceValue020.",
+          "turn_index": 6
+        },
+        {
+          "speaker_display_name": "Personal Preference 030",
+          "speaker_slug": "personal-preference-030",
+          "text": "Personal Preference 030 preference is PreferenceValue030.",
+          "turn_index": 7
+        },
+        {
+          "speaker_display_name": "Personal Preference 040",
+          "speaker_slug": "personal-preference-040",
+          "text": "Personal Preference 040 preference is PreferenceValue040.",
+          "turn_index": 8
+        },
+        {
+          "speaker_display_name": "Personal Preference 050",
+          "speaker_slug": "personal-preference-050",
+          "text": "Personal Preference 050 preference is PreferenceValue050.",
+          "turn_index": 9
+        },
+        {
+          "speaker_display_name": "Personal Rollback 010",
+          "speaker_slug": "personal-rollback-010",
+          "text": "Personal Rollback 010 lives in OldCity010.",
+          "turn_index": 10
+        },
+        {
+          "speaker_display_name": "Personal Rollback 020",
+          "speaker_slug": "personal-rollback-020",
+          "text": "Personal Rollback 020 lives in OldCity020.",
+          "turn_index": 11
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-adversarial-010",
+          "text": "Iris Nguyen lives in Coimbra.",
+          "turn_index": 12
+        },
+        {
+          "speaker_display_name": "David Nguyen",
+          "speaker_slug": "realistic-adversarial-020",
+          "text": "David Nguyen lives in Lisbon.",
+          "turn_index": 13
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-adversarial-030",
+          "text": "Iris Nguyen lives in Coimbra.",
+          "turn_index": 14
+        },
+        {
+          "speaker_display_name": "David Nguyen",
+          "speaker_slug": "realistic-adversarial-040",
+          "text": "David Nguyen lives in Lisbon.",
+          "turn_index": 15
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-adversarial-050",
+          "text": "Iris Nguyen lives in Coimbra.",
+          "turn_index": 16
+        },
+        {
+          "speaker_display_name": "Iris Stone",
+          "speaker_slug": "realistic-biography-010",
+          "text": "Iris Stone stores bike keys in the kitchen drawer.",
+          "turn_index": 17
+        },
+        {
+          "speaker_display_name": "David Stone",
+          "speaker_slug": "realistic-biography-020",
+          "text": "David Stone stores bike keys in the kitchen drawer.",
+          "turn_index": 18
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-cross-alice-010",
+          "text": "Iris Nguyen lives in Lisbon.",
+          "turn_index": 19
+        },
+        {
+          "speaker_display_name": "David Nguyen",
+          "speaker_slug": "realistic-cross-alice-020",
+          "text": "David Nguyen lives in Lisbon.",
+          "turn_index": 20
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-experiences-010",
+          "text": "Iris Nguyen attended product offsite on 2025-10-15.",
+          "turn_index": 21
+        },
+        {
+          "speaker_display_name": "David Nguyen",
+          "speaker_slug": "realistic-experiences-020",
+          "text": "David Nguyen attended product offsite on 2025-08-15.",
+          "turn_index": 22
+        },
+        {
+          "speaker_display_name": "Priya Kim",
+          "speaker_slug": "realistic-negation-005",
+          "text": "Priya Kim shared a personal-memory detail.",
+          "turn_index": 23
+        },
+        {
+          "speaker_display_name": "Helena Kim",
+          "speaker_slug": "realistic-negation-015",
+          "text": "Helena Kim shared a personal-memory detail.",
+          "turn_index": 24
+        },
+        {
+          "speaker_display_name": "Priya Kim",
+          "speaker_slug": "realistic-negation-025",
+          "text": "Priya Kim shared a personal-memory detail.",
+          "turn_index": 25
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-preferences-005",
+          "text": "Priya Nguyen prefers early calls before lunch.",
+          "turn_index": 26
+        },
+        {
+          "speaker_display_name": "Helena Nguyen",
+          "speaker_slug": "realistic-preferences-015",
+          "text": "Helena Nguyen prefers early calls before lunch.",
+          "turn_index": 27
+        },
+        {
+          "speaker_display_name": "Priya Nguyen",
+          "speaker_slug": "realistic-preferences-025",
+          "text": "Priya Nguyen prefers early calls before lunch.",
+          "turn_index": 28
+        },
+        {
+          "speaker_display_name": "Iris Brooks",
+          "speaker_slug": "realistic-social-010",
+          "text": "Iris Brooks's colleague is Priya Shah.",
+          "turn_index": 29
+        },
+        {
+          "speaker_display_name": "David Brooks",
+          "speaker_slug": "realistic-social-020",
+          "text": "David Brooks's colleague is Priya Shah.",
+          "turn_index": 30
+        },
+        {
+          "speaker_display_name": "Iris Nguyen",
+          "speaker_slug": "realistic-speakerless-010",
+          "text": "Iris Nguyen speakerless note says save the tax receipt after payment.",
+          "turn_index": 31
+        },
+        {
+          "speaker_display_name": "David Nguyen",
+          "speaker_slug": "realistic-speakerless-020",
+          "text": "David Nguyen speakerless note says save the tax receipt after payment.",
+          "turn_index": 32
+        },
+        {
+          "speaker_display_name": "Priya Kim",
+          "speaker_slug": "realistic-temporal-005",
+          "text": "Priya Kim attended customer interview sprint.",
+          "turn_index": 33
+        },
+        {
+          "speaker_display_name": "Helena Kim",
+          "speaker_slug": "realistic-temporal-015",
+          "text": "Helena Kim attended customer interview sprint.",
+          "turn_index": 34
+        },
+        {
+          "speaker_display_name": "Priya Kim",
+          "speaker_slug": "realistic-temporal-025",
+          "text": "Priya Kim attended customer interview sprint.",
+          "turn_index": 35
+        },
+        {
+          "speaker_display_name": "Priya Brooks",
+          "speaker_slug": "realistic-update-005",
+          "text": "Priya Brooks lived in Valencia.",
+          "turn_index": 36
+        },
+        {
+          "speaker_display_name": "Helena Brooks",
+          "speaker_slug": "realistic-update-015",
+          "text": "Helena Brooks lived in Valencia.",
+          "turn_index": 37
+        },
+        {
+          "speaker_display_name": "Priya Brooks",
+          "speaker_slug": "realistic-update-025",
+          "text": "Priya Brooks lived in Valencia.",
+          "turn_index": 38
+        },
+        {
+          "speaker_display_name": "Priya Morgan",
+          "speaker_slug": "realistic-work-005",
+          "text": "Priya Morgan uses Metabase.",
+          "turn_index": 39
+        },
+        {
+          "speaker_display_name": "Helena Morgan",
+          "speaker_slug": "realistic-work-015",
+          "text": "Helena Morgan uses Metabase.",
+          "turn_index": 40
+        },
+        {
+          "speaker_display_name": "Priya Morgan",
+          "speaker_slug": "realistic-work-025",
+          "text": "Priya Morgan uses Metabase.",
+          "turn_index": 41
+        },
+        {
+          "speaker_display_name": "Personal Alice",
+          "speaker_slug": "personal-alice",
+          "text": "Personal Alice adds follow-up context for locomo_like_010 turn 42.",
+          "turn_index": 42
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 010",
+          "speaker_slug": "personal-cross-alice-010",
+          "text": "Personal Cross Alice 010 adds follow-up context for locomo_like_010 turn 43.",
+          "turn_index": 43
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 020",
+          "speaker_slug": "personal-cross-alice-020",
+          "text": "Personal Cross Alice 020 adds follow-up context for locomo_like_010 turn 44.",
+          "turn_index": 44
+        },
+        {
+          "speaker_display_name": "Personal Cross Alice 030",
+          "speaker_slug": "personal-cross-alice-030",
+          "text": "Personal Cross Alice 030 adds follow-up context for locomo_like_010 turn 45.",
+          "turn_index": 45
+        },
+        {
+          "speaker_display_name": "Personal Preference 010",
+          "speaker_slug": "personal-preference-010",
+          "text": "Personal Preference 010 adds follow-up context for locomo_like_010 turn 46.",
+          "turn_index": 46
+        },
+        {
+          "speaker_display_name": "Personal Preference 020",
+          "speaker_slug": "personal-preference-020",
+          "text": "Personal Preference 020 adds follow-up context for locomo_like_010 turn 47.",
+          "turn_index": 47
+        },
+        {
+          "speaker_display_name": "Personal Preference 030",
+          "speaker_slug": "personal-preference-030",
+          "text": "Personal Preference 030 adds follow-up context for locomo_like_010 turn 48.",
+          "turn_index": 48
+        },
+        {
+          "speaker_display_name": "Personal Preference 040",
+          "speaker_slug": "personal-preference-040",
+          "text": "Personal Preference 040 adds follow-up context for locomo_like_010 turn 49.",
+          "turn_index": 49
+        },
+        {
+          "speaker_display_name": "Personal Preference 050",
+          "speaker_slug": "personal-preference-050",
+          "text": "Personal Preference 050 adds follow-up context for locomo_like_010 turn 50.",
+          "turn_index": 50
+        }
+      ]
+    }
+  ],
+  "schema_version": 1
+}

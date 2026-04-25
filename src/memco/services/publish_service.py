@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+
 from memco.consolidation import get_policy
 from memco.extractors.base import validate_candidate_payload
 from memco.models.memory_fact import MemoryFactInput
 from memco.models.relationships import FAMILY_SOCIAL_BRIDGE_RELATION_TYPES, canonical_relation_type
 from memco.repositories.candidate_repository import CandidateRepository
 from memco.repositories.fact_repository import FactRepository
+from memco.repositories.source_repository import SourceRepository
 from memco.services.consolidation_service import ConsolidationService
 from memco.utils import slugify
 
@@ -187,6 +190,13 @@ class PublishService:
                 locator[key] = primary_evidence[key]
         source_segment_ids = primary_evidence.get("source_segment_ids") or []
         session_ids = primary_evidence.get("session_ids") or []
+        if source_segment_ids:
+            segment = SourceRepository().get_segment(conn, segment_id=int(source_segment_ids[0]))
+            if segment is not None:
+                segment_locator = json.loads(segment.get("locator_json") or "{}")
+                if isinstance(segment_locator, dict) and segment_locator:
+                    locator["source_segment_locator"] = segment_locator
+                locator["source_segment_type"] = segment.get("segment_type") or ""
         fact = self.consolidation_service.add_fact(
             conn,
             payload,

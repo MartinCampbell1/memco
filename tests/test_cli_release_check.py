@@ -297,7 +297,7 @@ def test_cli_doctor_reports_redacted_runtime_state(tmp_path):
     (goldens / "realistic_personal_memory_goldens.jsonl").write_text("{}", encoding="utf-8")
     settings = Settings(root=repo_root)
     settings.api.auth_token = "plain-secret-token"
-    settings.storage.database_url = "postgresql://alice:secret@127.0.0.1:5432/memco_local"
+    settings.storage.database_url = "postgresql://user:password@127.0.0.1:5432/memco_local"
     settings.backup_path.parent.mkdir(parents=True, exist_ok=True)
     settings.backup_path.write_text("backup", encoding="utf-8")
     write_settings(settings)
@@ -310,7 +310,7 @@ def test_cli_doctor_reports_redacted_runtime_state(tmp_path):
 
     assert result.exit_code == 0, result.output
     assert "plain-secret-token" not in result.output
-    assert "alice:secret" not in result.output
+    assert "user:password" not in result.output
     payload = json.loads(result.output)
     assert payload["artifact_type"] == "doctor_report"
     assert payload["ok"] is True

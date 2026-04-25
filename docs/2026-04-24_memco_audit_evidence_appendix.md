@@ -1,8 +1,11 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Audit Evidence Appendix
 
 Date: 2026-04-24
 Status: historical pre-remediation evidence appendix, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Audit package index: `docs/2026-04-24_memco_audit_package_index.md`
 Source audit: `docs/2026-04-24_memco_final_release_audit.md`
 Russian executive summary: `docs/2026-04-24_memco_final_release_audit_ru.md`

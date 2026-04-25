@@ -114,6 +114,7 @@ def test_answer_service_allows_secondary_partial_when_primary_is_supported():
     assert result["must_not_use_as_fact"] is False
     assert "Alice lives in Lisbon." in result["answer"]
     assert "Stripe" in result["answer"]
+    assert "unknown" in result["answer"]
     assert result["evidence_ids"] == [12]
 
 
@@ -146,6 +147,41 @@ def test_answer_service_honors_retrieval_answerable_false_for_partial():
     assert result["answerable"] is False
     assert result["must_not_use_as_fact"] is True
     assert result["agent_response"]["answerable"] is False
+
+
+def test_answer_service_partial_answer_states_missing_work_is_unknown():
+    service = AnswerService()
+    result = service.build_answer(
+        query="Where does Alice live and what does she do for work?",
+        retrieval_result=RetrievalResult(
+            query="Where does Alice live and what does she do for work?",
+            answerable=True,
+            unsupported_premise_detected=True,
+            support_level="partial",
+            unsupported_claims=["No evidence for employer claim: work."],
+            hits=[
+                RetrievalHit(
+                    fact_id=1,
+                    domain="biography",
+                    category="residence",
+                    summary="Alice lives in Lisbon.",
+                    confidence=0.9,
+                    score=2.0,
+                    payload={"city": "Lisbon"},
+                    evidence=[{"evidence_id": 14}],
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is False
+    assert result["answerable"] is True
+    assert result["support_level"] == "partial"
+    assert result["used_fact_ids"] == [1]
+    assert result["used_evidence_ids"] == [14]
+    assert "Alice lives in Lisbon." in result["answer"]
+    assert "work" in result["answer"]
+    assert "unknown" in result["answer"]
 
 
 def test_answer_service_returns_memory_only_answer_for_supported_hits():
@@ -486,6 +522,9 @@ def test_answer_service_uses_provider_only_with_confirmed_evidence():
         return {
             "answer": "Alice lives in Lisbon, according to confirmed memory evidence.",
             "support_level": "supported",
+            "unsupported_claims": [],
+            "answerable": True,
+            "refused": False,
             "used_fact_ids": [1],
             "used_evidence_ids": [61],
         }
@@ -520,6 +559,10 @@ def test_answer_service_uses_provider_only_with_confirmed_evidence():
     assert seen["schema_name"] == "memco_evidence_bound_answer_v1"
     assert "Do not add, infer, or guess new personal facts" in seen["system_prompt"]
     prompt = seen["prompt"]
+    assert prompt["unsupported_claims"] == []
+    assert prompt["answerable"] is True
+    assert prompt["refused"] is False
+    assert {"unsupported_claims", "answerable", "refused"} <= set(prompt["output_schema"])
     assert prompt["confirmed_facts"][0]["summary"] == "Alice lives in Lisbon."
     assert prompt["confirmed_facts"][0]["evidence"][0]["evidence_id"] == 61
 
@@ -530,6 +573,9 @@ def test_answer_service_rejects_provider_ungrounded_ids_and_fails_closed():
             json_handler=lambda **_: {
                 "answer": "Alice lives in Lisbon.",
                 "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
                 "used_fact_ids": [999],
                 "used_evidence_ids": [62],
             }
@@ -570,6 +616,9 @@ def test_answer_service_rejects_provider_answer_that_introduces_unsupported_name
             json_handler=lambda **_: {
                 "answer": "Alice lives in Berlin.",
                 "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
                 "used_fact_ids": [2],
                 "used_evidence_ids": [62],
             }
@@ -608,6 +657,9 @@ def test_answer_service_rejects_provider_answer_grounded_only_in_query_premise()
             json_handler=lambda **_: {
                 "answer": "Alice lives in Berlin.",
                 "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
                 "used_fact_ids": [2],
                 "used_evidence_ids": [62],
             }
@@ -646,6 +698,132 @@ def test_answer_service_rejects_provider_answer_that_adds_unsupported_lowercase_
             json_handler=lambda **_: {
                 "answer": "Alice lives in Lisbon and likes sushi.",
                 "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
+                "used_fact_ids": [2],
+                "used_evidence_ids": [62],
+            }
+        )
+    )
+
+    result = service.build_answer(
+        query="Where does Alice live?",
+        retrieval_result=RetrievalResult(
+            query="Where does Alice live?",
+            unsupported_premise_detected=False,
+            support_level="supported",
+            hits=[
+                RetrievalHit(
+                    fact_id=2,
+                    domain="biography",
+                    category="residence",
+                    summary="Alice lives in Lisbon.",
+                    confidence=0.9,
+                    score=2.0,
+                    payload={"city": "Lisbon"},
+                    evidence=[{"evidence_id": 62, "quote_text": "Alice lives in Lisbon."}],
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is True
+    assert result["answerable"] is False
+    assert result["refusal_category"] == "insufficient_evidence"
+
+
+def test_answer_service_rejects_provider_answer_that_adds_unsupported_date():
+    service = AnswerService(
+        llm_provider=MockLLMProvider(
+            json_handler=lambda **_: {
+                "answer": "Alice attended PyCon in 2025.",
+                "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
+                "used_fact_ids": [2],
+                "used_evidence_ids": [62],
+            }
+        )
+    )
+
+    result = service.build_answer(
+        query="What did Alice attend?",
+        retrieval_result=RetrievalResult(
+            query="What did Alice attend?",
+            unsupported_premise_detected=False,
+            support_level="supported",
+            hits=[
+                RetrievalHit(
+                    fact_id=2,
+                    domain="experiences",
+                    category="event",
+                    summary="Alice attended PyCon.",
+                    confidence=0.9,
+                    score=2.0,
+                    payload={"event": "PyCon"},
+                    evidence=[{"evidence_id": 62, "quote_text": "Alice attended PyCon."}],
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is True
+    assert result["answerable"] is False
+    assert result["refusal_category"] == "insufficient_evidence"
+
+
+def test_answer_service_rejects_provider_answer_that_adds_unsupported_relation():
+    service = AnswerService(
+        llm_provider=MockLLMProvider(
+            json_handler=lambda **_: {
+                "answer": "Alice's sister is Maria.",
+                "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
+                "used_fact_ids": [2],
+                "used_evidence_ids": [62],
+            }
+        )
+    )
+
+    result = service.build_answer(
+        query="Where does Alice live?",
+        retrieval_result=RetrievalResult(
+            query="Where does Alice live?",
+            unsupported_premise_detected=False,
+            support_level="supported",
+            hits=[
+                RetrievalHit(
+                    fact_id=2,
+                    domain="biography",
+                    category="residence",
+                    summary="Alice lives in Lisbon.",
+                    confidence=0.9,
+                    score=2.0,
+                    payload={"city": "Lisbon"},
+                    evidence=[{"evidence_id": 62, "quote_text": "Alice lives in Lisbon."}],
+                )
+            ],
+        ),
+    )
+
+    assert result["refused"] is True
+    assert result["answerable"] is False
+    assert result["refusal_category"] == "insufficient_evidence"
+
+
+def test_answer_service_rejects_provider_output_that_changes_guardrail_flags():
+    service = AnswerService(
+        llm_provider=MockLLMProvider(
+            json_handler=lambda **_: {
+                "answer": "Alice lives in Lisbon.",
+                "support_level": "supported",
+                "unsupported_claims": ["No evidence for employer claim: Stripe."],
+                "answerable": True,
+                "refused": False,
                 "used_fact_ids": [2],
                 "used_evidence_ids": [62],
             }
@@ -763,6 +941,9 @@ def test_phase7_local_provider_smoke_planner_and_answer():
         json_handler=lambda **_: {
             "answer": "Alice lives in Lisbon and works at Acme Robotics.",
             "support_level": "supported",
+            "unsupported_claims": [],
+            "answerable": True,
+            "refused": False,
             "used_fact_ids": [10, 11],
             "used_evidence_ids": [100, 101],
         }

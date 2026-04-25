@@ -1,3 +1,6 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Full Fix Plan
 
 Date: 2026-04-22
@@ -77,8 +80,8 @@ Whenever verification changes, update:
 
 - [../2026-04-21_memco_release_readiness_gate.md](../2026-04-21_memco_release_readiness_gate.md)
 - [../2026-04-21_memco_private_release_gate.md](../2026-04-21_memco_private_release_gate.md)
-- [../README.md](../README.md)
-- [../IMPLEMENTATION_NOTES.md](../IMPLEMENTATION_NOTES.md)
+- [../../README.md](../../README.md)
+- [../../IMPLEMENTATION_NOTES.md](../../IMPLEMENTATION_NOTES.md)
 
 ### R3. Do not regress into Docker-by-default language
 

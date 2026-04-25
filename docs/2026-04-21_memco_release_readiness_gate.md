@@ -4,15 +4,15 @@ Date: 2026-04-21
 Last refreshed: 2026-04-23
 Status: active current repo-local release gate
 Status note: active gate definition, not current checkout proof by itself.
-Current checkout proof requires a fresh `release-readiness-check` artifact with live smoke; see docs/2026-04-24_memco_release_closure.md for the current private release verdict.
+Current checkout proof requires a fresh `release-readiness-check` artifact with live smoke; see docs/CURRENT_STATUS.md for the current status entrypoint.
 
-## Current Verdict
+## Gate Definition
 
 | Gate | Status | Meaning |
 |---|---|---|
-| Current target contract | GO | For current repo-local work, the accepted target contract is `docs/synthius_mem_execution_brief.md`. |
-| Private release readiness | GO | The current local private, operator-controlled, review-gated slice is ready for a technical private owner/operator when backed by a fresh release-grade artifact. |
-| No-Docker Postgres operational readiness | GO | The repo has a verified Postgres runtime path on this machine without Docker. |
+| Current target contract | accepted scope | For current repo-local work, the accepted target contract is `docs/synthius_mem_execution_brief.md` plus `docs/PRIVATE_SINGLE_USER_CONTRACT.md`. |
+| Private release readiness | requires fresh proof | The local private, operator-controlled, review-gated slice can be evaluated only with current checkout/config artifacts. |
+| No-Docker Postgres operational readiness | supported path | The repo has a Postgres runtime path on this machine without Docker; use current proof artifacts before release claims. |
 
 This document is the active current release gate for repo-local work, despite the original filename date.
 
@@ -38,7 +38,7 @@ Related contract decision:
 
 ## Private Release Readiness
 
-Current status: `GO` for the local/private/operator-controlled/review-gated release scope.
+Current gate scope: local/private/operator-controlled/review-gated release scope.
 
 This is not a universal memory substrate, a fully autonomous production memory claim, or a broad public SaaS readiness claim.
 
@@ -65,7 +65,7 @@ What is green:
 
 Primary evidence:
 
-- [docs/2026-04-21_memco_private_release_gate.md](docs/2026-04-21_memco_private_release_gate.md) (`Phase 8 Private Gate`)
+- [2026-04-21_memco_private_release_gate.md](2026-04-21_memco_private_release_gate.md) (`Phase 8 Private Gate`)
 - [README.md](../README.md)
 - [IMPLEMENTATION_NOTES.md](../IMPLEMENTATION_NOTES.md)
 

@@ -456,8 +456,10 @@ class EvalService:
         "rollback_update": 20,
     }
     PERSONAL_MEMORY_THRESHOLDS = {
+        "overall_accuracy": 0.90,
         "core_memory_accuracy": 0.95,
         "adversarial_robustness": 0.98,
+        "temporal_accuracy": 0.90,
         "cross_person_contamination": 0,
         "unsupported_premise_answered_as_fact": 0,
         "evidence_missing_on_supported_answers": 0,
@@ -466,6 +468,18 @@ class EvalService:
         "experience_event_retrieval_pass_rate": 0.90,
         "source_hard_case_failures": 0,
     }
+    PERSONAL_MEMORY_COVERAGE_GROUPS = {
+        "single_hop": {"core_fact", "preference", "speakerless_note"},
+        "multi_hop": {"social_family"},
+        "temporal": {"temporal", "rollback_update"},
+        "open_inference": {"speakerless_note"},
+        "adversarial_false_premise": {"adversarial_false_premise"},
+        "cross_person": {"cross_person_contamination"},
+    }
+    LOCOMO_LIKE_MANIFEST_NAME = "locomo_like_suite_manifest.json"
+    LOCOMO_LIKE_MIN_CONVERSATIONS = 10
+    LOCOMO_LIKE_MIN_PERSONS_PER_CONVERSATION = 2
+    LOCOMO_LIKE_DEFAULT_MIN_TURNS = 50
 
     BEHAVIOR_CHECKS = (
         EvalBehaviorCheck(
@@ -1599,6 +1613,450 @@ class EvalService:
                     if status != "active" and seeded.get("status") != status:
                         conn.execute("UPDATE memory_facts SET status = ? WHERE id = ?", (status, int(seeded["id"])))
 
+    def _personal_evolution_residence_facts(self, conn, *, person_id: int) -> list[dict[str, Any]]:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM memory_facts
+            WHERE person_id = ? AND domain = 'biography' AND category = 'residence'
+            ORDER BY id ASC
+            """,
+            (person_id,),
+        ).fetchall()
+        facts: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            facts.append(item)
+        return facts
+
+    def _reset_personal_evolution_fixture(self, conn, *, fact_repo: FactRepository) -> None:
+        workspace_id = fact_repo.ensure_workspace(conn, "default")
+        source_rows = conn.execute(
+            """
+            SELECT id
+            FROM sources
+            WHERE workspace_id = ?
+              AND (source_path LIKE ? OR origin_uri LIKE ? OR title LIKE ?)
+            """,
+            (workspace_id, "%memory-evolution-eval%", "%memory-evolution-eval%", "%memory-evolution-eval%"),
+        ).fetchall()
+        if source_rows:
+            placeholders = ",".join("?" for _ in source_rows)
+            conn.execute(
+                f"DELETE FROM sources WHERE id IN ({placeholders})",
+                [int(row["id"]) for row in source_rows],
+            )
+        person_rows = conn.execute(
+            "SELECT id FROM persons WHERE workspace_id = ? AND slug = ?",
+            (workspace_id, "memory-evolution-eval"),
+        ).fetchall()
+        if person_rows:
+            placeholders = ",".join("?" for _ in person_rows)
+            conn.execute(
+                f"DELETE FROM persons WHERE id IN ({placeholders})",
+                [int(row["id"]) for row in person_rows],
+            )
+
+    def _personal_memory_evolution_report(self, project_root: Path) -> dict[str, Any]:
+        settings = ensure_runtime(load_settings(project_root))
+        settings.runtime.profile = "fixture"
+        settings.llm.provider = "mock"
+        settings.llm.model = "fixture"
+        settings.llm.allow_mock_provider = True
+        fact_repo = FactRepository()
+        source_repo = SourceRepository()
+        consolidation = ConsolidationService(fact_repository=fact_repo)
+        ingest_service = IngestService(source_repository=source_repo)
+        conversation_service = ConversationIngestService(fact_repository=fact_repo)
+        candidate_service = CandidateService(
+            extraction_service=ExtractionService.from_settings(settings, usage_tracker=self.llm_usage_tracker)
+        )
+        publish_service = PublishService(
+            fact_repository=fact_repo,
+            consolidation_service=consolidation,
+        )
+        slug = "memory-evolution-eval"
+        display_name = "Memory Evolution Eval"
+        required_checks = [
+            "incremental_import_creates_active_fact",
+            "same_conversation_reextract_idempotent",
+            "same_source_reimport_no_duplicate_active_facts",
+            "conflict_update_supersedes_previous_fact",
+            "current_query_returns_new_fact",
+            "historical_query_returns_superseded_fact",
+            "stale_superseded_fact_excluded_from_current",
+            "delete_hides_fact_from_retrieval",
+            "restore_deleted_fact_retrievable",
+            "rollback_restores_previous_active_state",
+        ]
+        checks: list[dict[str, Any]] = []
+
+        def add_check(name: str, description: str, passed: bool, details: dict[str, Any]) -> None:
+            checks.append(
+                {
+                    "name": name,
+                    "description": description,
+                    "passed": bool(passed),
+                    "details": details,
+                }
+            )
+
+        def publish_residence_candidates(conn, candidates: list[dict]) -> list[dict]:
+            published: list[dict] = []
+            for candidate in candidates:
+                if candidate.get("domain") != "biography" or candidate.get("category") != "residence":
+                    continue
+                if candidate.get("candidate_status") == "published":
+                    if candidate.get("publish_target_fact_id"):
+                        published.append(
+                            {
+                                "candidate": candidate,
+                                "fact": fact_repo.get_fact(
+                                    conn,
+                                    fact_id=int(candidate["publish_target_fact_id"]),
+                                ),
+                            }
+                        )
+                    continue
+                if candidate.get("candidate_status") != "validated_candidate":
+                    continue
+                published.append(
+                    publish_service.publish_candidate(
+                        conn,
+                        workspace_slug="default",
+                        candidate_id=int(candidate["id"]),
+                    )
+                )
+            return published
+
+        def retrieve_residence(conn, *, query: str, temporal_mode: str) -> Any:
+            return self.retrieval_service.retrieve(
+                conn,
+                RetrievalRequest(
+                    workspace="default",
+                    person_slug=slug,
+                    query=query,
+                    domain="biography",
+                    category="residence",
+                    limit=3,
+                    include_fallback=False,
+                    temporal_mode=temporal_mode,
+                    actor=build_internal_actor(settings, actor_id="eval-runner"),
+                ),
+                settings=settings,
+                route_name="personal_memory_evolution_eval",
+            )
+
+        try:
+            with get_connection(settings.db_path) as conn:
+                self._reset_personal_evolution_fixture(conn, fact_repo=fact_repo)
+                person = self._person(conn, fact_repo=fact_repo, slug=slug, display_name=display_name)
+                person_id = int(person["id"])
+                berlin_messages = [
+                    {
+                        "speaker": display_name,
+                        "timestamp": "2026-04-21T09:00:00Z",
+                        "text": "I live in Berlin.",
+                    }
+                ]
+                berlin_source_id, berlin_conversation_id = self._ensure_imported_conversation(
+                    settings,
+                    conn,
+                    ingest_service=ingest_service,
+                    conversation_service=conversation_service,
+                    filename="memory-evolution-eval-berlin.json",
+                    messages=berlin_messages,
+                    conversation_uid="memory-evolution-eval-berlin",
+                    title="Memory Evolution Eval Berlin",
+                )
+                berlin_candidates = candidate_service.extract_from_conversation(
+                    conn,
+                    workspace_slug="default",
+                    conversation_id=berlin_conversation_id,
+                )
+                publish_residence_candidates(conn, berlin_candidates)
+                facts_after_first_import = self._personal_evolution_residence_facts(conn, person_id=person_id)
+                active_after_first_import = [fact for fact in facts_after_first_import if fact["status"] == "active"]
+                berlin_fact = next(
+                    (fact for fact in facts_after_first_import if fact["payload"].get("city") == "Berlin"),
+                    None,
+                )
+                add_check(
+                    "incremental_import_creates_active_fact",
+                    "A first incremental conversation import should create one active residence fact.",
+                    berlin_fact is not None
+                    and berlin_fact["status"] == "active"
+                    and len(active_after_first_import) == 1,
+                    {
+                        "active_count": len(active_after_first_import),
+                        "cities": [fact["payload"].get("city") for fact in facts_after_first_import],
+                    },
+                )
+
+                same_conversation_candidates = candidate_service.extract_from_conversation(
+                    conn,
+                    workspace_slug="default",
+                    conversation_id=berlin_conversation_id,
+                )
+                publish_residence_candidates(conn, same_conversation_candidates)
+                facts_after_same_conversation = self._personal_evolution_residence_facts(conn, person_id=person_id)
+                active_after_same_conversation = [
+                    fact for fact in facts_after_same_conversation if fact["status"] == "active"
+                ]
+                add_check(
+                    "same_conversation_reextract_idempotent",
+                    "Re-extracting an already published conversation should not demote or duplicate the active fact.",
+                    len(active_after_same_conversation) == 1
+                    and active_after_same_conversation[0]["payload"].get("city") == "Berlin",
+                    {
+                        "candidate_statuses": [candidate["candidate_status"] for candidate in same_conversation_candidates],
+                        "active_count": len(active_after_same_conversation),
+                        "fact_count": len(facts_after_same_conversation),
+                    },
+                )
+
+                repeated_source_id, repeated_conversation_id = self._ensure_imported_conversation(
+                    settings,
+                    conn,
+                    ingest_service=ingest_service,
+                    conversation_service=conversation_service,
+                    filename="memory-evolution-eval-berlin.json",
+                    messages=berlin_messages,
+                    conversation_uid="memory-evolution-eval-berlin",
+                    title="Memory Evolution Eval Berlin",
+                )
+                repeated_candidates = candidate_service.extract_from_conversation(
+                    conn,
+                    workspace_slug="default",
+                    conversation_id=repeated_conversation_id,
+                )
+                publish_residence_candidates(conn, repeated_candidates)
+                facts_after_reimport = self._personal_evolution_residence_facts(conn, person_id=person_id)
+                active_after_reimport = [fact for fact in facts_after_reimport if fact["status"] == "active"]
+                add_check(
+                    "same_source_reimport_no_duplicate_active_facts",
+                    "Re-importing and reprocessing the same source should keep one active fact for the current value.",
+                    repeated_source_id == berlin_source_id
+                    and repeated_conversation_id == berlin_conversation_id
+                    and len(active_after_reimport) == 1
+                    and active_after_reimport[0]["payload"].get("city") == "Berlin",
+                    {
+                        "first_source_id": berlin_source_id,
+                        "repeated_source_id": repeated_source_id,
+                        "first_conversation_id": berlin_conversation_id,
+                        "repeated_conversation_id": repeated_conversation_id,
+                        "active_count": len(active_after_reimport),
+                        "fact_count": len(facts_after_reimport),
+                    },
+                )
+
+                lisbon_source_id, lisbon_conversation_id = self._ensure_imported_conversation(
+                    settings,
+                    conn,
+                    ingest_service=ingest_service,
+                    conversation_service=conversation_service,
+                    filename="memory-evolution-eval-lisbon.json",
+                    messages=[
+                        {
+                            "speaker": display_name,
+                            "timestamp": "2026-04-21T12:00:00Z",
+                            "text": "I moved to Lisbon.",
+                        }
+                    ],
+                    conversation_uid="memory-evolution-eval-lisbon",
+                    title="Memory Evolution Eval Lisbon",
+                )
+                lisbon_candidates = candidate_service.extract_from_conversation(
+                    conn,
+                    workspace_slug="default",
+                    conversation_id=lisbon_conversation_id,
+                )
+                publish_residence_candidates(conn, lisbon_candidates)
+                facts_after_conflict = self._personal_evolution_residence_facts(conn, person_id=person_id)
+                berlin_fact = next(
+                    (fact for fact in facts_after_conflict if fact["payload"].get("city") == "Berlin"),
+                    None,
+                )
+                lisbon_fact = next(
+                    (fact for fact in facts_after_conflict if fact["payload"].get("city") == "Lisbon"),
+                    None,
+                )
+                active_after_conflict = [fact for fact in facts_after_conflict if fact["status"] == "active"]
+                add_check(
+                    "conflict_update_supersedes_previous_fact",
+                    "A newer conflicting current-state residence should supersede the old value.",
+                    berlin_fact is not None
+                    and lisbon_fact is not None
+                    and berlin_fact["status"] == "superseded"
+                    and lisbon_fact["status"] == "active"
+                    and berlin_fact["superseded_by_fact_id"] == lisbon_fact["id"]
+                    and len(active_after_conflict) == 1,
+                    {
+                        "berlin_status": berlin_fact["status"] if berlin_fact else None,
+                        "lisbon_status": lisbon_fact["status"] if lisbon_fact else None,
+                        "active_count": len(active_after_conflict),
+                        "lisbon_source_id": lisbon_source_id,
+                    },
+                )
+                if berlin_fact is None or lisbon_fact is None:
+                    raise RuntimeError("memory evolution fixture did not produce Berlin and Lisbon facts")
+
+                current_after_conflict = retrieve_residence(
+                    conn,
+                    query="Where does Memory Evolution Eval live?",
+                    temporal_mode="current",
+                )
+                history_after_conflict = retrieve_residence(
+                    conn,
+                    query="Where did Memory Evolution Eval live before Lisbon?",
+                    temporal_mode="history",
+                )
+                add_check(
+                    "current_query_returns_new_fact",
+                    "Current retrieval should return the latest active value after a conflict update.",
+                    bool(current_after_conflict.hits)
+                    and current_after_conflict.hits[0].fact_id == int(lisbon_fact["id"])
+                    and current_after_conflict.hits[0].payload.get("city") == "Lisbon",
+                    {
+                        "hit_fact_ids": [hit.fact_id for hit in current_after_conflict.hits],
+                        "hit_cities": [hit.payload.get("city") for hit in current_after_conflict.hits],
+                    },
+                )
+                add_check(
+                    "historical_query_returns_superseded_fact",
+                    "Historical retrieval should expose the superseded previous value.",
+                    bool(history_after_conflict.hits)
+                    and history_after_conflict.hits[0].fact_id == int(berlin_fact["id"])
+                    and history_after_conflict.hits[0].status == "superseded",
+                    {
+                        "hit_fact_ids": [hit.fact_id for hit in history_after_conflict.hits],
+                        "hit_statuses": [hit.status for hit in history_after_conflict.hits],
+                        "hit_cities": [hit.payload.get("city") for hit in history_after_conflict.hits],
+                    },
+                )
+                add_check(
+                    "stale_superseded_fact_excluded_from_current",
+                    "The stale superseded value should not appear in current-mode retrieval.",
+                    int(berlin_fact["id"]) not in [hit.fact_id for hit in current_after_conflict.hits],
+                    {
+                        "stale_fact_id": int(berlin_fact["id"]),
+                        "current_hit_fact_ids": [hit.fact_id for hit in current_after_conflict.hits],
+                    },
+                )
+
+                consolidation.mark_deleted(
+                    conn,
+                    fact_id=int(lisbon_fact["id"]),
+                    reason="personal memory evolution eval delete",
+                )
+                current_after_delete = retrieve_residence(
+                    conn,
+                    query="Where does Memory Evolution Eval live?",
+                    temporal_mode="current",
+                )
+                add_check(
+                    "delete_hides_fact_from_retrieval",
+                    "Deleted facts should not be retrieved as current facts.",
+                    int(lisbon_fact["id"]) not in [hit.fact_id for hit in current_after_delete.hits],
+                    {
+                        "deleted_fact_id": int(lisbon_fact["id"]),
+                        "current_hit_fact_ids": [hit.fact_id for hit in current_after_delete.hits],
+                    },
+                )
+
+                restored = consolidation.restore(
+                    conn,
+                    fact_id=int(lisbon_fact["id"]),
+                    reason="personal memory evolution eval restore",
+                )
+                current_after_restore = retrieve_residence(
+                    conn,
+                    query="Where does Memory Evolution Eval live?",
+                    temporal_mode="current",
+                )
+                add_check(
+                    "restore_deleted_fact_retrievable",
+                    "A restored fact should become retrievable again.",
+                    restored["status"] == "active"
+                    and bool(current_after_restore.hits)
+                    and current_after_restore.hits[0].fact_id == int(lisbon_fact["id"]),
+                    {
+                        "restored_status": restored["status"],
+                        "current_hit_fact_ids": [hit.fact_id for hit in current_after_restore.hits],
+                    },
+                )
+
+                supersede_operation = conn.execute(
+                    """
+                    SELECT id
+                    FROM memory_operations
+                    WHERE target_fact_id = ? AND operation_type = 'superseded'
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (int(berlin_fact["id"]),),
+                ).fetchone()
+                if supersede_operation is None:
+                    raise RuntimeError("memory evolution fixture did not record supersede operation")
+                consolidation.rollback(
+                    conn,
+                    operation_id=int(supersede_operation["id"]),
+                    reason="personal memory evolution eval rollback",
+                )
+                facts_after_rollback = self._personal_evolution_residence_facts(conn, person_id=person_id)
+                berlin_after_rollback = next(
+                    (fact for fact in facts_after_rollback if fact["payload"].get("city") == "Berlin"),
+                    None,
+                )
+                lisbon_after_rollback = next(
+                    (fact for fact in facts_after_rollback if fact["payload"].get("city") == "Lisbon"),
+                    None,
+                )
+                current_after_rollback = retrieve_residence(
+                    conn,
+                    query="Where does Memory Evolution Eval live?",
+                    temporal_mode="current",
+                )
+                active_after_rollback = [fact for fact in facts_after_rollback if fact["status"] == "active"]
+                add_check(
+                    "rollback_restores_previous_active_state",
+                    "Rolling back the supersede should reactivate the previous state and demote the successor.",
+                    berlin_after_rollback is not None
+                    and lisbon_after_rollback is not None
+                    and berlin_after_rollback["status"] == "active"
+                    and lisbon_after_rollback["status"] == "deleted"
+                    and len(active_after_rollback) == 1
+                    and bool(current_after_rollback.hits)
+                    and current_after_rollback.hits[0].fact_id == int(berlin_after_rollback["id"]),
+                    {
+                        "berlin_status": berlin_after_rollback["status"] if berlin_after_rollback else None,
+                        "lisbon_status": lisbon_after_rollback["status"] if lisbon_after_rollback else None,
+                        "active_count": len(active_after_rollback),
+                        "current_hit_fact_ids": [hit.fact_id for hit in current_after_rollback.hits],
+                        "rollback_operation_id": int(supersede_operation["id"]),
+                    },
+                )
+        except Exception as exc:
+            add_check(
+                "memory_evolution_scenario_completed",
+                "The memory evolution fixture should run without runtime exceptions.",
+                False,
+                {"error": f"{type(exc).__name__}: {exc}"},
+            )
+
+        passed = sum(1 for item in checks if item["passed"])
+        missing_required_checks = sorted(set(required_checks) - {item["name"] for item in checks})
+        return {
+            "ok": passed == len(checks) and not missing_required_checks,
+            "total": len(checks),
+            "passed": passed,
+            "failed": len(checks) - passed,
+            "required_checks": required_checks,
+            "missing_required_checks": missing_required_checks,
+            "checks": checks,
+        }
+
     def _personal_case_result(self, *, conn, settings, eval_actor, case: dict[str, Any], route_name: str) -> dict:
         started = time.perf_counter()
         retrieval = self.retrieval_service.retrieve(
@@ -1826,9 +2284,231 @@ class EvalService:
             for group, required in self.PERSONAL_MEMORY_REQUIRED_COUNTS.items()
         }
 
+    def _locomo_like_suite_report(self, goldens_dir: Path, cases: list[dict[str, Any]]) -> dict[str, Any]:
+        manifest_path = goldens_dir / self.LOCOMO_LIKE_MANIFEST_NAME
+        fallback_disclaimer = "Internal LoCoMo-like personal-memory eval; not paper-equivalent."
+        required_coverage = set(self.PERSONAL_MEMORY_COVERAGE_GROUPS)
+        cases_by_conversation: dict[str, list[dict[str, Any]]] = {}
+        cases_missing_conversation_id: list[str] = []
+        for case in cases:
+            conversation_id = str(case.get("conversation_id") or "").strip()
+            if not conversation_id:
+                cases_missing_conversation_id.append(str(case.get("id") or "<unknown>"))
+                continue
+            cases_by_conversation.setdefault(conversation_id, []).append(case)
+
+        def empty_report(error: str) -> dict[str, Any]:
+            return {
+                "manifest_path": str(manifest_path),
+                "benchmark_disclaimer": fallback_disclaimer,
+                "eventual_target_questions": 1000,
+                "conversation_count": 0,
+                "required_conversation_count": self.LOCOMO_LIKE_MIN_CONVERSATIONS,
+                "long_conversation_min_turns": self.LOCOMO_LIKE_DEFAULT_MIN_TURNS,
+                "long_conversation_count": 0,
+                "min_persons_per_conversation": 0,
+                "all_conversations_have_two_or_more_persons": False,
+                "linked_case_count": 0,
+                "total_case_count": len(cases),
+                "all_cases_linked_to_conversations": False,
+                "cases_missing_conversation_id": cases_missing_conversation_id[:50],
+                "case_conversation_ids_missing_from_suite": sorted(cases_by_conversation)[:50],
+                "coverage_dimensions": [],
+                "required_coverage_dimensions": sorted(required_coverage),
+                "missing_coverage_dimensions": sorted(required_coverage),
+                "conversations": [],
+                "ok": False,
+                "error": error,
+            }
+
+        if not manifest_path.exists():
+            return empty_report("locomo_like_manifest_missing")
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            return empty_report(f"locomo_like_manifest_invalid_json:{exc.msg}")
+
+        conversations_file = str(manifest.get("conversations_file") or "").strip()
+        if not conversations_file:
+            return empty_report("locomo_like_conversations_file_missing")
+        conversations_path = goldens_dir / conversations_file
+        if not conversations_path.exists():
+            return empty_report("locomo_like_conversations_file_not_found")
+        try:
+            conversations_payload = json.loads(conversations_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            return empty_report(f"locomo_like_conversations_invalid_json:{exc.msg}")
+        fixtures_raw = conversations_payload.get("conversations")
+        fixtures = fixtures_raw if isinstance(fixtures_raw, list) else []
+        fixtures_by_id = {
+            str(item.get("conversation_id")): item
+            for item in fixtures
+            if isinstance(item, dict) and item.get("conversation_id")
+        }
+
+        conversations_raw = manifest.get("conversations")
+        conversations = conversations_raw if isinstance(conversations_raw, list) else []
+        try:
+            min_turns = int(manifest.get("long_conversation_min_turns") or self.LOCOMO_LIKE_DEFAULT_MIN_TURNS)
+        except (TypeError, ValueError):
+            min_turns = self.LOCOMO_LIKE_DEFAULT_MIN_TURNS
+        try:
+            eventual_target_questions = int(manifest.get("eventual_target_questions") or 1000)
+        except (TypeError, ValueError):
+            eventual_target_questions = 1000
+
+        coverage_dimensions: set[str] = set()
+        conversation_reports: list[dict[str, Any]] = []
+        person_counts: list[int] = []
+        long_conversation_count = 0
+        linked_case_ids: set[str] = set()
+        suite_conversation_ids: set[str] = set()
+
+        for index, item in enumerate(conversations):
+            entry = item if isinstance(item, dict) else {}
+            conversation_id = str(entry.get("conversation_id") or f"conversation_{index + 1}")
+            suite_conversation_ids.add(conversation_id)
+            fixture = fixtures_by_id.get(conversation_id, {})
+            turns_raw = fixture.get("turns", []) if isinstance(fixture, dict) else []
+            turns = turns_raw if isinstance(turns_raw, list) else []
+            try:
+                declared_turn_count = int(entry.get("turn_count") or 0)
+            except (TypeError, ValueError):
+                declared_turn_count = 0
+            actual_turn_count = len(turns)
+            fixture_person_slugs = {
+                str(person).strip()
+                for person in fixture.get("person_slugs", [])
+                if str(person).strip()
+            } if isinstance(fixture, dict) else set()
+            speaker_slugs = {
+                str(turn.get("speaker_slug") or "").strip()
+                for turn in turns
+                if isinstance(turn, dict) and str(turn.get("speaker_slug") or "").strip()
+            }
+            manifest_person_slugs = {
+                str(person).strip()
+                for person in entry.get("person_slugs", [])
+                if str(person).strip()
+            }
+            person_slugs = fixture_person_slugs | speaker_slugs | manifest_person_slugs
+            coverage = {
+                str(name).strip()
+                for name in entry.get("coverage", [])
+                if str(name).strip()
+            }
+            fixture_linked_case_ids = {
+                str(case_id)
+                for case_id in fixture.get("linked_case_ids", [])
+            } if isinstance(fixture, dict) else set()
+            actual_cases = cases_by_conversation.get(conversation_id, [])
+            actual_case_ids = {str(case.get("id") or "") for case in actual_cases}
+            actual_case_person_slugs = {
+                str(case.get("person_slug") or "").strip()
+                for case in actual_cases
+                if str(case.get("person_slug") or "").strip()
+            }
+            linked_case_ids.update(actual_case_ids)
+            coverage_dimensions.update(coverage)
+            person_count = len(person_slugs)
+            person_counts.append(person_count)
+            long_ok = actual_turn_count >= min_turns
+            persons_ok = person_count >= self.LOCOMO_LIKE_MIN_PERSONS_PER_CONVERSATION
+            turns_have_required_persons = len(speaker_slugs) >= self.LOCOMO_LIKE_MIN_PERSONS_PER_CONVERSATION
+            fixture_matches_cases = fixture_linked_case_ids == actual_case_ids
+            cases_match_people = actual_case_person_slugs <= speaker_slugs
+            if long_ok:
+                long_conversation_count += 1
+            conversation_reports.append(
+                {
+                    "conversation_id": conversation_id,
+                    "declared_turn_count": declared_turn_count,
+                    "turn_count": actual_turn_count,
+                    "long_conversation": long_ok,
+                    "person_count": person_count,
+                    "persons_ok": persons_ok,
+                    "speaker_count": len(speaker_slugs),
+                    "turns_have_required_persons": turns_have_required_persons,
+                    "linked_case_count": len(actual_case_ids),
+                    "fixture_linked_case_count": len(fixture_linked_case_ids),
+                    "fixture_matches_cases": fixture_matches_cases,
+                    "cases_match_people": cases_match_people,
+                    "coverage": sorted(coverage),
+                    "ok": (
+                        long_ok
+                        and persons_ok
+                        and turns_have_required_persons
+                        and fixture_matches_cases
+                        and cases_match_people
+                        and bool(coverage & required_coverage)
+                    ),
+                }
+            )
+
+        missing_coverage = sorted(required_coverage - coverage_dimensions)
+        case_conversation_ids_missing_from_suite = sorted(set(cases_by_conversation) - suite_conversation_ids)
+        conversations_without_cases = sorted(
+            item["conversation_id"] for item in conversation_reports if item["linked_case_count"] == 0
+        )
+        all_have_two_persons = bool(conversation_reports) and all(item["persons_ok"] for item in conversation_reports)
+        all_turns_have_required_persons = bool(conversation_reports) and all(
+            item["turns_have_required_persons"] for item in conversation_reports
+        )
+        all_fixtures_match_cases = bool(conversation_reports) and all(
+            item["fixture_matches_cases"] for item in conversation_reports
+        )
+        all_cases_match_people = bool(conversation_reports) and all(
+            item["cases_match_people"] for item in conversation_reports
+        )
+        all_cases_linked = (
+            len(linked_case_ids) == len(cases)
+            and not cases_missing_conversation_id
+            and not case_conversation_ids_missing_from_suite
+            and not conversations_without_cases
+        )
+        ok = (
+            len(conversation_reports) >= self.LOCOMO_LIKE_MIN_CONVERSATIONS
+            and long_conversation_count >= self.LOCOMO_LIKE_MIN_CONVERSATIONS
+            and all_have_two_persons
+            and all_turns_have_required_persons
+            and all_fixtures_match_cases
+            and all_cases_match_people
+            and all_cases_linked
+            and not missing_coverage
+        )
+        return {
+            "manifest_path": str(manifest_path),
+            "conversations_path": str(conversations_path),
+            "schema_version": manifest.get("schema_version"),
+            "benchmark_disclaimer": str(manifest.get("benchmark_disclaimer") or fallback_disclaimer),
+            "eventual_target_questions": eventual_target_questions,
+            "conversation_count": len(conversation_reports),
+            "required_conversation_count": self.LOCOMO_LIKE_MIN_CONVERSATIONS,
+            "long_conversation_min_turns": min_turns,
+            "long_conversation_count": long_conversation_count,
+            "min_persons_per_conversation": min(person_counts) if person_counts else 0,
+            "all_conversations_have_two_or_more_persons": all_have_two_persons,
+            "all_turns_have_two_or_more_speakers": all_turns_have_required_persons,
+            "linked_case_count": len(linked_case_ids),
+            "total_case_count": len(cases),
+            "all_cases_linked_to_conversations": all_cases_linked,
+            "cases_missing_conversation_id": cases_missing_conversation_id[:50],
+            "case_conversation_ids_missing_from_suite": case_conversation_ids_missing_from_suite[:50],
+            "conversations_without_cases": conversations_without_cases[:50],
+            "all_fixture_case_links_match": all_fixtures_match_cases,
+            "all_case_persons_present_in_turns": all_cases_match_people,
+            "coverage_dimensions": sorted(coverage_dimensions),
+            "required_coverage_dimensions": sorted(required_coverage),
+            "missing_coverage_dimensions": missing_coverage,
+            "conversations": conversation_reports,
+            "ok": ok,
+        }
+
     def _personal_metrics(
         self,
         *,
+        goldens_dir: Path,
         cases: list[dict[str, Any]],
         results: list[dict],
         source_hard_checks: list[dict],
@@ -1851,8 +2531,14 @@ class EvalService:
         )
         source_hard_case_failures = sum(1 for item in source_hard_checks if not item["passed"])
         metrics = {
+            "overall_accuracy": round(sum(1 for item in results if item["passed"]) / len(results), 4) if results else 0.0,
             "core_memory_accuracy": self._personal_pass_rate(results=results, group="core_fact"),
             "adversarial_robustness": self._personal_pass_rate(results=results, group="adversarial_false_premise"),
+            "temporal_accuracy": self._personal_case_pass_rate(
+                cases=cases,
+                results=results,
+                predicate=lambda item: item.get("group") == "temporal",
+            ),
             "cross_person_contamination": cross_person_contamination,
             "unsupported_premise_answered_as_fact": unsupported_premise_answered_as_fact,
             "evidence_missing_on_supported_answers": evidence_missing_on_supported_answers,
@@ -1874,6 +2560,11 @@ class EvalService:
             "source_hard_case_failures": source_hard_case_failures,
         }
         checks = {
+            "overall_accuracy": {
+                "value": metrics["overall_accuracy"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["overall_accuracy"],
+                "ok": metrics["overall_accuracy"] >= self.PERSONAL_MEMORY_THRESHOLDS["overall_accuracy"],
+            },
             "core_memory_accuracy": {
                 "value": metrics["core_memory_accuracy"],
                 "threshold": self.PERSONAL_MEMORY_THRESHOLDS["core_memory_accuracy"],
@@ -1883,6 +2574,11 @@ class EvalService:
                 "value": metrics["adversarial_robustness"],
                 "threshold": self.PERSONAL_MEMORY_THRESHOLDS["adversarial_robustness"],
                 "ok": metrics["adversarial_robustness"] >= self.PERSONAL_MEMORY_THRESHOLDS["adversarial_robustness"],
+            },
+            "temporal_accuracy": {
+                "value": metrics["temporal_accuracy"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["temporal_accuracy"],
+                "ok": metrics["temporal_accuracy"] >= self.PERSONAL_MEMORY_THRESHOLDS["temporal_accuracy"],
             },
             "cross_person_contamination": {
                 "value": metrics["cross_person_contamination"],
@@ -1938,11 +2634,74 @@ class EvalService:
                     "pass_rate": self._personal_pass_rate(results=results, group=group),
                 }
             )
+        coverage = {}
+        for name, groups in self.PERSONAL_MEMORY_COVERAGE_GROUPS.items():
+            covered_cases = [item for item in results if item["group"] in groups]
+            coverage[name] = {
+                "groups": sorted(groups),
+                "total": len(covered_cases),
+                "passed": sum(1 for item in covered_cases if item["passed"]),
+                "covered": bool(covered_cases),
+                "pass_rate": round(sum(1 for item in covered_cases if item["passed"]) / len(covered_cases), 4)
+                if covered_cases
+                else 0.0,
+            }
+        locomo_like_suite = self._locomo_like_suite_report(goldens_dir, cases)
+        count_checks.update(
+            {
+                "locomo_like_conversation_count": {
+                    "value": locomo_like_suite["conversation_count"],
+                    "required": locomo_like_suite["required_conversation_count"],
+                    "ok": locomo_like_suite["conversation_count"] >= locomo_like_suite["required_conversation_count"],
+                },
+                "locomo_like_long_conversations": {
+                    "value": locomo_like_suite["long_conversation_count"],
+                    "required": locomo_like_suite["required_conversation_count"],
+                    "ok": locomo_like_suite["long_conversation_count"]
+                    >= locomo_like_suite["required_conversation_count"],
+                },
+                "locomo_like_persons_per_conversation": {
+                    "value": locomo_like_suite["min_persons_per_conversation"],
+                    "required": self.LOCOMO_LIKE_MIN_PERSONS_PER_CONVERSATION,
+                    "ok": locomo_like_suite["all_conversations_have_two_or_more_persons"],
+                },
+                "locomo_like_coverage_dimensions": {
+                    "value": sorted(
+                        set(locomo_like_suite["required_coverage_dimensions"])
+                        - set(locomo_like_suite["missing_coverage_dimensions"])
+                    ),
+                    "required": locomo_like_suite["required_coverage_dimensions"],
+                    "ok": not locomo_like_suite["missing_coverage_dimensions"],
+                },
+                "locomo_like_cases_linked_to_conversations": {
+                    "value": locomo_like_suite["linked_case_count"],
+                    "required": locomo_like_suite["total_case_count"],
+                    "ok": locomo_like_suite["all_cases_linked_to_conversations"],
+                },
+            }
+        )
         latencies = [int(item["latency_ms"]) for item in results]
         return {
             "metrics": metrics,
             "policy_checks": checks,
             "dataset_count_checks": count_checks,
+            "coverage": coverage,
+            "locomo_like_scope": {
+                "benchmark_disclaimer": "Internal LoCoMo-like personal-memory eval; not paper-equivalent.",
+                "current_questions": len(results),
+                "eventual_target_questions": locomo_like_suite["eventual_target_questions"],
+                "conversation_suite": locomo_like_suite,
+                "private_gate_thresholds": {
+                    "overall_accuracy_min": self.PERSONAL_MEMORY_THRESHOLDS["overall_accuracy"],
+                    "core_memory_accuracy_min": self.PERSONAL_MEMORY_THRESHOLDS["core_memory_accuracy"],
+                    "adversarial_robustness_min": self.PERSONAL_MEMORY_THRESHOLDS["adversarial_robustness"],
+                    "temporal_accuracy_min": self.PERSONAL_MEMORY_THRESHOLDS["temporal_accuracy"],
+                    "cross_person_contamination_max": self.PERSONAL_MEMORY_THRESHOLDS["cross_person_contamination"],
+                    "unsupported_premise_answered_as_fact_max": self.PERSONAL_MEMORY_THRESHOLDS[
+                        "unsupported_premise_answered_as_fact"
+                    ],
+                },
+            },
             "source_hard_checks_total": len(source_hard_checks),
             "source_hard_checks_passed": sum(1 for item in source_hard_checks if item["passed"]),
             "source_hard_checks": source_hard_checks,
@@ -1970,13 +2729,20 @@ class EvalService:
                 for case in cases
             ]
         results.sort(key=lambda item: (item["group"], item["id"]))
+        memory_evolution_checks = self._personal_memory_evolution_report(project_root)
         source_hard_checks = self._personal_source_hard_checks(cases)
         summary = self._personal_metrics(
+            goldens_dir=goldens_dir,
             cases=cases,
             results=results,
             source_hard_checks=source_hard_checks,
             start_event_index=start_event_index,
         )
+        summary["policy_checks"]["memory_evolution_update_fidelity"] = {
+            "value": memory_evolution_checks["passed"],
+            "threshold": memory_evolution_checks["total"],
+            "ok": memory_evolution_checks["ok"],
+        }
         failures = [item for item in results if not item["passed"]]
         ok = (
             not failures
@@ -1992,6 +2758,7 @@ class EvalService:
             "failed": len(failures),
             "ok": ok,
             **summary,
+            "memory_evolution_checks": memory_evolution_checks,
             "failures": failures[:50],
             "cases": results,
         }

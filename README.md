@@ -14,7 +14,7 @@ This repository should not be read as:
 - a broad public SaaS-style multi-user product beyond the currently documented API and operating model
 - a claim that Docker Compose is the preferred day-to-day runtime path on this machine
 - a claim that the strict Docker Compose requirement from the original execution brief has already been waived
-- a claim that WhatsApp or Telegram export parsers are already part of the current repo-local ingestion contract
+- a claim that every edge case in every messenger export variant has production-grade parser coverage
 
 The current honest status is:
 
@@ -27,9 +27,9 @@ No release claim in this repository should be read as a universal memory substra
 
 Current repo-local ingestion scope:
 
-- implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`
-- explicitly not part of the current repo-local contract: `WhatsApp`, `Telegram`
-- `WhatsApp` / `Telegram` remain roadmap/reference-track parser targets and should not be implied as currently shipped support
+- implemented and supported now: `text`, `markdown`, `chat`, `json`, `csv`, `email`, `pdf`, `html`, `whatsapp`, `telegram`
+- WhatsApp and Telegram export parsers are part of the current repo-local ingestion contract for common export shapes
+- messenger parsing currently covers common WhatsApp text exports plus Telegram JSON/HTML exports; unusual export variants should be validated with fixtures before making broader claims
 
 ## Stage A Actor Contract
 
@@ -52,12 +52,12 @@ For the current codebase:
 Implementation deviations and known scope limits are tracked in [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md).
 
 Read that file before making any claim that the repository strictly satisfies the original execution brief.
-Read that file together with [docs/synthius_mem_execution_brief.md](docs/synthius_mem_execution_brief.md) and [docs/2026-04-21_memco_release_readiness_gate.md](docs/2026-04-21_memco_release_readiness_gate.md), which are the current source of truth for the repo-local contract and the private/original-brief split.
+Read that file together with [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md), [docs/PRIVATE_SINGLE_USER_CONTRACT.md](docs/PRIVATE_SINGLE_USER_CONTRACT.md), [docs/PDF_PARITY_GAPS.md](docs/PDF_PARITY_GAPS.md), [docs/synthius_mem_execution_brief.md](docs/synthius_mem_execution_brief.md), and [docs/2026-04-21_memco_release_readiness_gate.md](docs/2026-04-21_memco_release_readiness_gate.md), which separate the current checkout status, private repo-local contract, PDF/reference gaps, and release gate.
 
 The explicit contract decision for current repo-local work lives in [docs/2026-04-22_memco_contract_decision.md](docs/2026-04-22_memco_contract_decision.md).
 The original execution brief is kept as a reference/backlog-only track for current repo-local release management, documented in [docs/2026-04-22_memco_original_brief_track_decision.md](docs/2026-04-22_memco_original_brief_track_decision.md).
-The fastest repo-local status summary now lives in [docs/2026-04-22_memco_repo_local_status_snapshot.md](docs/2026-04-22_memco_repo_local_status_snapshot.md).
-The current private release closure lives in [docs/2026-04-24_memco_release_closure.md](docs/2026-04-24_memco_release_closure.md).
+The fastest current status summary now lives in [docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).
+Older repo-local status snapshots and release closures are historical evidence, not current verdicts.
 
 ## Single-User Setup And Use
 
@@ -82,6 +82,15 @@ uv run memco fact-rollback --latest-operation --operation-type superseded --reas
 
 Current CLI flow supports the private single-user operator path end to end, including `source -> conversation` via `conversation-import`.
 
+For common local imports, the CLI also supports shortcut forms that keep the source type in the command itself:
+
+```bash
+uv run memco import whatsapp /absolute/path/to/WhatsApp.txt --root "$ROOT"
+uv run memco import telegram /absolute/path/to/result.json --root "$ROOT"
+uv run memco import pdf /absolute/path/to/document.pdf --root "$ROOT"
+uv run memco import note --owner martin /absolute/path/to/note.txt --root "$ROOT"
+```
+
 In the simple single-user path, `--latest-source`, `--latest-conversation`, `--latest-candidate`, `--latest-target-fact`, and `--latest-operation` reduce manual ID handoff between the main operator steps.
 
 For `candidate-publish`, `--latest-candidate` means the literal newest candidate in the workspace. If that newest candidate is not publishable yet, the command fails closed instead of silently publishing an older one.
@@ -93,9 +102,10 @@ For review-driven paths, the same pattern now works through `review-resolve appr
 Typical review-driven branch:
 
 ```bash
-uv run memco review-list --status pending --person-slug alice --root "$ROOT"
+uv run memco review pending --person-slug alice --root "$ROOT"
 uv run memco review-dashboard --status pending --person-slug alice --root "$ROOT"
 uv run memco review-resolve approved --latest-review --person-slug alice --candidate-person-slug alice --candidate-target-person-slug bob --publish --reason "resolved review path" --root "$ROOT"
+uv run memco publish --all-safe --person-slug alice --root "$ROOT"
 ```
 
 In mixed workspaces, `retrieval-log-list --person-slug alice` lets the operator inspect one person’s redacted retrieval activity without scanning the whole workspace log stream.
@@ -113,13 +123,14 @@ The required private agent-memory pilot sequence lives in [docs/PRIVATE_PILOT_RU
 Backup/export/restore checks are available through the backup command group:
 
 ```bash
+uv run memco backup runbook --root "$ROOT"
 uv run memco backup export --mode audit --output var/backups/memco-audit-export.json --root "$ROOT"
 uv run memco backup verify var/backups/memco-audit-export.json
 MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup export --mode full --encrypted --output var/backups/memco-full-backup.json.enc --root "$ROOT"
 MEMCO_BACKUP_PASSPHRASE='replace-with-local-passphrase' uv run memco backup restore-dry-run var/backups/memco-full-backup.json.enc
 ```
 
-Audit exports redact raw source/message/evidence text. Full encrypted exports are the restore-dry-run path and should remain private runtime artifacts.
+Native SQLite and Postgres dump/restore commands are documented in [docs/BACKUP_RESTORE_RUNBOOK.md](docs/BACKUP_RESTORE_RUNBOOK.md). Audit exports redact raw source/message/evidence text. Full encrypted exports are the restore-dry-run path and should remain private runtime artifacts.
 
 Eval and chat service wiring now expose production-style `token_accounting.production_accounting`: stage tokens for extraction/planner/retrieval/answer, retrieved-context tokens, amortized extraction cost per candidate, and cost/token rollups by source, person, and domain. Unknown live-provider pricing stays `null` with `cost_status: "unknown"` instead of being reported as zero. Attribution groups are non-additive: if one event references multiple sources or domains, the same event is counted in each relevant group.
 
@@ -203,6 +214,34 @@ uv run memco persona-export --person-slug alice --detail-policy exhaustive --roo
 ```
 
 On the HTTP side, the same contract is exposed through `detail_policy` in the JSON request body for `/v1/retrieve`, `/v1/chat`, and `/v1/persona/export`.
+
+For agent integrations, prefer the structured retrieval-only context endpoint over `/v1/chat`:
+
+```bash
+curl -sS -X POST "$MEMCO_API_URL/v1/agent/memory-context" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "person_slug": "alice",
+    "query": "Where does Alice live?",
+    "mode": "retrieval_only",
+    "max_facts": 10,
+    "include_evidence": true,
+    "actor": {
+      "actor_id": "dev-owner",
+      "actor_type": "owner",
+      "auth_token": "from local ignored var/config/settings.yaml actor_policies",
+      "can_view_sensitive": true
+    }
+  }'
+```
+
+That endpoint returns `memory_context` plus `instructions_for_agent` and deliberately does not return a natural-language `answer`.
+
+For local operator inspection, `memory-explorer` gives one JSON snapshot with facts, evidence, review candidates, lifecycle changes, rollback hints, and domain filters:
+
+```bash
+uv run memco memory-explorer --person-slug alice --domain biography --root "$ROOT"
+```
 
 The quick repo-local release gate can be run locally with:
 

@@ -357,6 +357,26 @@ def test_extraction_service_from_settings_uses_configured_mock_provider():
     assert candidates[0]["payload"]["city"] == "Lisbon"
 
 
+def test_extraction_service_mock_provider_combined_legacy_mode_preserves_combined_output(tmp_path):
+    settings = Settings(root=tmp_path / "mock-combined-legacy")
+    settings.runtime.profile = "fixture"
+    settings.llm.provider = "mock"
+    settings.llm.allow_mock_provider = True
+    settings.extraction.mode = "combined_legacy"
+
+    service = ExtractionService.from_settings(settings)
+    candidates = service.extract_candidates(
+        source_text="I moved to Lisbon. I prefer coffee. I use Python.",
+        person_hint="Alice",
+    )
+
+    domains = {candidate["domain"] for candidate in candidates}
+    assert {"biography", "preferences", "work"} <= domains
+    summary = service.usage_tracker.summary()
+    assert summary["deterministic_usage"]["operation_count"] == 1
+    assert summary["production_accounting"]["by_domain"]["combined_legacy"]["operation_count"] == 1
+
+
 def test_extraction_service_from_settings_defaults_to_openai_compatible_runtime():
     settings = Settings(root=Path("/tmp/memco-test-runtime-default"))
 
@@ -496,9 +516,9 @@ def test_extraction_service_from_settings_uses_configured_openai_compatible_prov
     assert candidates[0]["domain"] == "biography"
     assert candidates[0]["payload"]["city"] == "Lisbon"
     summary = service.usage_tracker.summary()
-    assert summary["llm_usage"]["operation_count"] == 1
-    assert summary["llm_usage"]["input_tokens"] == 11
-    assert summary["llm_usage"]["output_tokens"] == 7
+    assert summary["llm_usage"]["operation_count"] == 5
+    assert summary["llm_usage"]["input_tokens"] == 55
+    assert summary["llm_usage"]["output_tokens"] == 35
     assert summary["deterministic_usage"]["operation_count"] == 0
 
 
@@ -569,9 +589,9 @@ def test_extraction_service_openai_compatible_live_http_path():
         assert candidates[0]["domain"] == "biography"
         assert candidates[0]["payload"]["city"] == "Lisbon"
         summary = service.usage_tracker.summary()
-        assert summary["llm_usage"]["operation_count"] == 1
-        assert summary["llm_usage"]["input_tokens"] == 11
-        assert summary["llm_usage"]["output_tokens"] == 7
+        assert summary["llm_usage"]["operation_count"] == 5
+        assert summary["llm_usage"]["input_tokens"] == 55
+        assert summary["llm_usage"]["output_tokens"] == 35
         assert summary["deterministic_usage"]["operation_count"] == 0
     finally:
         server.shutdown()
@@ -628,7 +648,7 @@ def test_extraction_service_openai_compatible_provider_path_covers_llm_first_reg
         for key, value in payload_expectations.items():
             assert candidates[0]["payload"][key] == value
         summary = service.usage_tracker.summary()
-        assert summary["llm_usage"]["operation_count"] == 1
+        assert summary["llm_usage"]["operation_count"] == 5
         assert summary["deterministic_usage"]["operation_count"] == 0
     finally:
         server.shutdown()

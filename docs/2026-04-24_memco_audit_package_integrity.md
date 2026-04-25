@@ -1,8 +1,11 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Audit Package Integrity Check
 
 Date: 2026-04-24
 Status: historical pre-remediation audit integrity check, not current release verdict.
-Current release verdict lives in `docs/2026-04-24_memco_release_closure.md`.
+Current verdict: see `docs/CURRENT_STATUS.md`.
 Audit package index: `docs/2026-04-24_memco_audit_package_index.md`
 Manifest: `docs/2026-04-24_memco_audit_package_manifest.json`
 
@@ -85,4 +88,4 @@ The pre-remediation audit verdict was:
 NO-GO for honest private Hermes/API-backed use until P0 blockers are fixed and fresh release-readiness proof is produced.
 ```
 
-For the current remediated private-release verdict, use `docs/2026-04-24_memco_release_closure.md`.
+For the current checkout status, use `docs/CURRENT_STATUS.md`.

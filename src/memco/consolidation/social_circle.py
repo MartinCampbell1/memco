@@ -6,6 +6,17 @@ from memco.consolidation.base import ConsolidationPolicy
 class SocialCircleConsolidationPolicy(ConsolidationPolicy):
     domain = "social_circle"
 
+    def is_current_state(self, category: str) -> bool:
+        return category != "relationship_event"
+
+    def current_state_key(self, *, category: str, canonical_key: str, payload: dict) -> str:
+        if not self.is_current_state(category):
+            return ""
+        target = self._first_value(payload, "target_person_id", "target_label", "related_person_name")
+        if target:
+            return f"relationship:{target}"
+        return super().current_state_key(category=category, canonical_key=canonical_key, payload=payload)
+
     def semantic_duplicate_key(self, *, category: str, payload: dict) -> str:
         if category == "relationship_event":
             return f"relationship_event:{self._first_value(payload, 'target_person_id', 'target_label', 'related_person_name')}:{self._first_value(payload, 'event')}"

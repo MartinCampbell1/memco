@@ -5,8 +5,10 @@ import pytest
 from memco.db import get_connection
 from memco.models.memory_fact import MemoryFactInput
 from memco.models.retrieval import RetrievalRequest
+from memco.repositories.conversation_repository import ConversationRepository
 from memco.repositories.fact_repository import FactRepository
 from memco.repositories.source_repository import SourceRepository
+from memco.retrievers import build_domain_retrievers
 from memco.services.consolidation_service import ConsolidationService
 from memco.services.retrieval_service import RetrievalService
 
@@ -94,6 +96,69 @@ def _seed_alice_experience_fact(settings, *, payload: dict, summary: str, event_
                 source_id=source_id,
                 quote_text=summary,
             ),
+        )
+
+
+def _seed_alice_conversation_chunk(settings, *, text: str) -> None:
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    conversation_repo = ConversationRepository()
+    text_key = str(sum(ord(char) for char in text))
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-fallback-chat.json",
+            source_type="conversation",
+            origin_uri="/tmp/alice-fallback-chat.json",
+            title="alice-fallback-chat",
+            sha256=f"alice-fallback-chat-{text_key}",
+            parsed_text=text,
+        )
+        conversation_id = conversation_repo.upsert_conversation(
+            conn,
+            workspace_slug="default",
+            source_id=source_id,
+            conversation_uid=f"alice-fallback-chat-{text_key}",
+            title="alice fallback chat",
+            started_at="2026-04-21T10:00:00Z",
+            ended_at="2026-04-21T10:00:00Z",
+        )
+        conversation_repo.replace_messages(
+            conn,
+            conversation_id=conversation_id,
+            messages=[
+                {
+                    "role": "user",
+                    "speaker_label": "Alice",
+                    "speaker_key": "alice",
+                    "speaker_person_id": int(person["id"]),
+                    "occurred_at": "2026-04-21T10:00:00Z",
+                    "text": text,
+                }
+            ],
+        )
+        conversation_repo.replace_chunks(
+            conn,
+            conversation_id=conversation_id,
+            source_id=source_id,
+            chunks=[
+                {
+                    "start_message_index": 0,
+                    "end_message_index": 0,
+                    "text": text,
+                    "token_count": len(text.split()),
+                    "locator": {"message_index": 0},
+                }
+            ],
         )
 
 
@@ -1337,6 +1402,48 @@ def test_retrieve_refuses_subject_binding_mismatch(settings):
     assert result.unsupported_claims == ["Query subject does not match requested person."]
 
 
+def test_retrieve_does_not_use_raw_fallback_for_explicit_domain_mismatch(settings):
+    _seed_alice_conversation_chunk(settings, text="Alice: I live in Lisbon.")
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                domain="work",
+                query="Where does Alice live?",
+            ),
+        )
+
+    assert result.hits == []
+    assert result.fallback_hits == []
+    assert result.support_level == "unsupported"
+    assert result.answerable is False
+
+
+def test_retrieve_does_not_use_raw_fallback_for_false_premise_query(settings):
+    _seed_alice_conversation_chunk(settings, text="Alice: I live in Lisbon.")
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Does Alice live in Berlin?",
+            ),
+        )
+
+    assert result.hits == []
+    assert result.fallback_hits == []
+    assert result.support_level == "unsupported"
+    assert result.answerable is False
+    assert any("Berlin" in claim for claim in result.unsupported_claims)
+
+
 def test_retrieve_marks_contradicted_support_for_conflicting_current_fact(settings):
     fact_repo = FactRepository()
     source_repo = SourceRepository()
@@ -1983,3 +2090,163 @@ def test_retrieve_applies_stale_penalty_for_older_active_facts(settings):
 
     assert len(result.hits) >= 2
     assert result.hits[0].payload["skill"] == "Rust"
+
+
+def test_domain_retrievers_expose_category_rag_contracts():
+    retrievers = build_domain_retrievers()
+
+    assert {"biography", "preferences", "social_circle", "work", "experiences", "psychometrics"} <= set(retrievers)
+    assert "city" in retrievers["biography"].payload_fields["residence"]
+    assert "value" in retrievers["preferences"].payload_fields["preference"]
+    assert "target_label" in retrievers["social_circle"].payload_fields["relationship"]
+    assert "event_at" in retrievers["experiences"].payload_fields["event"]
+    assert retrievers["psychometrics"].factual is False
+    assert retrievers["work"].category_sequence("tool")[1] == "skill"
+
+
+def test_relationship_residence_multi_hop_retrieves_related_person_residence(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        alice = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        maria = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Maria",
+            slug="maria",
+            person_type="human",
+            aliases=["Maria"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-maria-residence.md",
+            source_type="note",
+            origin_uri="/tmp/alice-maria-residence.md",
+            title="alice-maria-residence",
+            sha256="alice-maria-residence-sha",
+            parsed_text="Alice's sister is Maria. Maria lives in Porto.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(alice["id"]),
+                domain="biography",
+                category="family",
+                subcategory="sister",
+                canonical_key="alice:biography:family:sister:maria",
+                payload={"relation": "sister", "name": "Maria", "target_person_id": int(maria["id"])},
+                summary="Alice's sister is Maria.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice's sister is Maria.",
+            ),
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(maria["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="maria:biography:residence:porto",
+                payload={"city": "Porto"},
+                summary="Maria lives in Porto.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:05:00Z",
+                source_id=source_id,
+                quote_text="Maria lives in Porto.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Who is Alice's sister and where does she live?",
+                limit=5,
+            ),
+        )
+
+    assert result.support_level == "supported"
+    assert result.answerable is True
+    assert any(hit.category == "family" and hit.payload["name"] == "Maria" for hit in result.hits)
+    assert any(hit.category == "residence" and hit.payload["city"] == "Porto" for hit in result.hits)
+
+
+def test_relationship_residence_multi_hop_reports_missing_related_residence(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+
+    with get_connection(settings.db_path) as conn:
+        alice = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        maria = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Maria",
+            slug="maria",
+            person_type="human",
+            aliases=["Maria"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/alice-maria-no-residence.md",
+            source_type="note",
+            origin_uri="/tmp/alice-maria-no-residence.md",
+            title="alice-maria-no-residence",
+            sha256="alice-maria-no-residence-sha",
+            parsed_text="Alice's sister is Maria.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(alice["id"]),
+                domain="biography",
+                category="family",
+                subcategory="sister",
+                canonical_key="alice:biography:family:sister:maria",
+                payload={"relation": "sister", "name": "Maria", "target_person_id": int(maria["id"])},
+                summary="Alice's sister is Maria.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice's sister is Maria.",
+            ),
+        )
+        result = retrieval.retrieve(
+            conn,
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Who is Alice's sister and where does she live?",
+                limit=5,
+            ),
+        )
+
+    assert result.support_level == "partial"
+    assert result.answerable is False
+    assert any(hit.category == "family" and hit.payload["name"] == "Maria" for hit in result.hits)
+    assert any("Maria" in claim for claim in result.unsupported_claims)

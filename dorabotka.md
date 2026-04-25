@@ -1,7 +1,10 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
  ТЗ на завершающую доработку Memco
 
    Status: historical remediation plan, not current release verdict.
-   Current verdict lives in docs/2026-04-24_memco_release_closure.md and the active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
+   Current verdict: see docs/CURRENT_STATUS.md. The active gate definition lives in docs/2026-04-21_memco_release_readiness_gate.md.
    Keep this file as historical implementation context; do not use it as fresh GO proof without rerunning the current gates.
 
    Цель

@@ -112,7 +112,7 @@ def test_retrieval_logs_store_fallback_refs_without_chunk_text(settings, tmp_pat
         )
         retrieval.retrieve(
             conn,
-            RetrievalRequest(workspace="default", person_slug="alice", query="Did Alice attend PyCon?", actor=actor),
+            RetrievalRequest(workspace="default", person_slug="alice", query="What memories mention attended?", actor=actor),
             settings=loaded_settings,
             route_name="retrieve",
         )

@@ -7,6 +7,7 @@ import re
 from click.testing import CliRunner
 from typer.main import get_command
 
+from memco.artifact_semantics import evaluate_artifact_freshness
 from memco.cli.main import app
 from memco.models.retrieval import RetrievalRequest
 from memco.services.eval_service import EvalService
@@ -14,6 +15,8 @@ from memco.services.planner_service import PlannerService
 
 
 GOLDENS_DIR = Path("eval/personal_memory_goldens")
+LOCOMO_LIKE_MANIFEST = GOLDENS_DIR / EvalService.LOCOMO_LIKE_MANIFEST_NAME
+LOCOMO_LIKE_CONVERSATIONS = GOLDENS_DIR / "locomo_like_conversations.json"
 
 
 def _load_goldens() -> list[dict]:
@@ -26,6 +29,21 @@ def _load_goldens() -> list[dict]:
 
 def test_personal_memory_goldens_cover_required_groups():
     cases = _load_goldens()
+    locomo_manifest = json.loads(LOCOMO_LIKE_MANIFEST.read_text(encoding="utf-8"))
+    locomo_conversation_payload = json.loads(LOCOMO_LIKE_CONVERSATIONS.read_text(encoding="utf-8"))
+    locomo_conversations = locomo_manifest["conversations"]
+    locomo_fixture_by_id = {
+        conversation["conversation_id"]: conversation
+        for conversation in locomo_conversation_payload["conversations"]
+    }
+    cases_by_conversation: dict[str, list[dict]] = {}
+    for item in cases:
+        cases_by_conversation.setdefault(item["conversation_id"], []).append(item)
+    locomo_coverage = {
+        coverage
+        for conversation in locomo_conversations
+        for coverage in conversation["coverage"]
+    }
     counts = {
         group: sum(1 for item in cases if item["group"] == group)
         for group in EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS
@@ -57,6 +75,52 @@ def test_personal_memory_goldens_cover_required_groups():
     assert len(cases) == 680
     assert len({item["id"] for item in cases}) == len(cases)
     assert (GOLDENS_DIR / "realistic_personal_memory_goldens.jsonl").exists()
+    assert LOCOMO_LIKE_MANIFEST.exists()
+    assert LOCOMO_LIKE_CONVERSATIONS.exists()
+    assert locomo_manifest["benchmark_disclaimer"] == "Internal LoCoMo-like personal-memory eval metadata; not paper-equivalent."
+    assert locomo_manifest["eventual_target_questions"] == 1000
+    assert locomo_manifest["conversations_file"] == LOCOMO_LIKE_CONVERSATIONS.name
+    assert len(locomo_conversations) >= 10
+    assert len(locomo_fixture_by_id) == len(locomo_conversations)
+    assert set(cases_by_conversation) == {
+        conversation["conversation_id"]
+        for conversation in locomo_conversations
+    }
+    assert sum(len(items) for items in cases_by_conversation.values()) == len(cases)
+    assert all(
+        len(locomo_fixture_by_id[conversation["conversation_id"]]["turns"])
+        >= locomo_manifest["long_conversation_min_turns"]
+        for conversation in locomo_conversations
+    )
+    assert all(
+        len(
+            {
+                turn["speaker_slug"]
+                for turn in locomo_fixture_by_id[conversation["conversation_id"]]["turns"]
+            }
+        )
+        >= 2
+        for conversation in locomo_conversations
+    )
+    assert all(
+        set(conversation["person_slugs"])
+        == {
+            turn["speaker_slug"]
+            for turn in locomo_fixture_by_id[conversation["conversation_id"]]["turns"]
+        }
+        for conversation in locomo_conversations
+    )
+    assert all(
+        set(locomo_fixture_by_id[conversation["conversation_id"]]["linked_case_ids"])
+        == {item["id"] for item in cases_by_conversation[conversation["conversation_id"]]}
+        for conversation in locomo_conversations
+    )
+    assert all(
+        {item["person_slug"] for item in cases_by_conversation[conversation["conversation_id"]]}
+        <= set(conversation["person_slugs"])
+        for conversation in locomo_conversations
+    )
+    assert set(EvalService.PERSONAL_MEMORY_COVERAGE_GROUPS) <= locomo_coverage
     assert {item["group"] for item in realistic_cases} == set(EvalService.PERSONAL_MEMORY_REQUIRED_COUNTS)
     assert len(realistic_cases) == 300
     assert scenario_counts == {
@@ -137,8 +201,10 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["failures"] == []
     assert all(item["ok"] for item in result["policy_checks"].values())
     assert all(item["ok"] for item in result["dataset_count_checks"].values())
+    assert result["metrics"]["overall_accuracy"] >= 0.90
     assert result["metrics"]["core_memory_accuracy"] >= 0.95
     assert result["metrics"]["adversarial_robustness"] >= 0.98
+    assert result["metrics"]["temporal_accuracy"] >= 0.90
     assert result["metrics"]["cross_person_contamination"] == 0
     assert result["metrics"]["unsupported_premise_answered_as_fact"] == 0
     assert result["metrics"]["evidence_missing_on_supported_answers"] == 0
@@ -148,6 +214,27 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["metrics"]["source_hard_case_failures"] == 0
     assert result["source_hard_checks_total"] == 6
     assert result["source_hard_checks_passed"] == 6
+    assert result["memory_evolution_checks"]["ok"] is True
+    assert result["memory_evolution_checks"]["failed"] == 0
+    assert result["memory_evolution_checks"]["missing_required_checks"] == []
+    assert {item["name"] for item in result["memory_evolution_checks"]["checks"]} == {
+        "incremental_import_creates_active_fact",
+        "same_conversation_reextract_idempotent",
+        "same_source_reimport_no_duplicate_active_facts",
+        "conflict_update_supersedes_previous_fact",
+        "current_query_returns_new_fact",
+        "historical_query_returns_superseded_fact",
+        "stale_superseded_fact_excluded_from_current",
+        "delete_hides_fact_from_retrieval",
+        "restore_deleted_fact_retrievable",
+        "rollback_restores_previous_active_state",
+    }
+    assert all(item["passed"] for item in result["memory_evolution_checks"]["checks"])
+    assert result["policy_checks"]["memory_evolution_update_fidelity"] == {
+        "value": result["memory_evolution_checks"]["passed"],
+        "threshold": result["memory_evolution_checks"]["total"],
+        "ok": True,
+    }
     assert {item["source_hard_check"] for item in result["source_hard_checks"]} == {
         "combined_tools_split",
         "combined_project_temporal",
@@ -159,6 +246,75 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["policy_checks"]["tool_project_retrieval_pass_rate"]["ok"] is True
     assert result["policy_checks"]["experience_event_retrieval_pass_rate"]["ok"] is True
     assert result["policy_checks"]["source_hard_case_failures"]["ok"] is True
+    assert result["policy_checks"]["overall_accuracy"]["threshold"] == 0.90
+    assert result["policy_checks"]["temporal_accuracy"]["threshold"] == 0.90
+    assert result["coverage"]["single_hop"]["covered"] is True
+    assert result["coverage"]["multi_hop"]["covered"] is True
+    assert result["coverage"]["temporal"]["covered"] is True
+    assert result["coverage"]["open_inference"]["covered"] is True
+    assert result["coverage"]["adversarial_false_premise"]["covered"] is True
+    assert result["coverage"]["cross_person"]["covered"] is True
+    assert result["dataset_count_checks"]["locomo_like_conversation_count"] == {
+        "value": 10,
+        "required": 10,
+        "ok": True,
+    }
+    assert result["dataset_count_checks"]["locomo_like_long_conversations"] == {
+        "value": 10,
+        "required": 10,
+        "ok": True,
+    }
+    assert result["dataset_count_checks"]["locomo_like_persons_per_conversation"]["value"] >= 2
+    assert result["dataset_count_checks"]["locomo_like_persons_per_conversation"]["required"] == 2
+    assert result["dataset_count_checks"]["locomo_like_persons_per_conversation"]["ok"] is True
+    assert result["dataset_count_checks"]["locomo_like_coverage_dimensions"] == {
+        "value": [
+            "adversarial_false_premise",
+            "cross_person",
+            "multi_hop",
+            "open_inference",
+            "single_hop",
+            "temporal",
+        ],
+        "required": [
+            "adversarial_false_premise",
+            "cross_person",
+            "multi_hop",
+            "open_inference",
+            "single_hop",
+            "temporal",
+        ],
+        "ok": True,
+    }
+    assert result["dataset_count_checks"]["locomo_like_cases_linked_to_conversations"] == {
+        "value": 680,
+        "required": 680,
+        "ok": True,
+    }
+    assert result["locomo_like_scope"]["benchmark_disclaimer"] == "Internal LoCoMo-like personal-memory eval; not paper-equivalent."
+    assert result["locomo_like_scope"]["current_questions"] == 680
+    assert result["locomo_like_scope"]["eventual_target_questions"] == 1000
+    assert result["locomo_like_scope"]["conversation_suite"]["ok"] is True
+    assert result["locomo_like_scope"]["conversation_suite"]["conversation_count"] == 10
+    assert result["locomo_like_scope"]["conversation_suite"]["long_conversation_count"] == 10
+    assert result["locomo_like_scope"]["conversation_suite"]["long_conversation_min_turns"] == 50
+    assert result["locomo_like_scope"]["conversation_suite"]["min_persons_per_conversation"] >= 2
+    assert result["locomo_like_scope"]["conversation_suite"]["all_conversations_have_two_or_more_persons"] is True
+    assert result["locomo_like_scope"]["conversation_suite"]["all_turns_have_two_or_more_speakers"] is True
+    assert result["locomo_like_scope"]["conversation_suite"]["linked_case_count"] == 680
+    assert result["locomo_like_scope"]["conversation_suite"]["total_case_count"] == 680
+    assert result["locomo_like_scope"]["conversation_suite"]["all_cases_linked_to_conversations"] is True
+    assert result["locomo_like_scope"]["conversation_suite"]["all_fixture_case_links_match"] is True
+    assert result["locomo_like_scope"]["conversation_suite"]["all_case_persons_present_in_turns"] is True
+    assert result["locomo_like_scope"]["conversation_suite"]["missing_coverage_dimensions"] == []
+    assert result["locomo_like_scope"]["private_gate_thresholds"] == {
+        "overall_accuracy_min": 0.90,
+        "core_memory_accuracy_min": 0.95,
+        "adversarial_robustness_min": 0.98,
+        "temporal_accuracy_min": 0.90,
+        "cross_person_contamination_max": 0,
+        "unsupported_premise_answered_as_fact_max": 0,
+    }
 
 
 def test_personal_memory_eval_fails_when_hard_cases_are_mutated(settings, tmp_path):
@@ -248,3 +404,36 @@ def test_personal_memory_eval_cli_writes_gate_artifact(tmp_path):
     assert artifact["ok"] is True
     assert artifact["total"] == 680
     assert artifact["failed"] == 0
+    assert artifact["artifact_context"]["freshness"]["status"] == "current_at_generation"
+    freshness = evaluate_artifact_freshness(artifact, project_root=Path.cwd().resolve())
+    assert freshness["current_for_checkout_config"] is True
+
+
+def test_personal_memory_eval_root_alias_accepts_realistic_filename(tmp_path):
+    runner = CliRunner()
+    command = get_command(app)
+    runtime_root = tmp_path / "personal-memory-runtime"
+    output_path = tmp_path / "personal-memory-eval-current.json"
+
+    result = runner.invoke(
+        command,
+        [
+            "personal-memory-eval",
+            "--root",
+            str(runtime_root),
+            "--goldens",
+            "realistic_personal_memory_goldens.jsonl",
+            "--output",
+            str(output_path),
+        ],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    artifact = json.loads(output_path.read_text(encoding="utf-8"))
+    assert artifact["artifact_path"] == str(output_path.resolve())
+    assert artifact["goldens_dir"] == str(GOLDENS_DIR.resolve())
+    assert artifact["ok"] is True
+    assert artifact["total"] == 680
+    assert artifact["failed"] == 0
+    assert artifact["artifact_context"]["freshness"]["status"] == "current_at_generation"

@@ -128,7 +128,7 @@ def score_signal_groups(*, signals: list[PsychometricSignal], counterevidence_qu
         score = max(0.2, min(0.95, round(scored_confidence + 0.05 * max(0, evidence_count - 1), 2)))
         threshold = _framework_threshold(framework)
         use_in_generation = (
-            (evidence_count >= 2 or explicit_self_description)
+            evidence_count >= 2
             and not counterevidence_quotes
             and scored_confidence >= threshold
         )

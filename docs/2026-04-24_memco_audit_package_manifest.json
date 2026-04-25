@@ -3,8 +3,9 @@
   "generated_at": "2026-04-24",
   "project_root": "/Users/martin/memco",
   "status": "historical pre-remediation audit baseline, not current release verdict",
-  "current_release_closure": "docs/2026-04-24_memco_release_closure.md",
-  "current_private_verdict": "GO",
+  "current_status": "docs/CURRENT_STATUS.md",
+  "historical_release_closure": "docs/2026-04-24_memco_release_closure.md",
+  "current_private_verdict": "see docs/CURRENT_STATUS.md",
   "audit_scope": "pre-remediation dirty checkout",
   "verdict": {
     "summary": "historical pre-remediation NO-GO baseline",
@@ -13,7 +14,7 @@
     "strict_original_brief": "NO-GO/reference-track until Docker Compose wording is explicitly waived or superseded, and current notes-path drift is fixed"
   },
   "entrypoints": {
-    "read_first": "docs/2026-04-24_memco_release_closure.md",
+    "read_first": "docs/CURRENT_STATUS.md",
     "pre_remediation_audit_index": "docs/2026-04-24_memco_audit_package_index.md",
     "owner_summary_ru": "docs/2026-04-24_memco_final_release_audit_ru.md",
     "compliance_matrix": "docs/2026-04-24_memco_contract_compliance_matrix.md",

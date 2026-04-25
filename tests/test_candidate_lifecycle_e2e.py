@@ -291,7 +291,7 @@ def test_social_circle_rejected_candidate_never_appears(monkeypatch, settings, t
     assert chat.json()["refused"] is True
 
 
-def test_retrieve_returns_fallback_hits_without_promoting_claim(monkeypatch, settings, tmp_path):
+def test_retrieve_blocks_raw_fallback_for_unpublished_yes_no_claim(monkeypatch, settings, tmp_path):
     with get_connection(settings.db_path) as conn:
         FactRepository().upsert_person(
             conn,
@@ -320,9 +320,8 @@ def test_retrieve_returns_fallback_hits_without_promoting_claim(monkeypatch, set
     payload = retrieve.json()
     assert payload["hits"] == []
     assert payload["unsupported_premise_detected"] is True
-    assert payload["support_level"] == "ambiguous"
-    assert len(payload["fallback_hits"]) >= 1
-    assert "PyCon" in payload["fallback_hits"][0]["text"]
+    assert payload["support_level"] == "unsupported"
+    assert payload["fallback_hits"] == []
 
 
 def test_duplicate_publish_merges_evidence(monkeypatch, settings, tmp_path):

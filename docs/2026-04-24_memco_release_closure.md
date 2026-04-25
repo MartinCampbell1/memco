@@ -1,7 +1,10 @@
+Historical document. Not current verdict.
+Current verdict: see docs/CURRENT_STATUS.md
+
 # Memco Release Closure
 
 Date: 2026-04-24
-Status: current private release closure
+Status: historical dated private release closure, not current checkout verdict
 
 ## Verdict
 

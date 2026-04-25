@@ -40,6 +40,9 @@ class _Phase7OpenAICompatibleHandler(BaseHTTPRequestHandler):
             content = {
                 "answer": "Alice lives in Lisbon.",
                 "support_level": "supported",
+                "unsupported_claims": [],
+                "answerable": True,
+                "refused": False,
                 "used_fact_ids": [1],
                 "used_evidence_ids": [21],
             }
