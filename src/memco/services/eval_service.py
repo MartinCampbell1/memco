@@ -28,6 +28,7 @@ from memco.services.consolidation_service import ConsolidationService
 from memco.services.conversation_ingest_service import ConversationIngestService
 from memco.services.extraction_service import ExtractionService
 from memco.services.ingest_service import IngestService
+from memco.services.pipeline_service import IngestPipelineService
 from memco.services.publish_service import PublishService
 from memco.services.refusal_service import RefusalService
 from memco.services.retrieval_service import RetrievalService
@@ -467,7 +468,9 @@ class EvalService:
         "tool_project_retrieval_pass_rate": 0.95,
         "experience_event_retrieval_pass_rate": 0.90,
         "source_hard_case_failures": 0,
+        "realistic_dense_personal_message_pass_rate": 1.0,
     }
+    REALISTIC_DENSE_PERSONAL_MESSAGE_MIN_CASES = 30
     P1_8_PRIVATE_EVAL_TARGET_COUNTS = {
         "core_biography": 100,
         "preference_current_state": 100,
@@ -2723,12 +2726,21 @@ class EvalService:
         row = conn.execute(f"SELECT COUNT(*) AS count FROM {table} WHERE workspace_id = ?", (workspace_id,)).fetchone()
         return int(row["count"]) if row is not None else 0
 
-    def _long_corpus_probe_result(self, *, conn, settings, eval_actor, probe: dict[str, Any]) -> dict[str, Any]:
+    def _long_corpus_probe_result(
+        self,
+        *,
+        conn,
+        settings,
+        eval_actor,
+        probe: dict[str, Any],
+        workspace_slug: str = "long-corpus-stress",
+        route_name: str = "long_corpus_stress",
+    ) -> dict[str, Any]:
         started = time.perf_counter()
         retrieval = self.retrieval_service.retrieve(
             conn,
             RetrievalRequest(
-                workspace="long-corpus-stress",
+                workspace=workspace_slug,
                 person_slug=str(probe["person_slug"]),
                 query=str(probe["query"]),
                 domain=probe.get("domain"),
@@ -2739,7 +2751,7 @@ class EvalService:
                 actor=eval_actor,
             ),
             settings=settings,
-            route_name="long_corpus_stress",
+            route_name=route_name,
         )
         latency_ms = max(0, int((time.perf_counter() - started) * 1000))
         answer = self.refusal_service.build_answer(query=str(probe["query"]), retrieval_result=retrieval)
@@ -2754,11 +2766,16 @@ class EvalService:
         for value in probe.get("expected_values", []):
             if str(value).lower() not in combined_text:
                 failures.append(f"missing_expected_value:{value}")
+        answer_text = str(answer["answer"]).lower()
+        for value in probe.get("expected_answer_values", []):
+            if str(value).lower() not in answer_text:
+                failures.append(f"missing_expected_answer_value:{value}")
         for value in probe.get("forbidden_values", []):
             if str(value).lower() in forbidden_text:
                 failures.append(f"forbidden_value_present:{value}")
         return {
             "name": str(probe["name"]),
+            "group": str(probe.get("group") or ""),
             "query": str(probe["query"]),
             "passed": not failures,
             "failures": failures,
@@ -2768,6 +2785,153 @@ class EvalService:
             "fallback_hit_count": len(retrieval.fallback_hits),
             "latency_ms": latency_ms,
             "answer": answer["answer"],
+        }
+
+    def _realistic_dense_personal_message_source(self) -> str:
+        return """
+        2026-04-01T10:00:00Z Alice: My name is Alice. I live in Lisbon. I currently prefer coffee, but I used to prefer tea. My sister is Maria and my best friend is Tom. I attended PyCon in May 2024 with Bob and learned to plan rehearsals. In October 2023, I had a serious car accident during a road trip to the Grand Canyon and I paused hiking for two months. I shipped Project Atlas with Bob on the mobile team; the outcome was 20% faster onboarding. I work as a designer and use Python and Postgres.
+        2026-04-01T10:02:00Z Bob: I live in Berlin and I work at Stripe.
+        2026-04-01T10:04:00Z Alice: I visited Kyoto in 2022 with Dana. I went to Web Summit in 2021 with Emma. Я предпочитаю matcha. Я работаю как дизайнер. Я использую Docker и Kubernetes.
+        """.strip()
+
+    def _realistic_dense_personal_message_cases(self) -> list[dict[str, Any]]:
+        group = "realistic_dense_personal_message"
+
+        def case(
+            name: str,
+            query: str,
+            expected_values: list[str] | None = None,
+            *,
+            person_slug: str = "dense-alice",
+            domain: str | None = None,
+            category: str | None = None,
+            expect_refused: bool = False,
+            expected_support_level: str | None = "supported",
+            forbidden_values: list[str] | None = None,
+            expected_answer_values: list[str] | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "name": name,
+                "group": group,
+                "person_slug": person_slug,
+                "query": query,
+                "domain": domain,
+                "category": category,
+                "expected_values": expected_values or [],
+                "expected_answer_values": (
+                    expected_answer_values
+                    if expected_answer_values is not None
+                    else ([] if expect_refused else (expected_values or []))
+                ),
+                "forbidden_values": forbidden_values or [],
+                "expect_refused": expect_refused,
+                "expected_support_level": expected_support_level,
+            }
+
+        return [
+            case("dense_residence_where", "Where does Alice live?", ["Lisbon"], domain="biography", category="residence"),
+            case("dense_residence_query_variant", "What city is Alice based in?", ["Lisbon"], domain="biography", category="residence"),
+            case("dense_pref_current", "What does Alice currently prefer?", ["coffee"], domain="preferences", category="preference", forbidden_values=["tea"]),
+            case("dense_pref_current_variant", "What does Alice currently prefer?", ["coffee"], domain="preferences", category="preference", forbidden_values=["tea"]),
+            case("dense_pref_past", "What did Alice used to prefer?", ["tea"], domain="preferences", category="preference"),
+            case("dense_sister", "Who is Alice's sister?", ["Maria"], domain="social_circle", category="sister"),
+            case("dense_best_friend", "Who is Alice's best friend?", ["Tom"], domain="social_circle", category="best_friend"),
+            case("dense_pycon_when", "When did Alice attend PyCon?", ["May 2024"], domain="experiences", category="event"),
+            case("dense_pycon_with", "Who did Alice attend PyCon with?", ["Bob"], domain="experiences", category="event"),
+            case("dense_pycon_lesson", "What did Alice learn at PyCon?", ["plan rehearsals"], domain="experiences", category="event"),
+            case("dense_accident_where", "Where did Alice have an accident?", ["Grand Canyon"], domain="experiences", category="event"),
+            case("dense_accident_when", "When did Alice have the accident?", ["October 2023"], domain="experiences", category="event"),
+            case("dense_accident_change", "What changed in Alice's life after the accident?", ["paused hiking for two months"], domain="experiences", category="event"),
+            case("dense_work_role", "What does Alice do for work?", ["дизайнер"], domain="work", category="employment"),
+            case("dense_work_tools_python", "What tools does Alice use?", ["Python"], domain="work", category="tool"),
+            case("dense_work_tools_postgres", "What tools does Alice use?", ["Postgres"], domain="work", category="tool"),
+            case("dense_project_name", "What project did Alice ship?", ["Project Atlas"], domain="work", category="project"),
+            case("dense_project_collaborator", "Who did Alice ship Project Atlas with?", ["Bob"], domain="work", category="project"),
+            case("dense_project_repeat", "What project did Alice ship?", ["Project Atlas"], domain="work", category="project"),
+            case("dense_project_collaborator_repeat", "Who did Alice ship Project Atlas with?", ["Bob"], domain="work", category="project"),
+            case("dense_kyoto_where", "Where did Alice visit in 2022?", ["Kyoto"], domain="experiences", category="event"),
+            case("dense_kyoto_when", "When did Alice visit Kyoto?", ["2022"], domain="experiences", category="event"),
+            case("dense_kyoto_with", "Who visited Kyoto with Alice?", ["Dana"], domain="experiences", category="event"),
+            case("dense_websummit_attendance", "What event did Alice go to in 2021?", ["Web Summit"], domain="experiences", category="event"),
+            case("dense_websummit_with", "Who went to Web Summit with Alice?", ["Emma"], domain="experiences", category="event"),
+            case("dense_mixed_pref", "What mixed-language preference did Alice mention?", ["matcha"], domain="preferences", category="preference"),
+            case("dense_mixed_work_role", "What Russian-language role did Alice mention?", ["дизайнер"], domain="work", category="employment"),
+            case("dense_mixed_tool_docker", "What mixed-language tool does Alice use?", ["Docker"], domain="work", category="tool"),
+            case("dense_false_premise_residence", "Does Alice live in Berlin?", ["do not"], domain="biography", category="residence", expect_refused=True, expected_support_level="contradicted", forbidden_values=["yes"], expected_answer_values=["do not"]),
+            case("dense_cross_person_bob_residence", "Where does Bob live?", [], domain="biography", category="residence", expect_refused=True, expected_support_level="unsupported", forbidden_values=["Berlin", "Alice lives in Berlin"]),
+        ]
+
+    def _realistic_dense_personal_message_report(self, project_root: Path) -> dict[str, Any]:
+        settings = ensure_runtime(load_settings(project_root))
+        dense_settings = settings.model_copy(deep=True)
+        dense_settings.llm.provider = "mock"
+        dense_settings.llm.model = "fixture"
+        dense_settings.llm.allow_mock_provider = True
+        dense_settings.runtime.profile = "fixture"
+        workspace_slug = "realistic-dense-personal-message"
+        cases = self._realistic_dense_personal_message_cases()
+        pipeline = IngestPipelineService(
+            candidate_service=CandidateService(
+                extraction_service=ExtractionService.from_settings(dense_settings, usage_tracker=self.llm_usage_tracker)
+            )
+        )
+        with get_connection(settings.db_path) as conn:
+            FactRepository().upsert_person(
+                conn,
+                workspace_slug=workspace_slug,
+                display_name="Tom",
+                slug="tom",
+                person_type="human",
+                aliases=["Tom"],
+            )
+            result = pipeline.ingest_text(
+                dense_settings,
+                conn,
+                workspace_slug=workspace_slug,
+                text=self._realistic_dense_personal_message_source(),
+                source_type="chat",
+                title="realistic-dense-personal-message",
+                person_display_name="Alice",
+                person_slug="dense-alice",
+                aliases=["Alice"],
+                conversation_uid="realistic-dense-personal-message",
+            )
+            eval_actor = build_internal_actor(settings, actor_id="eval-runner")
+            probe_results = [
+                self._long_corpus_probe_result(
+                    conn=conn,
+                    settings=settings,
+                    eval_actor=eval_actor,
+                    probe=probe,
+                    workspace_slug=workspace_slug,
+                    route_name="realistic_dense_personal_message",
+                )
+                for probe in cases
+            ]
+        passed = sum(1 for item in probe_results if item["passed"])
+        return {
+            "group": "realistic_dense_personal_message",
+            "case_count": len(cases),
+            "required_case_count": self.REALISTIC_DENSE_PERSONAL_MESSAGE_MIN_CASES,
+            "passed": passed,
+            "failed": len(cases) - passed,
+            "pass_rate": round(passed / len(cases), 4) if cases else 0.0,
+            "ok": len(cases) >= self.REALISTIC_DENSE_PERSONAL_MESSAGE_MIN_CASES and passed == len(cases),
+            "source_dimensions": [
+                "current_past_preference_same_sentence",
+                "role_tools_same_sentence",
+                "multiple_events_one_message",
+                "family_and_best_friend_one_message",
+                "false_premise_after_dense_ingestion",
+                "cross_person_question_after_dense_ingestion",
+                "russian_mixed_language_variants",
+            ],
+            "pipeline": {
+                "extracted_total": int(result["extracted_total"]),
+                "published_count": len(result["published"]),
+                "publish_error_count": len(result["publish_errors"]),
+            },
+            "probes": probe_results,
         }
 
     def _p2_3_long_corpus_target_report(
@@ -3092,6 +3256,7 @@ class EvalService:
         source_hard_checks: list[dict],
         start_event_index: int,
         long_corpus_stress: dict[str, Any],
+        realistic_dense_personal_message: dict[str, Any],
     ) -> dict:
         unsupported_premise_answered_as_fact = sum(
             1
@@ -3137,6 +3302,7 @@ class EvalService:
                 and item.get("domain_category") == "event",
             ),
             "source_hard_case_failures": source_hard_case_failures,
+            "realistic_dense_personal_message_pass_rate": realistic_dense_personal_message["pass_rate"],
         }
         checks = {
             "overall_accuracy": {
@@ -3200,6 +3366,11 @@ class EvalService:
                 "ok": metrics["source_hard_case_failures"]
                 <= self.PERSONAL_MEMORY_THRESHOLDS["source_hard_case_failures"],
             },
+            "realistic_dense_personal_message": {
+                "value": metrics["realistic_dense_personal_message_pass_rate"],
+                "threshold": self.PERSONAL_MEMORY_THRESHOLDS["realistic_dense_personal_message_pass_rate"],
+                "ok": bool(realistic_dense_personal_message["ok"]),
+            },
         }
         count_checks = self._personal_count_checks(cases)
         group_reports = []
@@ -3262,6 +3433,12 @@ class EvalService:
                     "required": long_corpus_stress["limits"]["messages_tested"],
                     "ok": bool(long_corpus_stress["ok"]),
                 },
+                "realistic_dense_personal_message_case_count": {
+                    "value": realistic_dense_personal_message["case_count"],
+                    "required": realistic_dense_personal_message["required_case_count"],
+                    "ok": realistic_dense_personal_message["case_count"]
+                    >= realistic_dense_personal_message["required_case_count"],
+                },
             }
         )
         latencies = [int(item["latency_ms"]) for item in results]
@@ -3293,6 +3470,7 @@ class EvalService:
             },
             "p2_1_external_benchmark_report": self._p2_1_external_benchmark_report(),
             "long_corpus_stress": long_corpus_stress,
+            "realistic_dense_personal_message": realistic_dense_personal_message,
             "source_hard_checks_total": len(source_hard_checks),
             "source_hard_checks_passed": sum(1 for item in source_hard_checks if item["passed"]),
             "source_hard_checks": source_hard_checks,
@@ -3321,6 +3499,7 @@ class EvalService:
             ]
         results.sort(key=lambda item: (item["group"], item["id"]))
         long_corpus_stress = self._long_corpus_stress_report(project_root)
+        realistic_dense_personal_message = self._realistic_dense_personal_message_report(project_root)
         memory_evolution_checks = self._personal_memory_evolution_report(project_root)
         source_hard_checks = self._personal_source_hard_checks(cases)
         summary = self._personal_metrics(
@@ -3330,6 +3509,7 @@ class EvalService:
             source_hard_checks=source_hard_checks,
             start_event_index=start_event_index,
             long_corpus_stress=long_corpus_stress,
+            realistic_dense_personal_message=realistic_dense_personal_message,
         )
         summary["policy_checks"]["memory_evolution_update_fidelity"] = {
             "value": memory_evolution_checks["passed"],

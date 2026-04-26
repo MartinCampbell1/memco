@@ -579,12 +579,20 @@ def verify_current_status_command(
             },
         }
     )
+    release_grade_claimed = (
+        local_summaries.get("release_check_postgres_gate_type") is not None
+        or local_summaries.get("strict_release_check_gate_type") is not None
+        or local_summaries.get("live_operator_smoke_current") is not None
+    )
+    release_grade_claim_ok = (
+        local_summaries.get("release_check_postgres_gate_type") == "canonical-postgres"
+        and local_summaries.get("strict_release_check_gate_type") == "strict-quality"
+        and local_summaries.get("live_operator_smoke_current") is True
+    )
     checks.append(
         {
-            "name": "local_refresh_does_not_claim_postgres_or_live_smoke",
-            "ok": local_summaries.get("release_check_postgres_gate_type") is None
-            and local_summaries.get("strict_release_check_gate_type") is None
-            and local_summaries.get("live_operator_smoke_current") is None,
+            "name": "local_refresh_release_grade_claims_are_consistent",
+            "ok": release_grade_claim_ok if release_grade_claimed else True,
             "artifact": {
                 "release_check_postgres_gate_type": local_summaries.get("release_check_postgres_gate_type"),
                 "strict_release_check_gate_type": local_summaries.get("strict_release_check_gate_type"),

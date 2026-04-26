@@ -12,9 +12,11 @@ from memco.extractors.base import (
     build_extraction_system_prompt,
     build_prompt_payload,
     display_subject,
+    overcaptured_payload_reasons,
     subject_key,
     validate_candidate,
 )
+from memco.extractors.text_units import context_for_clause, split_atomic_assertions
 from memco.llm import LLMProvider, build_llm_provider
 from memco.llm_usage import LLMUsageEvent, LLMUsageFileLogger, LLMUsageTracker
 from memco.models.conversation import ExtractionChunk, MessageView
@@ -501,6 +503,8 @@ class ExtractionService:
             domain=domain,
             category=str(normalized.get("category") or ""),
             payload=payload,
+            source_text=text,
+            subject_display=subject_display,
         ):
             if reason not in review_reasons:
                 review_reasons.append(reason)
@@ -509,13 +513,37 @@ class ExtractionService:
             normalized["reason"] = ",".join(review_reasons)
         return normalized
 
-    def _candidate_quality_review_reasons(self, *, domain: str, category: str, payload: dict[str, Any]) -> list[str]:
-        reasons: list[str] = []
+    def _candidate_quality_review_reasons(
+        self,
+        *,
+        domain: str,
+        category: str,
+        payload: dict[str, Any],
+        source_text: str = "",
+        subject_display: str = "",
+    ) -> list[str]:
+        reasons: list[str] = overcaptured_payload_reasons(payload)
         if domain == "biography" and category == "residence":
             city = str(payload.get("city") or "").strip()
             lowered = city.lower()
             if len(city.split()) > 4 or re.search(r"\b(?:and|prefer|work|moved|since|in\s+(?:19|20)\d{2})\b", lowered):
                 reasons.append("suspicious_residence_payload")
+            first_person_residence = re.search(
+                r"\b(?:i\s+(?:currently\s+)?live\s+in|i\s+moved\s+to|i(?:'m| am)\s+based\s+in|is\s+my\s+base|"
+                r"я\s+(?:сейчас\s+)?жив[ыу]\s+в|я\s+переехал(?:а|и)?\s+в)\b",
+                source_text,
+                re.IGNORECASE,
+            )
+            subject_residence = bool(
+                subject_display
+                and re.search(
+                    rf"\b{re.escape(subject_display)}\s+(?:currently\s+)?(?:lives\s+in|moved\s+to|is\s+based\s+in)\b",
+                    source_text,
+                    re.IGNORECASE,
+                )
+            )
+            if source_text and not (first_person_residence or subject_residence):
+                reasons.append("source_mismatch_residence")
         if domain == "biography" and category == "identity":
             name = str(payload.get("name") or "").strip()
             lowered = name.lower()
@@ -957,24 +985,30 @@ class ExtractionService:
         resolver = None
         if conn is not None and workspace_id is not None:
             resolver = lambda label: self._resolve_person_id(conn, workspace_id=workspace_id, label=label)
-        return self.orchestrator.extract(
-            ExtractionContext(
-                text=text,
-                subject_key=subject_key,
-                subject_display=subject_display,
-                speaker_label=speaker_label,
-                person_id=person_id,
-                conn=conn,
-                workspace_id=workspace_id,
-                message_id=message_id,
-                source_segment_id=source_segment_id,
-                session_id=session_id,
-                occurred_at=occurred_at,
-                resolve_person_id=resolver,
-            ),
-            include_style=include_style,
-            include_psychometrics=include_psychometrics,
+        base_context = ExtractionContext(
+            text=text,
+            subject_key=subject_key,
+            subject_display=subject_display,
+            speaker_label=speaker_label,
+            person_id=person_id,
+            conn=conn,
+            workspace_id=workspace_id,
+            message_id=message_id,
+            source_segment_id=source_segment_id,
+            session_id=session_id,
+            occurred_at=occurred_at,
+            resolve_person_id=resolver,
         )
+        candidates: list[dict] = []
+        for clause in split_atomic_assertions(text):
+            candidates.extend(
+                self.orchestrator.extract(
+                    context_for_clause(base_context, clause),
+                    include_style=include_style,
+                    include_psychometrics=include_psychometrics,
+                )
+            )
+        return candidates
 
     def _conversation_chunks(self, conn, *, conversation_id: int) -> list[ExtractionChunk]:
         message_rows = conn.execute(

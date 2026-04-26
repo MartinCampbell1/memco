@@ -249,9 +249,9 @@ def test_cli_verify_current_status_rejects_artifact_count_drift(monkeypatch, set
                 "Current reproduction path: LOCAL_REPRODUCTION.md.",
                 "Fresh gate evidence for this checkout:",
                 "- `uv run pytest -q`: 615 passed.",
-                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this dirty checkout; 839/840 passed.",
-                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this dirty checkout; acceptance 27/27.",
-                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this dirty checkout; full suite 615 passed, contract stack 104 passed, release-check acceptance 27/27.",
+                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this current checkout; 839/840 passed.",
+                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this current checkout; acceptance 27/27.",
+                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this current checkout; full suite 615 passed, contract stack 104 passed, release-check acceptance 27/27.",
             ]
         ),
         encoding="utf-8",
@@ -306,6 +306,159 @@ def test_cli_verify_current_status_rejects_artifact_count_drift(monkeypatch, set
     assert local_refresh_check["ok"] is False
 
 
+def test_cli_verify_current_status_accepts_current_release_grade_refresh(monkeypatch, settings):
+    docs_dir = settings.root / "docs"
+    reports_dir = settings.root / "var" / "reports"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "CURRENT_STATUS.md").write_text(
+        "\n".join(
+            [
+                "# Current Status",
+                "Current reproduction path: LOCAL_REPRODUCTION.md.",
+                "Fresh gate evidence for this checkout:",
+                "- `uv run pytest -q`: 658 passed.",
+                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this current checkout; 840/840 passed.",
+                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this current checkout; acceptance 27/27.",
+                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this current checkout; full suite 658 passed, contract stack 105 passed, release-check acceptance 27/27.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "personal-memory-eval-current.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "passed": 840,
+                "total": 840,
+                "metrics": {},
+                "token_accounting": {"implemented": True, "status": "tracked"},
+                "retrieval_latency_ms": {"p50": 1, "p95": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-check-current.json").write_text(
+        json.dumps({"ok": True, "steps": [{"name": "acceptance_artifact", "artifact_summary": {"passed": 27, "total": 27}}]}),
+        encoding="utf-8",
+    )
+    (reports_dir / "local-artifacts-refresh-current.json").write_text(
+        json.dumps(
+            {
+                "summaries": {
+                    "full_suite": "658 passed in 22.10s",
+                    "contract_stack": "105 passed in 5.10s",
+                    "release_check_acceptance": "27/27",
+                    "release_check_postgres_gate_type": "canonical-postgres",
+                    "strict_release_check_gate_type": "strict-quality",
+                    "live_operator_smoke_current": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-readiness-check-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    (reports_dir / "live-operator-smoke-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    runner = CliRunner()
+    command = get_command(app)
+    monkeypatch.setattr("memco.cli.main._project_root", lambda project_root: settings.root.resolve())
+    monkeypatch.setattr(
+        "memco.cli.main.evaluate_artifact_freshness",
+        lambda payload, *, project_root: {"status": "current", "current_for_checkout_config": True},
+    )
+
+    result = runner.invoke(
+        command,
+        ["verify-current-status", "--project-root", str(settings.root), "--pytest-passed", "658"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    release_grade_check = next(
+        check for check in payload["checks"] if check["name"] == "local_refresh_release_grade_claims_are_consistent"
+    )
+    assert release_grade_check["ok"] is True
+
+
+def test_cli_verify_current_status_rejects_inconsistent_release_grade_refresh(monkeypatch, settings):
+    docs_dir = settings.root / "docs"
+    reports_dir = settings.root / "var" / "reports"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "CURRENT_STATUS.md").write_text(
+        "\n".join(
+            [
+                "# Current Status",
+                "Current reproduction path: LOCAL_REPRODUCTION.md.",
+                "Fresh gate evidence for this checkout:",
+                "- `uv run pytest -q`: 658 passed.",
+                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this current checkout; 840/840 passed.",
+                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this current checkout; acceptance 27/27.",
+                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this current checkout; full suite 658 passed, contract stack 105 passed, release-check acceptance 27/27.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "personal-memory-eval-current.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "passed": 840,
+                "total": 840,
+                "metrics": {},
+                "token_accounting": {"implemented": True, "status": "tracked"},
+                "retrieval_latency_ms": {"p50": 1, "p95": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-check-current.json").write_text(
+        json.dumps({"ok": True, "steps": [{"name": "acceptance_artifact", "artifact_summary": {"passed": 27, "total": 27}}]}),
+        encoding="utf-8",
+    )
+    (reports_dir / "local-artifacts-refresh-current.json").write_text(
+        json.dumps(
+            {
+                "summaries": {
+                    "full_suite": "658 passed in 22.10s",
+                    "contract_stack": "105 passed in 5.10s",
+                    "release_check_acceptance": "27/27",
+                    "release_check_postgres_gate_type": "canonical-postgres",
+                    "strict_release_check_gate_type": "quick-repo-local",
+                    "live_operator_smoke_current": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports_dir / "release-readiness-check-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    (reports_dir / "live-operator-smoke-current.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    runner = CliRunner()
+    command = get_command(app)
+    monkeypatch.setattr("memco.cli.main._project_root", lambda project_root: settings.root.resolve())
+    monkeypatch.setattr(
+        "memco.cli.main.evaluate_artifact_freshness",
+        lambda payload, *, project_root: {"status": "current", "current_for_checkout_config": True},
+    )
+
+    result = runner.invoke(
+        command,
+        ["verify-current-status", "--project-root", str(settings.root), "--pytest-passed", "658"],
+        prog_name="memco",
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    release_grade_check = next(
+        check for check in payload["checks"] if check["name"] == "local_refresh_release_grade_claims_are_consistent"
+    )
+    assert release_grade_check["ok"] is False
+    assert release_grade_check["artifact"]["strict_release_check_gate_type"] == "quick-repo-local"
+
+
 def test_cli_verify_current_status_rejects_missing_token_latency_accounting(monkeypatch, settings):
     docs_dir = settings.root / "docs"
     reports_dir = settings.root / "var" / "reports"
@@ -318,9 +471,9 @@ def test_cli_verify_current_status_rejects_missing_token_latency_accounting(monk
                 "Current reproduction path: LOCAL_REPRODUCTION.md.",
                 "Fresh gate evidence for this checkout:",
                 "- `uv run pytest -q`: 615 passed.",
-                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this dirty checkout; 840/840 passed.",
-                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this dirty checkout; acceptance 27/27.",
-                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this dirty checkout; full suite 615 passed, contract stack 105 passed, release-check acceptance 27/27.",
+                "- `var/reports/personal-memory-eval-current.json`: fresh fixture/internal eval proof for this current checkout; 840/840 passed.",
+                "- `var/reports/release-check-current.json`: fresh quick repo-local release-check proof for this current checkout; acceptance 27/27.",
+                "- `var/reports/local-artifacts-refresh-current.json`: fresh repo-local refresh summary for this current checkout; full suite 615 passed, contract stack 105 passed, release-check acceptance 27/27.",
             ]
         ),
         encoding="utf-8",

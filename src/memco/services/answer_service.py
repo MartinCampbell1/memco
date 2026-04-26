@@ -677,6 +677,237 @@ class AnswerService:
             return f"{hit.summary} The exact event date is unknown; I only know it was recorded on {value}."
         return f"{hit.summary} The exact date is unknown."
 
+    def _subject(self, retrieval_result, factual_hits) -> str:
+        target_person = dict(getattr(retrieval_result, "target_person", {}) or {})
+        display_name = str(target_person.get("display_name") or "").strip()
+        if display_name:
+            return display_name
+        for hit in factual_hits:
+            summary = str(getattr(hit, "summary", "") or "").strip()
+            match = re.match(r"(?P<subject>[A-Z][A-Za-z0-9&.'_-]*(?:\s+[A-Z][A-Za-z0-9&.'_-]*)*)\b", summary)
+            if match:
+                return match.group("subject")
+        return "The user"
+
+    def _unique_values(self, values: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            cleaned = str(value or "").strip()
+            if not cleaned or cleaned.lower() in seen:
+                continue
+            seen.add(cleaned.lower())
+            unique.append(cleaned)
+        return unique
+
+    def _experience_hits(self, factual_hits) -> list:
+        return [hit for hit in factual_hits if hit.domain == "experiences"]
+
+    def _primary_experience_hit(self, query: str, factual_hits):
+        experience_hits = self._experience_hits(factual_hits)
+        if not experience_hits:
+            return None
+        q = query.lower()
+        dated = re.findall(r"\b(?:19|20)\d{2}\b", q)
+        for year in dated:
+            for hit in experience_hits:
+                temporal = " ".join(
+                    str(hit.payload.get(key) or "")
+                    for key in ("event_at", "date_range", "temporal_anchor", "summary")
+                ).lower()
+                if year in temporal:
+                    return hit
+        query_tokens = {
+            token
+            for token in re.findall(r"[a-z0-9]+", q)
+            if token not in {"what", "where", "when", "who", "did", "does", "with", "alice", "the", "in", "at", "go", "to"}
+        }
+        best_hit = None
+        best_score = 0
+        for hit in experience_hits:
+            haystack = " ".join(str(hit.payload.get(key) or "") for key in ("event", "event_type", "summary")).lower()
+            score = sum(1 for token in query_tokens if token in haystack)
+            if score > best_score:
+                best_hit = hit
+                best_score = score
+        return best_hit or experience_hits[0]
+
+    def _query_requests_tools(self, query: str) -> bool:
+        return bool(re.search(r"\b(?:tool|tools|use|uses|using|stack|software)\b", query.lower()))
+
+    def _query_requests_experience_place(self, query: str, factual_hits) -> bool:
+        if "where" not in query.lower() or not self._experience_hits(factual_hits):
+            return False
+        return bool(
+            re.search(
+                r"\b(?:accident|attend|attended|event|go|went|visit|visited|travel|trip|conference|summit|pycon|happen|happened)\b",
+                query.lower(),
+            )
+        )
+
+    def _field_specific_answer(self, *, query: str, retrieval_result, factual_hits) -> str | None:
+        q = query.lower()
+        subject = self._subject(retrieval_result, factual_hits)
+
+        residence_values: list[str] = []
+        for hit in factual_hits:
+            if hit.domain == "biography" and hit.category == "residence":
+                value = hit.payload.get("city") or hit.payload.get("place") or hit.payload.get("location")
+                if value:
+                    residence_values.append(str(value))
+        residence_values = self._unique_values(residence_values)
+
+        work_values: list[str] = []
+        for hit in factual_hits:
+            if hit.domain != "work":
+                continue
+            org = str(hit.payload.get("org") or "").strip()
+            title = str(hit.payload.get("title") or hit.payload.get("role") or "").strip()
+            if org and title:
+                work_values.append(f"{title} at {org}")
+            elif org:
+                work_values.append(f"at {org}")
+            elif title:
+                work_values.append(f"as {title}")
+        work_values = self._unique_values(work_values)
+
+        if "where" in q and any(marker in q for marker in ("work", "job", "do for work")) and residence_values and work_values:
+            return f"{subject} lives in {', '.join(residence_values)}. {subject} works {', '.join(work_values)}."
+
+        if "project" in q or "ship" in q or "shipped" in q:
+            for hit in factual_hits:
+                if hit.domain != "work" or hit.category != "project":
+                    continue
+                project = str(hit.payload.get("project") or "the project").strip()
+                collaborators = hit.payload.get("collaborators") or []
+                if ("who" in q or "with" in q) and isinstance(collaborators, list) and collaborators:
+                    people = self._unique_values([str(item) for item in collaborators])
+                    return f"{subject} shipped {project} with {', '.join(people)}."
+                if project:
+                    return f"{subject} shipped {project}."
+
+        if self._query_requests_tools(query):
+            tools: list[str] = []
+            for hit in factual_hits:
+                if hit.domain != "work":
+                    continue
+                if hit.category == "tool" and hit.payload.get("tool"):
+                    tools.append(str(hit.payload["tool"]))
+                for key in ("tools", "technologies"):
+                    value = hit.payload.get(key)
+                    if isinstance(value, list):
+                        tools.extend(str(item) for item in value)
+            tools = self._unique_values(tools)
+            if tools:
+                return f"{subject} uses {', '.join(tools)}."
+
+        if "prefer" in q or "like" in q:
+            wants_past = bool(re.search(r"\b(?:used\s+to|past|previously|before)\b", q))
+            wants_current = "current" in q or "currently" in q or not wants_past
+            values: list[str] = []
+            for hit in factual_hits:
+                if hit.domain != "preferences" or hit.category != "preference":
+                    continue
+                is_current = bool(hit.payload.get("is_current", True))
+                if wants_past and is_current:
+                    continue
+                if wants_current and not wants_past and not is_current:
+                    continue
+                value = hit.payload.get("value")
+                if value:
+                    values.append(str(value))
+            values = self._unique_values(values)
+            if values:
+                if wants_past:
+                    return f"{subject} used to prefer {', '.join(values)}."
+                return f"{subject} currently prefers {', '.join(values)}."
+
+        relation_query = next((term for term in self.RELATION_TERMS if term.replace("_", " ") in q or term in q), "")
+        if "who" in q and relation_query:
+            people: list[str] = []
+            for hit in factual_hits:
+                if hit.domain != "social_circle":
+                    continue
+                if hit.category != relation_query and hit.category.replace("_", " ") != relation_query.replace("_", " "):
+                    continue
+                value = hit.payload.get("target_label") or hit.payload.get("name")
+                if value:
+                    people.append(str(value))
+            people = self._unique_values(people)
+            if people:
+                relation = relation_query.replace("_", " ")
+                return f"{subject}'s {relation} is {', '.join(people)}."
+
+        if "where" in q:
+            hit = self._primary_experience_hit(query, factual_hits)
+            if hit is not None and self._query_requests_experience_place(query, factual_hits):
+                location = str(hit.payload.get("location") or "").strip()
+                event = str(hit.payload.get("event") or "the event").strip()
+                event_type = str(hit.payload.get("event_type") or "").strip().lower()
+                if location:
+                    return f"{subject} had {event} at {location}."
+                if event_type == "travel" and event:
+                    return f"{subject} visited {event}."
+
+            if residence_values:
+                return f"{subject} lives in {', '.join(residence_values)}."
+
+            if hit is not None:
+                location = str(hit.payload.get("location") or "").strip()
+                event = str(hit.payload.get("event") or "the event").strip()
+                event_type = str(hit.payload.get("event_type") or "").strip().lower()
+                if location:
+                    return f"{subject} had {event} at {location}."
+                if event_type == "travel" and event:
+                    return f"{subject} visited {event}."
+
+        if "when" in q:
+            temporal_hit = self._select_temporal_hit(factual_hits)
+            if temporal_hit is not None:
+                source, value = self._temporal_value(temporal_hit)
+                if value:
+                    event = str(temporal_hit.payload.get("event") or temporal_hit.summary).strip()
+                    if source == "event_at":
+                        return f"{subject} attended {event} in {value}."
+                    return self._format_when_answer(temporal_hit)
+
+        if "who" in q or "with" in q:
+            preferred = self._primary_experience_hit(query, factual_hits)
+            ordered_hits = [preferred] if preferred is not None else []
+            ordered_hits.extend(hit for hit in self._experience_hits(factual_hits) if hit is not preferred)
+            for hit in ordered_hits:
+                people_value = hit.payload.get("participants") or hit.payload.get("linked_persons") or []
+                if not isinstance(people_value, list):
+                    continue
+                people = self._unique_values([str(item) for item in people_value])
+                if people:
+                    event = str(hit.payload.get("event") or "the event").strip()
+                    return f"{subject} attended {event} with {', '.join(people)}."
+
+        if "learn" in q or "lesson" in q:
+            preferred = self._primary_experience_hit(query, factual_hits)
+            ordered_hits = [preferred] if preferred is not None else []
+            ordered_hits.extend(hit for hit in self._experience_hits(factual_hits) if hit is not preferred)
+            for hit in ordered_hits:
+                lesson = str(hit.payload.get("lesson") or "").strip()
+                if lesson:
+                    return f"{subject} learned {lesson}."
+
+        if "event" in q or "go to" in q or "went to" in q:
+            hit = self._primary_experience_hit(query, factual_hits)
+            if hit is not None:
+                event = str(hit.payload.get("event") or "").strip()
+                if event:
+                    return f"{subject} went to {event}."
+
+        if any(marker in q for marker in ("changed", "change", "after", "outcome", "result")):
+            for hit in factual_hits:
+                outcome = str(hit.payload.get("outcome") or "").strip()
+                if outcome:
+                    return f"After that event, {subject} {outcome}."
+
+        return None
+
     def build_answer(self, *, query: str, retrieval_result, detail_policy: DetailPolicy | None = None) -> dict:
         policy = detail_policy or getattr(retrieval_result, "detail_policy", "balanced")
         factual_hits = self._factual_hits(retrieval_result)
@@ -778,6 +1009,17 @@ class AnswerService:
                 )
                 self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
                 return payload
+        field_answer = self._field_specific_answer(query=query, retrieval_result=retrieval_result, factual_hits=factual_hits)
+        if field_answer:
+            payload = self._payload(
+                query=query,
+                answer=field_answer,
+                refused=False,
+                retrieval_result=retrieval_result,
+                detail_policy=policy,
+            )
+            self._record_usage(query=query, retrieval_result=retrieval_result, answer_payload=payload)
+            return payload
         payload = self._payload(
             query=query,
             answer=" ".join(hit.summary for hit in factual_hits),

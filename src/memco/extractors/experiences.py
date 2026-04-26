@@ -122,6 +122,8 @@ def _recurrence(text: str) -> str:
 def _lesson(text: str) -> str:
     match = re.search(r"\bi\s+learned\s+to\s+(?P<lesson>[^.!?\n]+)", text, re.IGNORECASE)
     if not match:
+        match = re.search(r"\band\s+learned\s+to\s+(?P<lesson>[^.!?\n]+)", text, re.IGNORECASE)
+    if not match:
         match = re.search(r"\b(?:lesson|takeaway)\s+was\s+(?P<lesson>[^.!?\n]+)", text, re.IGNORECASE)
     return clean_value(match.group("lesson")) if match else ""
 
@@ -199,6 +201,8 @@ def extract(context: ExtractionContext) -> list[dict]:
         if not outcome_match:
             outcome_match = re.search(r"\bwe\s+(?P<outcome>won\s+[^.!?\n]+)", context.text, re.IGNORECASE)
         pause_match = re.search(r"\bi\s+had\s+to\s+(?P<outcome>pause\s+[^.!?\n]+)", context.text, re.IGNORECASE)
+        if not pause_match:
+            pause_match = re.search(r"\bi\s+(?P<outcome>paused?\s+[^.!?\n]+)", context.text, re.IGNORECASE)
         valence, intensity = _valence_and_intensity(context.text)
         linked_projects = _linked_projects(context.text)
         event_type = _event_type(event, context.text)

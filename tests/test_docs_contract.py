@@ -112,12 +112,13 @@ def test_current_docs_entrypoints_separate_status_contract_gaps_and_reproduction
     local = _read("docs/LOCAL_REPRODUCTION.md")
 
     assert "Current verdict: P0 semantic remediation is green" in current
-    assert "Release-grade GO still requires refreshing the live/Postgres artifacts" in current
+    assert "The live/Postgres release-grade artifacts are fresh for this exact checkout and pass." in current
     assert "Do not derive this verdict from historical documents." in current
     assert "PRIVATE_SINGLE_USER_CONTRACT.md" in current
     assert "PDF_PARITY_GAPS.md" in current
     assert "LOCAL_REPRODUCTION.md" in current
-    assert "P0.7: `memco verify-current-status`" in current
+    assert "P0.7: `memco eval personal-memory` now includes a realistic dense personal-message bucket" in current
+    assert "P0.8: overcaptured provider payloads and source-mismatched residence candidates are forced to review" in current
     assert "Selected P1: preference evolution queries" in current
     assert "Selected P1: experiences now include normalized `event_type`/`salience`" in current
     assert "`build-life-timeline` CLI" in current
@@ -148,17 +149,17 @@ def test_current_docs_entrypoints_separate_status_contract_gaps_and_reproduction
     assert "`p2_3_target_report` keeps full P2.3 `ok_for_full_p2_3_claim=false`" in local
     assert "`p2_1_external_benchmark_report`" in local
     assert "public/external LoCoMO remains `not_run`" in local
-    assert "`uv run pytest -q`: 632 passed." in current
+    assert "`uv run pytest -q`: 658 passed." in current
     assert "`uv run pytest tests/test_private_agent_semantic_regressions.py -q`: 14 passed." in current
-    assert "fresh fixture/internal eval proof for this dirty checkout; 840/840 passed" in current
-    assert "fresh quick repo-local release-check proof for this dirty checkout; acceptance 27/27" in current
+    assert "fresh fixture/internal eval proof for this current checkout; 840/840 passed" in current
+    assert "fresh quick repo-local release-check proof for this current checkout; acceptance 27/27" in current
     assert (
-        "fresh repo-local refresh summary for this dirty checkout; "
-        "full suite 632 passed, contract stack 105 passed, release-check acceptance 27/27"
+        "fresh repo-local refresh summary for this current checkout; "
+        "full suite 658 passed, contract stack 105 passed, release-check acceptance 27/27"
     ) in current
-    assert "expected to fail only on release-grade artifact freshness" in current
-    assert "historical release-grade artifact from a different checkout; ignore its internal `ok=true`" in current
-    assert "historical live-smoke artifact from a different checkout; ignore its internal `ok=true`" in current
+    assert "passes with current artifact freshness" in current
+    assert "fresh release-grade artifact for this current checkout; `ok=true`" in current
+    assert "fresh live-smoke artifact for this current checkout; `ran=true`, `ok=true`" in current
     assert "manual P0 smoke" in current
 
     assert "Status: current repo-local contract." in contract

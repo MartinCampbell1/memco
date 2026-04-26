@@ -10,6 +10,8 @@ PREFERENCE_PATTERNS = (
     ("dislike", re.compile(r"\bi\s+do\s+not\s+like\s+(?P<value>[^.!?\n]+?)(?:\s+because\s+(?P<reason>[^.!?\n]+))?(?=$|[.!?\n])", re.IGNORECASE)),
     ("dislike", re.compile(r"\bi\s+don't\s+like\s+(?P<value>[^.!?\n]+?)(?:\s+because\s+(?P<reason>[^.!?\n]+))?(?=$|[.!?\n])", re.IGNORECASE)),
     ("dislike", re.compile(r"\bi\s+(?P<strongly>strongly\s+)?dislike\s+(?P<value>[^.!?\n]+?)(?:\s+because\s+(?P<reason>[^.!?\n]+))?(?=$|[.!?\n])", re.IGNORECASE)),
+    ("prefer", re.compile(r"\bi\s+(?:currently\s+)?prefer\s+(?P<value>[^.!?\n,]+?)(?=\s*,?\s+but\s+i\s+used\s+to\b|$|[.!?\n])", re.IGNORECASE)),
+    ("like", re.compile(r"\bi\s+(?:currently\s+)?like\s+(?P<value>[^.!?\n,]+?)(?=\s*,?\s+but\s+i\s+used\s+to\b|$|[.!?\n])", re.IGNORECASE)),
     ("prefer", re.compile(r"\bi\s+now\s+prefer\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
     ("prefer", re.compile(r"\bi\s+prefer\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
     ("like", re.compile(r"\bi\s+love\s+(?P<value>[^.!?\n]+)", re.IGNORECASE)),
@@ -78,7 +80,14 @@ def extract(context: ExtractionContext) -> list[dict]:
     evidence = build_evidence(context)
     candidates: list[dict] = []
     seen: set[tuple[str, str, bool]] = set()
-    has_current_self_correction = bool(re.search(r"\bbut\s+now\s+i\s+(?:prefer|like|love)\b", context.text, re.IGNORECASE))
+    has_current_self_correction = bool(
+        re.search(r"\bbut\s+now\s+i\s+(?:prefer|like|love)\b", context.text, re.IGNORECASE)
+        or re.search(
+            r"\bi\s+(?:currently\s+)?(?:prefer|like|love)\b.*\bbut\s+i\s+used\s+to\s+(?:prefer|like|love|dislike)\b",
+            context.text,
+            re.IGNORECASE,
+        )
+    )
     for verb, pattern in PREFERENCE_PATTERNS:
         for match in pattern.finditer(context.text):
             values = _preference_values(match.group("value"))
@@ -112,7 +121,7 @@ def extract(context: ExtractionContext) -> list[dict]:
                 seen.add(key)
                 preference_domain, preference_category = _classify_preference(value, match)
                 context_note = clean_value(match.groupdict().get("context") or "")
-                valid_to = "now" if (not is_current and has_current_self_correction) else ""
+                valid_to = "now" if (not is_current and (has_current_self_correction or verb.startswith("past_"))) else ""
                 candidates.append(
                     {
                         "domain": "preferences",
@@ -127,6 +136,7 @@ def extract(context: ExtractionContext) -> list[dict]:
                             "strength": strength,
                             "reason": reason,
                             "is_current": is_current,
+                            "temporal_status": "current" if is_current else "past",
                             "valid_from": "",
                             "valid_to": valid_to,
                             "original_phrasing": _original_phrasing(match),

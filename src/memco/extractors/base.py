@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -538,6 +539,23 @@ def _optional_list_of_strings(payload: dict[str, Any], key: str) -> None:
         _require_list_of_strings(payload, key)
 
 
+OVERCAPTURE_MARKERS = re.compile(
+    r"\b(?:and\s+i\s+|and\s+use\s+|and\s+work\s+with\s+|\.\s+[A-Z]|;\s*)",
+    re.IGNORECASE,
+)
+ATOMIC_STRING_FIELDS = {"name", "city", "role", "title", "tool", "value", "event", "org"}
+
+
+def overcaptured_payload_reasons(payload: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    for key, value in payload.items():
+        if key not in ATOMIC_STRING_FIELDS or not isinstance(value, str):
+            continue
+        if OVERCAPTURE_MARKERS.search(value):
+            reasons.append(f"overcaptured_{key}")
+    return reasons
+
+
 def validate_candidate_payload(*, domain: str, category: str, payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("candidate payload must be a dict")
@@ -604,7 +622,15 @@ def validate_candidate_payload(*, domain: str, category: str, payload: dict[str,
             _require_string(payload, "polarity")
         if "strength" in payload:
             _require_string(payload, "strength")
-        for key in ("preference_domain", "preference_category", "valid_from", "valid_to", "original_phrasing", "context"):
+        for key in (
+            "preference_domain",
+            "preference_category",
+            "temporal_status",
+            "valid_from",
+            "valid_to",
+            "original_phrasing",
+            "context",
+        ):
             _optional_string(payload, key)
         if "reason" in payload and not isinstance(payload.get("reason"), str):
             raise ValueError("payload.reason must be a string")

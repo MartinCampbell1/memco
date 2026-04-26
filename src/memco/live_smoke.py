@@ -192,6 +192,7 @@ def run_live_operator_smoke(
         "MEMCO_ROOT": str(root),
         "MEMCO_API_HOST": "127.0.0.1",
         "MEMCO_API_PORT": str(selected_port),
+        "MEMCO_LLM_PLANNER_MODE": "always",
     }
     process = subprocess.Popen(
         ["uv", "run", "memco-api"],

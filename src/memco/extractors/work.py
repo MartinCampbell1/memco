@@ -47,7 +47,7 @@ WORK_ENGAGEMENT_PATTERNS = (
 )
 
 WORK_TOOL_PATTERNS = (
-    re.compile(r"\bi\s+(?:use|work with)\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
+    re.compile(r"(?:\bi\s+|\band\s+)?(?:use|work with)\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
     re.compile(r"\bя\s+(?:использую|работаю\s+с)\s+(?P<value>[^.!?\n]+)", re.IGNORECASE),
 )
 
@@ -71,6 +71,17 @@ def _split_role_org(raw: str) -> tuple[str, str, list[str]]:
     if re.search(r"\s+at\s+", role, re.IGNORECASE):
         reasons.append("suspicious_work_payload")
     return role, org, reasons
+
+
+def _clean_role_value(raw: str) -> str:
+    value = clean_value(raw)
+    value = re.split(
+        r"\s+(?:and|,\s*and)\s+(?:i\s+)?(?:use|work\s+with|know)\b",
+        value,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    return clean_value(value)
 
 
 def _with_review_reasons(context: ExtractionContext, *extra_reasons: str) -> list[str]:
@@ -164,7 +175,7 @@ def extract(context: ExtractionContext) -> list[dict]:
         match = pattern.search(context.text)
         if not match:
             continue
-        title, org, quality_reasons = _split_role_org(match.group("value"))
+        title, org, quality_reasons = _split_role_org(_clean_role_value(match.group("value")))
         if not title:
             continue
         review_reasons = _with_review_reasons(context, *quality_reasons)

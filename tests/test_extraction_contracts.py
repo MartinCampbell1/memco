@@ -12,8 +12,10 @@ from memco.extractors.base import (
     build_extraction_contract,
     build_extraction_system_prompt,
     build_prompt_payload,
+    overcaptured_payload_reasons,
     validate_candidate_payload,
 )
+from memco.extractors.text_units import context_for_clause, split_atomic_assertions
 from memco.extractors.biography import extract as extract_biography
 from memco.extractors.experiences import extract as extract_experiences
 from memco.extractors.preferences import extract as extract_preferences
@@ -51,6 +53,110 @@ def _context(text: str, *, person_id: int | None = 1, resolve_person_id=None) ->
         occurred_at="2026-04-21T10:00:00Z",
         resolve_person_id=resolve_person_id,
     )
+
+
+def test_split_atomic_assertions_keeps_dense_persona_facts_separate() -> None:
+    clauses = split_atomic_assertions(
+        "My name is Alice. I live in Lisbon. I currently prefer coffee, but I used to prefer tea. "
+        "My sister is Maria and my best friend is Tom. "
+        "I attended PyCon in May 2024 with Bob and learned to plan rehearsals. "
+        "In October 2023, I had a serious car accident during a road trip to the Grand Canyon. "
+        "I shipped Project Atlas with Bob on the mobile team. "
+        "I work as a designer and use Python and Postgres."
+    )
+
+    assert "I live in Lisbon." in clauses
+    assert "I currently prefer coffee" in clauses
+    assert "I used to prefer tea." in clauses
+    assert "My sister is Maria" in clauses
+    assert "my best friend is Tom." in clauses
+    assert "I attended PyCon in May 2024 with Bob and learned to plan rehearsals." in clauses
+    assert "In October 2023, I had a serious car accident during a road trip to the Grand Canyon." in clauses
+    assert "I shipped Project Atlas with Bob on the mobile team." in clauses
+    assert "I work as a designer" in clauses
+    assert "use Python and Postgres." in clauses
+
+
+def test_context_for_clause_preserves_source_provenance_ids() -> None:
+    context = _context("I live in Lisbon. I prefer coffee.")
+
+    clause_context = context_for_clause(context, "I live in Lisbon")
+
+    assert clause_context.text == "I live in Lisbon"
+    assert clause_context.subject_key == context.subject_key
+    assert clause_context.subject_display == context.subject_display
+    assert clause_context.speaker_label == context.speaker_label
+    assert clause_context.person_id == context.person_id
+    assert clause_context.message_id == 11
+    assert clause_context.source_segment_id == 22
+    assert clause_context.session_id == 33
+    assert clause_context.occurred_at == context.occurred_at
+
+
+def test_context_for_clause_preserves_resolution_context() -> None:
+    conn = object()
+
+    def resolver(label: str) -> int | None:
+        return 7 if label == "Bob" else None
+
+    context = ExtractionContext(
+        text="My best friend is Bob. I live in Lisbon.",
+        subject_key="p1",
+        subject_display="Alice",
+        speaker_label="Alice",
+        person_id=1,
+        conn=conn,
+        workspace_id=42,
+        message_id=11,
+        source_segment_id=22,
+        session_id=33,
+        occurred_at="2026-04-21T10:00:00Z",
+        resolve_person_id=resolver,
+    )
+
+    clause_context = context_for_clause(context, "My best friend is Bob")
+
+    assert clause_context.conn is conn
+    assert clause_context.workspace_id == 42
+    assert clause_context.resolve_person_id is resolver
+    assert clause_context.resolve_person_id("Bob") == 7
+
+
+def test_clause_extraction_preserves_published_message_segment_and_chunk_provenance(settings):
+    with get_connection(settings.db_path) as conn:
+        result = IngestPipelineService().ingest_text(
+            settings,
+            conn,
+            workspace_slug="default",
+            text="2026-04-01T10:00:00Z Alice: I live in Lisbon. I currently prefer coffee, but I used to prefer tea.",
+            source_type="chat",
+            title="clause-provenance",
+            person_display_name="Alice",
+            person_slug="alice",
+            aliases=["Alice"],
+            conversation_uid="clause-provenance",
+        )
+
+    published = {
+        item["candidate"]["canonical_key"]: item
+        for item in result["published"]
+    }
+    residence = next(item for key, item in published.items() if ":biography:residence:" in key)
+    preference = next(item for key, item in published.items() if ":preferences:preference:coffee" in key)
+    residence_candidate_evidence = residence["candidate"]["evidence"][0]
+    preference_candidate_evidence = preference["candidate"]["evidence"][0]
+    residence_fact_evidence = residence["fact"]["evidence"][0]
+    preference_fact_evidence = preference["fact"]["evidence"][0]
+
+    assert residence_candidate_evidence["quote"] == "I live in Lisbon."
+    assert preference_candidate_evidence["quote"] == "I currently prefer coffee"
+    assert residence["candidate"]["chunk_id"] == preference["candidate"]["chunk_id"]
+    assert residence_candidate_evidence["message_ids"] == preference_candidate_evidence["message_ids"]
+    assert residence_candidate_evidence["source_segment_ids"] == preference_candidate_evidence["source_segment_ids"]
+    assert residence_candidate_evidence["session_ids"] == preference_candidate_evidence["session_ids"]
+    assert residence_fact_evidence["chunk_id"] == preference_fact_evidence["chunk_id"]
+    assert residence_fact_evidence["source_segment_id"] == preference_fact_evidence["source_segment_id"]
+    assert residence_fact_evidence["session_id"] == preference_fact_evidence["session_id"]
 
 
 class _RecordingExtractionProvider:
@@ -1370,7 +1476,133 @@ def test_provider_overcaptured_payloads_are_forced_to_review(settings):
     )
 
     assert normalized["needs_review"] is True
+    assert overcaptured_payload_reasons({"role": "designer and use Python"}) == ["overcaptured_role"]
+    assert "overcaptured_city" in normalized["reason"]
     assert "suspicious_residence_payload" in normalized["reason"]
+
+
+def test_provider_overcaptured_atomic_fields_are_not_publishable(settings):
+    extraction = ExtractionService.from_settings(settings)
+
+    for field in ("name", "city", "role", "title", "tool", "value", "event", "org"):
+        for marker_text in (
+            "alpha and I prefer coffee",
+            "alpha and use Python",
+            "alpha and work with Postgres",
+            "alpha; beta",
+            "alpha. Beta",
+        ):
+            assert overcaptured_payload_reasons({field: marker_text}) == [f"overcaptured_{field}"]
+
+    normalized = extraction._normalize_provider_candidate(
+        candidate={
+            "domain": "work",
+            "category": "employment",
+            "subcategory": "",
+            "canonical_key": "alice:work:employment:bad",
+            "payload": {"role": "designer and use Python", "title": "designer and use Python"},
+            "summary": "Alice works as designer and use Python.",
+            "confidence": 0.9,
+            "reason": "",
+            "needs_review": False,
+            "evidence": [{"quote": "I work as a designer and use Python.", "message_ids": [], "source_segment_ids": [1], "chunk_kind": "conversation"}],
+        },
+        text="I work as a designer and use Python.",
+        subject_display="Alice",
+        person_id=1,
+        message_id=1,
+        source_segment_id=1,
+        session_id=1,
+    )
+
+    assert normalized["needs_review"] is True
+    assert "overcaptured_role" in normalized["reason"]
+    assert "overcaptured_title" in normalized["reason"]
+
+
+def test_provider_residence_without_residence_source_marker_is_not_publishable(settings):
+    extraction = ExtractionService.from_settings(settings)
+
+    normalized = extraction._normalize_provider_candidate(
+        candidate={
+            "domain": "biography",
+            "category": "residence",
+            "subcategory": "",
+            "canonical_key": "alice:biography:residence:tea",
+            "payload": {"city": "tea"},
+            "summary": "Alice lives in tea.",
+            "confidence": 0.9,
+            "reason": "",
+            "needs_review": False,
+            "evidence": [{"quote": "I like tea.", "message_ids": [], "source_segment_ids": [1], "chunk_kind": "conversation"}],
+        },
+        text="I like tea.",
+        subject_display="Alice",
+        person_id=1,
+        message_id=1,
+        source_segment_id=1,
+        session_id=1,
+    )
+
+    assert normalized["needs_review"] is True
+    assert "source_mismatch_residence" in normalized["reason"]
+
+
+def test_provider_residence_with_residence_source_marker_remains_publishable(settings):
+    extraction = ExtractionService.from_settings(settings)
+
+    for source_text in ("I live in Lisbon.", "Alice lives in Lisbon."):
+        normalized = extraction._normalize_provider_candidate(
+            candidate={
+                "domain": "biography",
+                "category": "residence",
+                "subcategory": "",
+                "canonical_key": "alice:biography:residence:lisbon",
+                "payload": {"city": "Lisbon"},
+                "summary": "Alice lives in Lisbon.",
+                "confidence": 0.9,
+                "reason": "",
+                "needs_review": False,
+                "evidence": [{"quote": source_text, "message_ids": [], "source_segment_ids": [1], "chunk_kind": "conversation"}],
+            },
+            text=source_text,
+            subject_display="Alice",
+            person_id=1,
+            message_id=1,
+            source_segment_id=1,
+            session_id=1,
+        )
+
+        assert normalized["needs_review"] is False
+        assert "source_mismatch_residence" not in normalized.get("reason", "")
+
+
+def test_provider_residence_for_different_source_subject_is_not_publishable(settings):
+    extraction = ExtractionService.from_settings(settings)
+
+    normalized = extraction._normalize_provider_candidate(
+        candidate={
+            "domain": "biography",
+            "category": "residence",
+            "subcategory": "",
+            "canonical_key": "alice:biography:residence:berlin",
+            "payload": {"city": "Berlin"},
+            "summary": "Alice lives in Berlin.",
+            "confidence": 0.9,
+            "reason": "",
+            "needs_review": False,
+            "evidence": [{"quote": "Bob lives in Berlin.", "message_ids": [], "source_segment_ids": [1], "chunk_kind": "conversation"}],
+        },
+        text="Bob lives in Berlin.",
+        subject_display="Alice",
+        person_id=1,
+        message_id=1,
+        source_segment_id=1,
+        session_id=1,
+    )
+
+    assert normalized["needs_review"] is True
+    assert "source_mismatch_residence" in normalized["reason"]
 
 
 def test_experiences_extractor_returns_event_candidate():
@@ -1770,6 +2002,20 @@ def test_preferences_extractor_handles_current_preference_with_past_update():
     past = [candidate for candidate in candidates if candidate["payload"]["is_current"] is False]
     assert [candidate["payload"]["value"] for candidate in current] == ["coffee"]
     assert [candidate["payload"]["value"] for candidate in past] == ["tea"]
+    assert current[0]["payload"]["temporal_status"] == "current"
+    assert past[0]["payload"]["temporal_status"] == "past"
+    assert past[0]["payload"]["valid_to"] == "now"
+
+
+def test_preferences_extractor_extracts_currently_and_past_in_same_sentence():
+    candidates = extract_preferences(_context("I currently prefer coffee, but I used to prefer tea."))
+
+    values = {candidate["payload"]["value"]: candidate["payload"] for candidate in candidates}
+    assert values["coffee"]["is_current"] is True
+    assert values["coffee"]["temporal_status"] == "current"
+    assert values["tea"]["is_current"] is False
+    assert values["tea"]["temporal_status"] == "past"
+    assert values["tea"]["valid_to"] == "now"
 
 
 def test_preferences_extractor_captures_required_schema_fields_for_evolution():
@@ -1785,6 +2031,7 @@ def test_preferences_extractor_captures_required_schema_fields_for_evolution():
         "strength": "medium",
         "reason": "",
         "is_current": True,
+        "temporal_status": "current",
         "valid_from": "",
         "valid_to": "",
         "original_phrasing": "I prefer coffee",
@@ -1798,6 +2045,7 @@ def test_preferences_extractor_captures_required_schema_fields_for_evolution():
         "strength": "medium",
         "reason": "",
         "is_current": False,
+        "temporal_status": "past",
         "valid_from": "",
         "valid_to": "now",
         "original_phrasing": "I used to prefer tea, but now I prefer coffee",
@@ -1814,6 +2062,40 @@ def test_preferences_extractor_supports_indirect_go_to_phrase():
     assert candidates[0]["payload"]["preference_domain"] == "food_drink"
     assert candidates[0]["payload"]["preference_category"] == "drink"
     assert candidates[0]["payload"]["context"] == "I need to focus"
+
+
+def test_work_extractor_splits_role_and_tools_in_same_sentence():
+    candidates = extract_work(_context("I work as a designer and use Python and Postgres."))
+
+    roles = [candidate for candidate in candidates if candidate["category"] == "employment"]
+    tools = [candidate["payload"]["tool"] for candidate in candidates if candidate["category"] == "tool"]
+    assert roles[0]["payload"]["role"] == "designer"
+    assert set(tools) == {"Python", "Postgres"}
+
+
+def test_work_extractor_handles_atomized_bare_use_clause():
+    candidates = extract_work(_context("use Python and Postgres."))
+
+    tools = [candidate["payload"]["tool"] for candidate in candidates if candidate["category"] == "tool"]
+    assert set(tools) == {"Python", "Postgres"}
+
+
+def test_experience_extractor_captures_pause_outcome_after_accident():
+    candidates = extract_experiences(
+        _context("In October 2023, I had a serious car accident during a road trip to the Grand Canyon and I paused hiking for two months.")
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0]["payload"]["location"] == "Grand Canyon"
+    assert candidates[0]["payload"]["outcome"] == "paused hiking for two months"
+
+
+def test_experience_extractor_captures_embedded_lesson():
+    candidates = extract_experiences(_context("I attended PyCon in May 2024 with Bob and learned to plan rehearsals."))
+
+    assert len(candidates) == 1
+    assert candidates[0]["payload"]["event"] == "PyCon"
+    assert candidates[0]["payload"]["lesson"] == "plan rehearsals"
 
 
 def test_preferences_extractor_skips_hypothetical_preferences():

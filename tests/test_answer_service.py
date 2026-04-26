@@ -8,6 +8,15 @@ from memco.services.answer_service import AnswerService
 from memco.services.planner_service import PlannerService
 
 
+def _supported_result(query: str, hits: list[RetrievalHit]) -> RetrievalResult:
+    return RetrievalResult(
+        query=query,
+        support_level="supported",
+        target_person={"id": 1, "slug": "alice", "display_name": "Alice"},
+        hits=hits,
+    )
+
+
 def test_answer_service_refuses_when_no_hits():
     service = AnswerService()
     result = service.build_answer(
@@ -25,6 +34,294 @@ def test_answer_service_refuses_when_no_hits():
     assert result["must_not_use_as_fact"] is True
     assert result["support_level"] == "unsupported"
     assert "confirmed memory evidence" in result["answer"]
+
+
+def test_answer_service_field_specific_residence_answer_uses_city_payload():
+    service = AnswerService()
+    result = service.build_answer(
+        query="Where does Alice live?",
+        retrieval_result=_supported_result(
+            "Where does Alice live?",
+            [
+                RetrievalHit(
+                    fact_id=1,
+                    domain="biography",
+                    category="residence",
+                    summary="Alice lives in Lisbon.",
+                    confidence=0.9,
+                    score=2.0,
+                    payload={"city": "Lisbon"},
+                    evidence=[{"evidence_id": 101}],
+                )
+            ],
+        ),
+    )
+
+    assert result["answer"] == "Alice lives in Lisbon."
+
+
+def test_answer_service_field_specific_tools_answer_collects_tool_payloads():
+    service = AnswerService()
+    result = service.build_answer(
+        query="What tools does Alice use?",
+        retrieval_result=_supported_result(
+            "What tools does Alice use?",
+            [
+                RetrievalHit(
+                    fact_id=1,
+                    domain="work",
+                    category="tool",
+                    summary="Alice uses Python.",
+                    confidence=0.8,
+                    score=2.0,
+                    payload={"tool": "Python"},
+                    evidence=[{"evidence_id": 101}],
+                ),
+                RetrievalHit(
+                    fact_id=2,
+                    domain="work",
+                    category="tool",
+                    summary="Alice uses Postgres.",
+                    confidence=0.8,
+                    score=1.9,
+                    payload={"tool": "Postgres"},
+                    evidence=[{"evidence_id": 102}],
+                ),
+            ],
+        ),
+    )
+
+    assert result["answer"] == "Alice uses Python, Postgres."
+
+
+def test_answer_service_field_specific_preference_answer_honors_current_and_past():
+    service = AnswerService()
+    hits = [
+        RetrievalHit(
+            fact_id=1,
+            domain="preferences",
+            category="preference",
+            summary="Alice prefers coffee.",
+            confidence=0.8,
+            score=2.0,
+            payload={"value": "coffee", "is_current": True},
+            evidence=[{"evidence_id": 101}],
+        ),
+        RetrievalHit(
+            fact_id=2,
+            domain="preferences",
+            category="preference",
+            summary="Alice used to prefer tea.",
+            confidence=0.8,
+            score=1.9,
+            payload={"value": "tea", "is_current": False, "valid_to": "now"},
+            evidence=[{"evidence_id": 102}],
+        ),
+    ]
+
+    current = service.build_answer(
+        query="What does Alice currently prefer?",
+        retrieval_result=_supported_result("What does Alice currently prefer?", hits),
+    )
+    past = service.build_answer(
+        query="What did Alice used to prefer?",
+        retrieval_result=_supported_result("What did Alice used to prefer?", hits),
+    )
+
+    assert current["answer"] == "Alice currently prefers coffee."
+    assert past["answer"] == "Alice used to prefer tea."
+
+
+def test_answer_service_past_preference_query_does_not_match_use_tool_substring():
+    service = AnswerService()
+    hits = [
+        RetrievalHit(
+            fact_id=1,
+            domain="preferences",
+            category="preference",
+            summary="Alice used to prefer tea.",
+            confidence=0.8,
+            score=2.0,
+            payload={"value": "tea", "is_current": False, "valid_to": "now"},
+            evidence=[{"evidence_id": 101}],
+        ),
+        RetrievalHit(
+            fact_id=2,
+            domain="work",
+            category="tool",
+            summary="Alice uses Python.",
+            confidence=0.8,
+            score=1.0,
+            payload={"tool": "Python"},
+            evidence=[{"evidence_id": 102}],
+        ),
+    ]
+
+    result = service.build_answer(
+        query="What did Alice used to prefer?",
+        retrieval_result=_supported_result("What did Alice used to prefer?", hits),
+    )
+
+    assert result["answer"] == "Alice used to prefer tea."
+
+
+def test_answer_service_field_specific_experience_answers_use_payload_fields():
+    service = AnswerService()
+    hit = RetrievalHit(
+        fact_id=1,
+        domain="experiences",
+        category="event",
+        summary="Alice experienced serious car accident.",
+        confidence=0.8,
+        score=2.0,
+        payload={
+            "event": "serious car accident",
+            "location": "Grand Canyon",
+            "participants": ["Bob"],
+            "outcome": "paused hiking for two months",
+        },
+        evidence=[{"evidence_id": 101}],
+    )
+
+    where = service.build_answer(
+        query="Where did Alice have an accident?",
+        retrieval_result=_supported_result("Where did Alice have an accident?", [hit]),
+    )
+    who = service.build_answer(
+        query="Who did Alice attend PyCon with?",
+        retrieval_result=_supported_result("Who did Alice attend PyCon with?", [hit]),
+    )
+    changed = service.build_answer(
+        query="What changed in Alice's life after the accident?",
+        retrieval_result=_supported_result("What changed in Alice's life after the accident?", [hit]),
+    )
+
+    assert "Grand Canyon" in where["answer"]
+    assert "Bob" in who["answer"]
+    assert "paused hiking for two months" in changed["answer"]
+
+
+def test_answer_service_where_event_query_prefers_event_place_over_residence():
+    service = AnswerService()
+    residence = RetrievalHit(
+        fact_id=1,
+        domain="biography",
+        category="residence",
+        summary="Alice lives in Lisbon.",
+        confidence=0.9,
+        score=2.0,
+        payload={"city": "Lisbon"},
+        evidence=[{"evidence_id": 101}],
+    )
+    accident = RetrievalHit(
+        fact_id=2,
+        domain="experiences",
+        category="event",
+        summary="Alice experienced serious car accident.",
+        confidence=0.8,
+        score=1.9,
+        payload={
+            "event": "serious car accident",
+            "event_type": "accident",
+            "location": "Grand Canyon",
+        },
+        evidence=[{"evidence_id": 102}],
+    )
+
+    result = service.build_answer(
+        query="Where did Alice have the accident?",
+        retrieval_result=_supported_result("Where did Alice have the accident?", [residence, accident]),
+    )
+
+    assert result["answer"] == "Alice had serious car accident at Grand Canyon."
+
+
+def test_answer_service_field_specific_experience_selects_requested_event_fields():
+    service = AnswerService()
+    pycon = RetrievalHit(
+        fact_id=1,
+        domain="experiences",
+        category="event",
+        summary="Alice experienced PyCon.",
+        confidence=0.8,
+        score=2.0,
+        payload={
+            "event": "PyCon",
+            "event_type": "conference",
+            "summary": "I attended PyCon in May 2024 with Bob and learned to plan rehearsals",
+            "participants": ["Bob"],
+            "lesson": "plan rehearsals",
+            "event_at": "May 2024",
+        },
+        evidence=[{"evidence_id": 101}],
+    )
+    kyoto = RetrievalHit(
+        fact_id=2,
+        domain="experiences",
+        category="event",
+        summary="Alice experienced Kyoto.",
+        confidence=0.8,
+        score=1.9,
+        payload={
+            "event": "Kyoto",
+            "event_type": "travel",
+            "summary": "I visited Kyoto in 2022 with Dana",
+            "participants": ["Dana"],
+            "event_at": "2022",
+        },
+        evidence=[{"evidence_id": 102}],
+    )
+    accident = RetrievalHit(
+        fact_id=3,
+        domain="experiences",
+        category="event",
+        summary="Alice experienced serious car accident.",
+        confidence=0.8,
+        score=1.8,
+        payload={
+            "event": "serious car accident",
+            "event_type": "accident",
+            "location": "Grand Canyon",
+            "event_at": "October 2023",
+        },
+        evidence=[{"evidence_id": 103}],
+    )
+
+    lesson = service.build_answer(
+        query="What did Alice learn at PyCon?",
+        retrieval_result=_supported_result("What did Alice learn at PyCon?", [pycon, accident, kyoto]),
+    )
+    where = service.build_answer(
+        query="Where did Alice visit in 2022?",
+        retrieval_result=_supported_result("Where did Alice visit in 2022?", [kyoto, pycon, accident]),
+    )
+
+    assert lesson["answer"] == "Alice learned plan rehearsals."
+    assert where["answer"] == "Alice visited Kyoto."
+
+
+def test_answer_service_field_specific_project_collaborator_answer_uses_payload():
+    service = AnswerService()
+    result = service.build_answer(
+        query="Who did Alice ship Project Atlas with?",
+        retrieval_result=_supported_result(
+            "Who did Alice ship Project Atlas with?",
+            [
+                RetrievalHit(
+                    fact_id=1,
+                    domain="work",
+                    category="project",
+                    summary="Alice is building Project Atlas.",
+                    confidence=0.8,
+                    score=2.0,
+                    payload={"project": "Project Atlas", "collaborators": ["Bob"]},
+                    evidence=[{"evidence_id": 101}],
+                )
+            ],
+        ),
+    )
+
+    assert result["answer"] == "Alice shipped Project Atlas with Bob."
 
 
 def test_answer_service_refuses_yes_no_partial_false_premise():

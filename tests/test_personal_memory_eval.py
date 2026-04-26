@@ -190,6 +190,21 @@ def test_personal_memory_planner_does_not_treat_personal_as_son_relation():
     assert all(check.value != "son" for check in plan.claim_checks)
 
 
+def test_realistic_dense_personal_message_cases_assert_answer_text():
+    cases = EvalService()._realistic_dense_personal_message_cases()
+
+    cases_by_name = {case["name"]: case for case in cases}
+    assert len(cases) >= EvalService.REALISTIC_DENSE_PERSONAL_MESSAGE_MIN_CASES
+    for case in cases:
+        if case["expect_refused"]:
+            continue
+        assert case["expected_values"], case["name"]
+        assert case["expected_answer_values"] == case["expected_values"], case["name"]
+
+    assert cases_by_name["dense_false_premise_residence"]["expected_answer_values"] == ["do not"]
+    assert cases_by_name["dense_cross_person_bob_residence"]["expected_answer_values"] == []
+
+
 def test_personal_memory_eval_gate_passes_all_cases(settings):
     result = EvalService().run_personal_memory(project_root=settings.root, goldens_dir=GOLDENS_DIR)
 
@@ -213,8 +228,23 @@ def test_personal_memory_eval_gate_passes_all_cases(settings):
     assert result["metrics"]["tool_project_retrieval_pass_rate"] >= 0.95
     assert result["metrics"]["experience_event_retrieval_pass_rate"] >= 0.90
     assert result["metrics"]["source_hard_case_failures"] == 0
+    assert result["metrics"]["realistic_dense_personal_message_pass_rate"] == 1.0
     assert result["source_hard_checks_total"] == 6
     assert result["source_hard_checks_passed"] == 6
+    assert result["realistic_dense_personal_message"]["ok"] is True
+    assert result["realistic_dense_personal_message"]["case_count"] >= 30
+    assert result["realistic_dense_personal_message"]["passed"] == result["realistic_dense_personal_message"]["case_count"]
+    assert result["dataset_count_checks"]["realistic_dense_personal_message_case_count"]["ok"] is True
+    assert result["policy_checks"]["realistic_dense_personal_message"]["ok"] is True
+    assert {
+        "current_past_preference_same_sentence",
+        "role_tools_same_sentence",
+        "multiple_events_one_message",
+        "family_and_best_friend_one_message",
+        "false_premise_after_dense_ingestion",
+        "cross_person_question_after_dense_ingestion",
+        "russian_mixed_language_variants",
+    } <= set(result["realistic_dense_personal_message"]["source_dimensions"])
     assert result["memory_evolution_checks"]["ok"] is True
     assert result["memory_evolution_checks"]["failed"] == 0
     assert result["memory_evolution_checks"]["missing_required_checks"] == []

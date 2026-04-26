@@ -150,3 +150,33 @@ def test_phase7_chat_services_keep_deterministic_path_without_live_provider(tmp_
 
     assert plan.plan_version == "v2"
     assert answer["answer"] == "Alice lives in Lisbon."
+
+
+def test_phase7_chat_services_can_force_llm_planner_for_release_smoke(monkeypatch, tmp_path):
+    _Phase7OpenAICompatibleHandler.requests = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Phase7OpenAICompatibleHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        monkeypatch.setenv("MEMCO_LLM_PLANNER_MODE", "always")
+        settings = Settings(root=tmp_path)
+        settings.llm.provider = "openai-compatible"
+        settings.llm.model = "phase7-local"
+        settings.llm.base_url = f"http://127.0.0.1:{server.server_port}/v1"
+        settings.llm.api_key = "local-test-key"
+        retrieval_service, _answer_service = build_chat_services(settings)
+
+        plan = retrieval_service.planner_service.plan(
+            RetrievalRequest(
+                workspace="default",
+                person_slug="alice",
+                query="Where does Alice live?",
+            )
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    assert plan.plan_version == "v2_llm"
+    assert ("biography", "residence") in {(item.domain, item.category) for item in plan.domain_queries}
+    assert len(_Phase7OpenAICompatibleHandler.requests) == 1
