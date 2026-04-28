@@ -25,6 +25,7 @@ class RetrievalLogRepository:
         fact_hit_count: int,
         fallback_hit_count: int,
         unsupported_premise_detected: bool,
+        field_constraints: list[dict],
         fact_ids: list[int],
         fallback_refs: list[dict],
         latency_ms: int,
@@ -35,8 +36,8 @@ class RetrievalLogRepository:
             INSERT INTO retrieval_logs (
                 workspace_id, person_id, route_name, query_hash, query_length, domain_filter,
                 fact_hit_count, fallback_hit_count, unsupported_premise_detected,
-                fact_ids_json, fallback_refs_json, latency_ms, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                field_constraints_json, fact_ids_json, fallback_refs_json, latency_ms, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
@@ -48,6 +49,7 @@ class RetrievalLogRepository:
                 fact_hit_count,
                 fallback_hit_count,
                 1 if unsupported_premise_detected else 0,
+                json.dumps(field_constraints, ensure_ascii=False),
                 json.dumps(fact_ids, ensure_ascii=False),
                 json.dumps(fallback_refs, ensure_ascii=False),
                 latency_ms,
@@ -61,6 +63,7 @@ class RetrievalLogRepository:
         if row is None:
             raise ValueError("Unknown retrieval log")
         item = dict(row)
+        item["field_constraints"] = json.loads(item.pop("field_constraints_json", "[]") or "[]")
         item["fact_ids"] = json.loads(item.pop("fact_ids_json") or "[]")
         item["fallback_refs"] = json.loads(item.pop("fallback_refs_json") or "[]")
         item["unsupported_premise_detected"] = bool(item["unsupported_premise_detected"])

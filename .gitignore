@@ -8,6 +8,7 @@ __pycache__/
 .pytest_cache/
 
 var/
+external/
 *.zip
 
 .coverage

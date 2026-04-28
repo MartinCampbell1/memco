@@ -196,6 +196,68 @@ def test_retrieval_logs_include_temporal_mode_in_domain_filter(settings):
     assert logs[0]["domain_filter"].endswith("history")
 
 
+def test_retrieval_logs_include_redacted_category_rag_constraints(settings):
+    fact_repo = FactRepository()
+    source_repo = SourceRepository()
+    consolidation = ConsolidationService()
+    retrieval = RetrievalService()
+    log_repo = RetrievalLogRepository()
+    loaded_settings = load_settings(settings.root)
+    actor = build_internal_actor(loaded_settings, actor_id="dev-owner")
+
+    with get_connection(settings.db_path) as conn:
+        person = fact_repo.upsert_person(
+            conn,
+            workspace_slug="default",
+            display_name="Alice",
+            slug="alice",
+            person_type="human",
+            aliases=["Alice"],
+        )
+        source_id = source_repo.record_source(
+            conn,
+            workspace_slug="default",
+            source_path="var/raw/logging-current-residence.md",
+            source_type="note",
+            origin_uri="/tmp/logging-current-residence.md",
+            title="logging-current-residence",
+            sha256="logging-current-residence-sha",
+            parsed_text="Alice moved to Lisbon.",
+        )
+        consolidation.add_fact(
+            conn,
+            MemoryFactInput(
+                workspace="default",
+                person_id=int(person["id"]),
+                domain="biography",
+                category="residence",
+                canonical_key="alice:biography:residence:lisbon-current",
+                payload={"city": "Lisbon", "is_current": True},
+                summary="Alice lives in Lisbon.",
+                confidence=0.95,
+                observed_at="2026-04-21T10:00:00Z",
+                source_id=source_id,
+                quote_text="Alice moved to Lisbon.",
+            ),
+        )
+        retrieval.retrieve(
+            conn,
+            RetrievalRequest(workspace="default", person_slug="alice", query="Where does Alice live now?", actor=actor),
+            settings=loaded_settings,
+            route_name="retrieve",
+        )
+        logs = log_repo.list_logs(conn, workspace_slug="default")
+
+    assert logs[0]["field_constraints"] == [
+        {
+            "domain": "biography",
+            "category": "residence",
+            "field_constraints": {"is_current": True, "valid_at": "now"},
+        }
+    ]
+    assert "Lisbon" not in str(logs[0]["field_constraints"])
+
+
 def test_retrieval_logs_can_be_filtered_by_person(settings):
     fact_repo = FactRepository()
     source_repo = SourceRepository()

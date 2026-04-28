@@ -32,6 +32,7 @@ class CandidateService:
         owner_person_id: int | None = None,
         owner_display_name: str = "",
         attribution_policy: str = "strict_speaker_only",
+        max_chunks: int | None = None,
     ) -> list[dict]:
         extracted = self._require_extraction_service().extract_candidates_from_conversation(
             conn,
@@ -41,6 +42,7 @@ class CandidateService:
             owner_person_id=owner_person_id,
             owner_display_name=owner_display_name,
             attribution_policy=attribution_policy,
+            max_chunks=max_chunks,
         )
         persisted: list[dict] = []
         for item in extracted:

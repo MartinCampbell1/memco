@@ -11,6 +11,7 @@ from memco.llm import LLMProvider
 from memco.llm_usage import LLMUsageEvent, LLMUsageTracker, estimate_token_count
 from memco.models.relationships import RELATION_QUERY_TERMS
 from memco.models.retrieval import RetrievalClaimCheck, RetrievalDomainPlan, RetrievalPlan, RetrievalRequest
+from memco.services.category_rag_service import build_field_constraints
 
 
 QUESTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None, str]] = [
@@ -384,6 +385,11 @@ class PlannerService:
         if not domain_queries:
             raise ValueError("LLM planner returned no usable domain queries")
         domain_queries = self._guard_provider_domain_queries(payload=payload, domain_queries=domain_queries)
+        domain_queries = self._attach_field_constraints(
+            domain_queries,
+            query=payload.query,
+            temporal_mode=temporal_mode,
+        )
 
         claim_checks = self._provider_claim_checks(output, person_slug=payload.person_slug)
         false_premise_risk = output.false_premise_risk if output.false_premise_risk in {"low", "medium", "high"} else self._false_premise_risk(payload.query)
@@ -485,14 +491,22 @@ class PlannerService:
     def _rule_plan(self, payload: RetrievalRequest, *, record_usage: bool = True) -> RetrievalPlan:
         temporal_mode = self._resolve_temporal_mode(payload.query, payload.temporal_mode)
         if payload.domain or payload.category:
+            domain = payload.domain or "unknown"
+            category = payload.category
             plan = RetrievalPlan(
                 plan_version="v2",
                 question_type=self._question_type(payload.query, temporal_mode=temporal_mode),
                 domain_queries=[
                     RetrievalDomainPlan(
-                        domain=payload.domain or "unknown",
-                        category=payload.category,
+                        domain=domain,
+                        category=category,
                         field_query=payload.query,
+                        field_constraints=build_field_constraints(
+                            query=payload.query,
+                            domain=domain,
+                            category=category,
+                            temporal_mode=temporal_mode,
+                        ),
                         reason="explicit retrieval filters from caller",
                     )
                 ],
@@ -560,6 +574,11 @@ class PlannerService:
                     reason="default fallback for personal factual question",
                 )
             )
+        domain_queries = self._attach_field_constraints(
+            domain_queries,
+            query=payload.query,
+            temporal_mode=temporal_mode,
+        )
 
         plan = RetrievalPlan(
             plan_version="v2",
@@ -576,6 +595,28 @@ class PlannerService:
         if record_usage:
             self._record_usage(query=payload.query, plan=plan, request=payload)
         return plan
+
+    def _attach_field_constraints(
+        self,
+        domain_queries: list[RetrievalDomainPlan],
+        *,
+        query: str,
+        temporal_mode: str,
+    ) -> list[RetrievalDomainPlan]:
+        return [
+            item.model_copy(
+                update={
+                    "field_constraints": item.field_constraints
+                    or build_field_constraints(
+                        query=query,
+                        domain=item.domain,
+                        category=item.category,
+                        temporal_mode=temporal_mode,
+                    )
+                }
+            )
+            for item in domain_queries
+        ]
 
     def _resolve_temporal_mode(self, query: str, requested_mode: str) -> str:
         temporal_mode = requested_mode

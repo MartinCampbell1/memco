@@ -1,0 +1,38 @@
+[
+  {
+    "sample_id": "mini_001",
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1_date_time": "10:00 am on 1 January, 2024",
+      "session_1": [
+        {"speaker": "Alice", "dia_id": "D1:1", "text": "I moved to Lisbon."},
+        {"speaker": "Bob", "dia_id": "D1:2", "text": "I started using Postgres."}
+      ],
+      "session_2_date_time": "11:00 am on 2 January, 2024",
+      "session_2": [
+        {"speaker": "Alice", "dia_id": "D2:1", "text": "My favorite tool is Python."}
+      ]
+    },
+    "qa": [
+      {
+        "question": "Where did Alice move?",
+        "answer": "Lisbon",
+        "evidence": ["D1:1"],
+        "category": 1
+      },
+      {
+        "question": "What database did Bob start using?",
+        "answer": "Postgres",
+        "evidence": ["D1:2"],
+        "category": 1
+      },
+      {
+        "question": "What is my favorite tool?",
+        "answer": "Python",
+        "evidence": ["D2:1"],
+        "category": 3
+      }
+    ]
+  }
+]

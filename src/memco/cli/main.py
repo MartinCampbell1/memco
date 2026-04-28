@@ -12,6 +12,28 @@ import typer
 
 from memco.api.deps import build_internal_actor
 from memco.artifact_semantics import attach_artifact_context, evaluate_artifact_freshness
+from memco.benchmarks.backends.base import MemoryBackend
+from memco.benchmarks.backends.embedding_rag import EmbeddingRagBackend
+from memco.benchmarks.backends.full_context import FullContextBackend
+from memco.benchmarks.backends.langmem_backend import LangMemBenchmarkBackend
+from memco.benchmarks.backends.mem0_backend import Mem0BenchmarkBackend
+from memco.benchmarks.backends.memco_backend import MemcoBenchmarkBackend
+from memco.benchmarks.backends.sliding_window import SlidingWindowBackend
+from memco.benchmarks.backends.summarization import SummarizationBackend
+from memco.benchmarks.backends.zep_backend import ZepBenchmarkBackend
+from memco.benchmarks.judge import FixtureBinaryJudge
+from memco.benchmarks.llm_runtime import (
+    benchmark_llm_settings,
+    build_text_provider,
+    is_fixture_answer_model,
+    is_fixture_embedding_model,
+    is_fixture_judge_model,
+    make_llm_answer_fn,
+    make_llm_judge,
+    make_openai_compatible_embed_fn,
+)
+from memco.benchmarks.locomo_loader import load_locomo_dataset
+from memco.benchmarks.runner import BenchmarkRunConfig, current_git_commit, run_locomo_benchmark
 from memco.config import SQLITE_FALLBACK_ENGINE, Settings, load_settings, write_settings
 from memco.db import get_connection
 from memco.models.candidate import CandidateListRequest
@@ -45,6 +67,7 @@ from memco.postgres_smoke import run_postgres_smoke
 from memco.postgres_admin import ensure_postgres_database
 from memco.local_artifacts import refresh_local_artifacts
 from memco.operator_preflight import run_operator_preflight
+from memco.private_pilot_gate import run_private_pilot_gate
 from memco.release_check import resolve_repo_project_root, run_release_check, run_release_readiness_check, run_strict_release_check
 from memco.services.pipeline_service import IngestPipelineService
 
@@ -55,6 +78,8 @@ backup_app = typer.Typer(help="Backup, export, verification, and restore dry-run
 app.add_typer(backup_app, name="backup")
 review_app = typer.Typer(help="Short review queue commands.")
 app.add_typer(review_app, name="review")
+benchmark_app = typer.Typer(help="Benchmark commands.")
+app.add_typer(benchmark_app, name="benchmark")
 
 IMPORT_SOURCE_SHORTCUTS = {"whatsapp", "telegram", "pdf", "note"}
 
@@ -87,6 +112,68 @@ def _project_root(project_root: str | None) -> Path:
         return resolve_repo_project_root(selected)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
+
+
+def _csv(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _benchmark_backends(
+    names: list[str],
+    *,
+    answer_model: str,
+    embedding_model: str,
+    benchmark_mode: bool,
+    sliding_window_turns: int,
+    rag_top_k: int,
+    rag_chunk_unit: str,
+    extraction_mode: str,
+    memco_max_ingest_chunks: int | None,
+    answer_fn=None,
+    embed_fn=None,
+    memco_llm_settings: Settings | None = None,
+    memco_use_llm_answer: bool = False,
+) -> list[MemoryBackend]:
+    backends: list[MemoryBackend] = []
+    for name in names:
+        if name == "full_context":
+            backends.append(FullContextBackend(answer_model=answer_model, answer_fn=answer_fn))
+        elif name == "sliding_window":
+            backends.append(SlidingWindowBackend(answer_model=answer_model, turns=sliding_window_turns, answer_fn=answer_fn))
+        elif name == "summarization":
+            backends.append(SummarizationBackend(answer_model=answer_model, answer_fn=answer_fn))
+        elif name == "embedding_rag":
+            backends.append(
+                EmbeddingRagBackend(
+                    answer_model=answer_model,
+                    embedding_model=embedding_model or "fixture-embedding",
+                    top_k=rag_top_k,
+                    chunk_unit=rag_chunk_unit,
+                    answer_fn=answer_fn,
+                    embed_fn=embed_fn,
+                )
+            )
+        elif name == "memco":
+            backends.append(
+                MemcoBenchmarkBackend(
+                    benchmark_mode=benchmark_mode,
+                    extraction_mode=extraction_mode,
+                    llm_settings=memco_llm_settings,
+                    use_llm_answer=memco_use_llm_answer,
+                    max_ingest_chunks=memco_max_ingest_chunks,
+                )
+            )
+        elif name == "mem0":
+            backends.append(Mem0BenchmarkBackend())
+        elif name == "zep":
+            backends.append(ZepBenchmarkBackend())
+        elif name == "langmem":
+            backends.append(LangMemBenchmarkBackend())
+        else:
+            raise typer.BadParameter(f"Unsupported benchmark backend for this phase: {name}")
+    return backends
 
 
 def _emit_json_artifact(payload: dict, *, output: str | None) -> None:
@@ -2085,6 +2172,115 @@ def _run_personal_memory_eval_command(*, goldens: str, output: str | None, root:
         raise typer.Exit(1)
 
 
+@benchmark_app.command("locomo", help="Run a LoCoMo benchmark slice through the shared benchmark harness.")
+def benchmark_locomo_command(
+    dataset: str = typer.Option(..., help="Path to LoCoMo JSON dataset."),
+    backends: str = typer.Option(..., help="Comma-separated backend names."),
+    output_dir: str = typer.Option(..., help="Directory for benchmark artifacts."),
+    answer_model: str | None = typer.Option(None, help="Answer model shared by generative backends."),
+    judge_model: str | None = typer.Option(None, help="Judge model. Required unless --no-judge is set."),
+    embedding_model: str | None = typer.Option(None, help="Embedding model. Required for embedding_rag."),
+    max_samples: int | None = typer.Option(None, help="Optional conversation sample limit."),
+    max_questions: int | None = typer.Option(None, help="Optional question limit after filters."),
+    categories: str | None = typer.Option(None, help="Comma-separated category filter."),
+    question_ids: str | None = typer.Option(None, help="Comma-separated question id filter."),
+    sample_ids: str | None = typer.Option(None, help="Comma-separated sample id filter."),
+    benchmark_mode: bool = typer.Option(False, "--benchmark-mode", help="Enable isolated benchmark-only behavior."),
+    no_judge: bool = typer.Option(False, "--no-judge", help="Generate answers without judging them."),
+    resume: bool = typer.Option(False, "--resume", help="Reuse cached benchmark answers and judgments."),
+    force: bool = typer.Option(False, "--force", help="Ignore cached benchmark answers and judgments."),
+    seed: int = typer.Option(0, help="Deterministic seed for benchmark adapters."),
+    sliding_window_turns: int = typer.Option(20, "--sliding-window-turns", help="Number of final turns used by sliding_window."),
+    rag_top_k: int = typer.Option(3, "--rag-top-k", help="Number of session chunks retrieved by embedding_rag."),
+    rag_chunk_unit: str = typer.Option("session", "--rag-chunk-unit", help="Chunk unit for embedding_rag. Defaults to session."),
+    extraction_mode: str = typer.Option("llm_first", "--extraction-mode", help="Memco benchmark extraction mode. Defaults to llm_first."),
+    memco_max_ingest_chunks: int | None = typer.Option(
+        None,
+        "--memco-max-ingest-chunks",
+        help="Benchmark-only Memco ingestion chunk cap for live smoke runs. Defaults to uncapped.",
+    ),
+) -> None:
+    backend_names = _csv(backends)
+    if not backend_names:
+        raise typer.BadParameter("--backends must name at least one backend")
+    if "embedding_rag" in backend_names and not embedding_model:
+        raise typer.BadParameter("--embedding-model is required for embedding_rag")
+    if not no_judge and not judge_model:
+        raise typer.BadParameter("--judge-model is required unless --no-judge is set")
+    if "memco" in backend_names and not benchmark_mode:
+        raise typer.BadParameter("--benchmark-mode is required for the memco benchmark backend")
+    if extraction_mode not in {"llm_first", "per_domain", "combined_legacy"}:
+        raise typer.BadParameter("--extraction-mode must be one of: llm_first, per_domain, combined_legacy")
+    if memco_max_ingest_chunks is not None and memco_max_ingest_chunks < 1:
+        raise typer.BadParameter("--memco-max-ingest-chunks must be greater than zero")
+
+    selected_answer_model = answer_model or "fixture"
+    selected_judge_model = judge_model or ("none" if no_judge else "")
+    selected_embedding_model = embedding_model or ""
+    project_root = _project_root(None)
+    answer_fn = None
+    if not is_fixture_answer_model(selected_answer_model):
+        answer_settings = benchmark_llm_settings(project_root=project_root, model_name=selected_answer_model)
+        answer_fn = make_llm_answer_fn(build_text_provider(answer_settings))
+    embed_fn = None
+    if "embedding_rag" in backend_names and not is_fixture_embedding_model(selected_embedding_model):
+        embed_settings = benchmark_llm_settings(project_root=project_root, model_name=selected_answer_model)
+        embed_fn = make_openai_compatible_embed_fn(settings=embed_settings, model_name=selected_embedding_model)
+    memco_llm_settings = None
+    if "memco" in backend_names and not is_fixture_answer_model(selected_answer_model):
+        memco_llm_settings = benchmark_llm_settings(project_root=project_root, model_name=selected_answer_model)
+    judge = None
+    if not no_judge:
+        if is_fixture_judge_model(selected_judge_model):
+            judge = FixtureBinaryJudge(model_name=selected_judge_model)
+        else:
+            judge_settings = benchmark_llm_settings(project_root=project_root, model_name=selected_judge_model)
+            judge = make_llm_judge(provider=build_text_provider(judge_settings), model_name=selected_judge_model)
+    loaded_dataset = load_locomo_dataset(dataset)
+    config = BenchmarkRunConfig(
+        dataset_path=str(Path(dataset).expanduser().resolve()),
+        backend_names=backend_names,
+        output_dir=str(Path(output_dir).expanduser().resolve()),
+        answer_model=selected_answer_model,
+        judge_model=selected_judge_model,
+        embedding_model=selected_embedding_model,
+        max_samples=max_samples,
+        max_questions=max_questions,
+        categories=_csv(categories),
+        question_ids=_csv(question_ids),
+        sample_ids=_csv(sample_ids),
+        benchmark_mode=benchmark_mode,
+        no_judge=no_judge,
+        resume=resume,
+        force=force,
+        seed=seed,
+        code_git_commit=current_git_commit(project_root),
+    )
+    result = run_locomo_benchmark(
+        dataset=loaded_dataset,
+        backends=_benchmark_backends(
+            backend_names,
+            answer_model=selected_answer_model,
+            embedding_model=selected_embedding_model,
+            benchmark_mode=benchmark_mode,
+            sliding_window_turns=sliding_window_turns,
+            rag_top_k=rag_top_k,
+            rag_chunk_unit=rag_chunk_unit,
+            extraction_mode=extraction_mode,
+            memco_max_ingest_chunks=memco_max_ingest_chunks,
+            answer_fn=answer_fn,
+            embed_fn=embed_fn,
+            memco_llm_settings=memco_llm_settings,
+            memco_use_llm_answer=not is_fixture_answer_model(selected_answer_model),
+        ),
+        config=config,
+        judge=judge,
+    )
+    _emit_json_artifact(result.model_dump(mode="json"), output=None)
+    if not result.ok:
+        raise typer.Exit(1)
+
+
 @eval_app.command("personal-memory", help="Run the personal-memory golden eval gate.")
 def eval_personal_memory_command(
     goldens: str = typer.Option("eval/personal_memory_goldens", help="Directory or JSONL file containing personal-memory goldens."),
@@ -2101,6 +2297,20 @@ def personal_memory_eval_command(
     root: str | None = typer.Option(None, help="Optional isolated fixture runtime root. Defaults to a temporary root."),
 ) -> None:
     _run_personal_memory_eval_command(goldens=goldens, output=output, root=root)
+
+
+@app.command("private-pilot-gate", help="Run the private retrieval-only pilot gate and write a JSON report.")
+def private_pilot_gate_command(
+    project_root: str | None = typer.Option(None, help="Repo root. Defaults to the nearest Memco checkout above the current directory."),
+    root: str | None = typer.Option(None, help="Isolated fixture runtime root. Defaults to a temporary root."),
+    output: str | None = typer.Option(None, help="Optional JSON artifact output path."),
+) -> None:
+    resolved_project_root = _project_root(project_root)
+    runtime_root = Path(root).expanduser().resolve() if root else None
+    result = run_private_pilot_gate(project_root=resolved_project_root, root=runtime_root)
+    _emit_json_artifact(result, output=output)
+    if not result["ok"]:
+        raise typer.Exit(code=1)
 
 
 @app.command(

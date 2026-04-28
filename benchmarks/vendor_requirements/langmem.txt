@@ -1,0 +1,4 @@
+# Optional Phase 7 adapter dependency.
+# Install only for vendor benchmark runs:
+# uv pip install -r benchmarks/vendor_requirements/langmem.txt
+langmem

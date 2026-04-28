@@ -355,6 +355,12 @@ def run_migrations(conn: sqlite3.Connection) -> None:
         "session_id",
         f"session_id {session_fk_sql}",
     )
+    _ensure_column(
+        conn,
+        "retrieval_logs",
+        "field_constraints_json",
+        "field_constraints_json TEXT NOT NULL DEFAULT '[]'",
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversation_messages_session ON conversation_messages(session_id, message_index)"
     )

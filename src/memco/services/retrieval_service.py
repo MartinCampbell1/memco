@@ -147,6 +147,38 @@ class RetrievalService:
     def _hash_query(self, *, query: str, salt: str) -> str:
         return hashlib.sha256(f"{salt}:{query}".encode("utf-8")).hexdigest()
 
+    def _redacted_field_constraints(self, planner: RetrievalPlan | None) -> list[dict]:
+        if planner is None:
+            return []
+        redacted: list[dict] = []
+        for query in planner.domain_queries:
+            if not query.field_constraints:
+                continue
+            redacted.append(
+                {
+                    "domain": query.domain,
+                    "category": query.category,
+                    "field_constraints": {
+                        key: self._redact_constraint_value(value)
+                        for key, value in sorted(query.field_constraints.items())
+                    },
+                }
+            )
+        return redacted
+
+    def _redact_constraint_value(self, value):
+        if isinstance(value, str):
+            if value in {"now", "current_vs_past"}:
+                return value
+            return "<redacted>"
+        if isinstance(value, (bool, int, float)) or value is None:
+            return value
+        if isinstance(value, list):
+            return [self._redact_constraint_value(item) for item in value]
+        if isinstance(value, dict):
+            return {str(key): self._redact_constraint_value(item) for key, item in value.items()}
+        return "<redacted>"
+
     def _write_log(self, conn, *, payload: RetrievalRequest, person_id: int | None, result: RetrievalResult, route_name: str, latency_ms: int, settings) -> None:
         if settings is None or not settings.logging.enable_retrieval_logs:
             return
@@ -169,6 +201,7 @@ class RetrievalService:
             fact_hit_count=len(result.hits),
             fallback_hit_count=len(result.fallback_hits),
             unsupported_premise_detected=result.unsupported_premise_detected,
+            field_constraints=self._redacted_field_constraints(result.planner),
             fact_ids=[hit.fact_id for hit in result.hits],
             fallback_refs=[
                 {"chunk_kind": hit.chunk_kind, "chunk_id": hit.chunk_id, "source_id": hit.source_id, "score": hit.score}

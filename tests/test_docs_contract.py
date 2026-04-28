@@ -144,18 +144,46 @@ def test_current_docs_entrypoints_separate_status_contract_gaps_and_reproduction
     assert "not a paper-equivalent benchmark claim" in current
     assert "Selected P2: existing token/latency accounting remains covered" in current
     assert "fail-closes missing token/latency fields" in current
+    assert "Selected benchmark Phase 6: benchmark judging, category metrics" in current
+    assert "Selected benchmark Phase 7: Mem0, Zep, and LangMem" in current
+    assert "Selected benchmark Phase 8: Memco now exposes explicit LLM-first extraction schema modules" in current
+    assert "redacted retrieval-log constraint visibility" in current
+    assert "Selected benchmark Phase 9: the full mandatory LoCoMo harness run" in current
+    assert "The requested `gpt-4.1-mini`/`text-embedding-3-small` dry-run is preserved as a failed artifact" in current
+    assert "A later live dry-run using `gpt-5.4-mini` through the local OpenAI-compatible gateway" in current
+    assert "this is live-smoke evidence only, not a full uncapped live LoCoMo Memco claim" in current
     assert "The personal-memory eval artifact also includes `long_corpus_stress`" in local
     assert "false-positive retrieval checks, and refusal-quality probes" in local
     assert "`p2_3_target_report` keeps full P2.3 `ok_for_full_p2_3_claim=false`" in local
     assert "`p2_1_external_benchmark_report`" in local
     assert "public/external LoCoMO remains `not_run`" in local
-    assert "`uv run pytest -q`: 658 passed." in current
+    assert "`uv run pytest -q`: 723 passed." in current
+    assert "`uv run pytest tests/test_benchmark_runner.py -q`: 7 passed." in current
+    assert "`uv run pytest tests/test_benchmark_baselines.py tests/test_benchmark_runner.py -q`: 13 passed." in current
+    assert "`uv run pytest tests/test_benchmark_memco_backend.py tests/test_benchmark_baselines.py tests/test_benchmark_runner.py -q`: 23 passed." in current
+    assert "`uv run pytest tests/test_benchmark_judge.py tests/test_benchmark_metrics.py tests/test_benchmark_reports.py tests/test_benchmark_runner.py tests/test_benchmark_baselines.py tests/test_benchmark_memco_backend.py tests/test_locomo_loader.py tests/test_benchmark_mode_does_not_disable_review_gate.py -q`: 47 passed." in current
+    assert "`uv run pytest tests/test_benchmark_optional_adapters.py tests/test_benchmark_runner.py -q`: 11 passed." in current
+    assert "test_retrieval_logs_include_redacted_category_rag_constraints" in current
+    assert "`: 73 passed." in current
+    assert "`uv run memco benchmark locomo --dataset tests/fixtures/locomo_mini.json --backends full_context --output-dir var/reports/benchmark-current/phase3-smoke --no-judge`: `ok=true`" in current
+    assert "`uv run memco benchmark locomo --dataset tests/fixtures/locomo_mini.json --backends full_context,sliding_window,summarization,embedding_rag --output-dir /tmp/memco-phase4-smoke --answer-model fixture --embedding-model fixture-embedding --no-judge`: `ok=true`" in current
+    assert "`uv run memco benchmark locomo --dataset tests/fixtures/locomo_mini.json --backends memco --output-dir /tmp/memco-phase5-smoke --answer-model fixture --no-judge --benchmark-mode`: `ok=true`" in current
+    assert "`uv run memco benchmark locomo --dataset tests/fixtures/locomo_mini.json --backends full_context,sliding_window,summarization,embedding_rag,memco --output-dir var/reports/benchmark-current --answer-model fixture --judge-model fixture-judge --embedding-model fixture-embedding --benchmark-mode --force`: `ok=true`" in current
+    assert "`uv run memco benchmark locomo --dataset tests/fixtures/locomo_mini.json --backends mem0,zep,langmem --output-dir /tmp/memco-phase7-smoke --answer-model fixture --judge-model fixture-judge`: `ok=true`" in current
+    assert "`uv run memco benchmark locomo --dataset tests/fixtures/locomo_mini.json --backends memco --output-dir /tmp/memco-phase8-smoke --answer-model fixture --judge-model fixture-judge --benchmark-mode --extraction-mode llm_first`: `ok=true`" in current
+    assert "`uv run memco benchmark locomo --dataset external/locomo/data/locomo10.json --backends memco,full_context,sliding_window,summarization,embedding_rag --answer-model gpt-4.1-mini --judge-model gpt-4.1-mini --embedding-model text-embedding-3-small --output-dir var/reports/benchmark-dry-run --max-samples 1 --max-questions 20 --benchmark-mode --force`: `ok=false`" in current
+    assert "`uv run memco benchmark locomo --dataset external/locomo/data/locomo10.json --backends full_context,sliding_window,summarization,embedding_rag --answer-model gpt-5.4-mini --judge-model gpt-5.4-mini --embedding-model openai/text-embedding-3-small --output-dir var/reports/benchmark-dry-run-live-baselines --max-samples 1 --max-questions 20 --force`: `ok=true`" in current
+    assert "accuracies were full_context 0.65, sliding_window 0.55, summarization 0.60, embedding_rag 0.60" in current
+    assert "`uv run memco benchmark locomo --dataset external/locomo/data/locomo10.json --backends memco --answer-model gpt-5.4-mini --judge-model gpt-5.4-mini --embedding-model openai/text-embedding-3-small --output-dir var/reports/benchmark-dry-run-live-memco --max-samples 1 --max-questions 20 --benchmark-mode --extraction-mode combined_legacy --memco-max-ingest-chunks 2 --force`: `ok=true`" in current
+    assert "capped live Memco smoke completed with judge errors 0, accuracy 0.55, evidence coverage 1.0" in current
+    assert "`uv run memco benchmark locomo --dataset external/locomo/data/locomo10.json --backends memco,full_context,sliding_window,summarization,embedding_rag --answer-model fixture --judge-model fixture-judge --embedding-model fixture-embedding --output-dir var/reports/benchmark-current --benchmark-mode --force`: `ok=true`" in current
+    assert "`var/reports/benchmark-current/manual_audit.md`: created for the full mandatory fixture run" in current
     assert "`uv run pytest tests/test_private_agent_semantic_regressions.py -q`: 14 passed." in current
     assert "fresh fixture/internal eval proof for this current checkout; 840/840 passed" in current
     assert "fresh quick repo-local release-check proof for this current checkout; acceptance 27/27" in current
     assert (
         "fresh repo-local refresh summary for this current checkout; "
-        "full suite 658 passed, contract stack 105 passed, release-check acceptance 27/27"
+        "full suite 723 passed, contract stack 105 passed, release-check acceptance 27/27"
     ) in current
     assert "passes with current artifact freshness" in current
     assert "fresh release-grade artifact for this current checkout; `ok=true`" in current

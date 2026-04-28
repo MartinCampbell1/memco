@@ -600,6 +600,8 @@ class ExtractionService:
         mode = self._settings.extraction.mode if self._settings is not None else "per_domain"
         if mode == "combined_legacy":
             return self._extract_candidates_via_provider_combined_legacy(**kwargs)
+        if mode == "llm_first":
+            return self._extract_candidates_via_provider_per_domain(**kwargs)
         return self._extract_candidates_via_provider_per_domain(**kwargs)
 
     def _extract_candidates_via_provider_per_domain(
@@ -1177,6 +1179,7 @@ class ExtractionService:
         owner_person_id: int | None = None,
         owner_display_name: str = "",
         attribution_policy: str = "strict_speaker_only",
+        max_chunks: int | None = None,
     ) -> list[dict]:
         meta_row = conn.execute(
             """
@@ -1191,6 +1194,8 @@ class ExtractionService:
         if meta_row is None:
             return []
         chunks = self._conversation_chunks(conn, conversation_id=conversation_id)
+        if max_chunks is not None:
+            chunks = chunks[:max_chunks]
         candidates: list[dict] = []
         for chunk in chunks:
             targets: list[tuple[int | None, str, list[MessageView]]] = []

@@ -14,7 +14,7 @@ PRIMARY_STORAGE_ENGINE = "postgres"
 SQLITE_FALLBACK_ENGINE = "sqlite"
 SUPPORTED_STORAGE_ENGINES = {PRIMARY_STORAGE_ENGINE, SQLITE_FALLBACK_ENGINE}
 AttributionPolicy = Literal["strict_speaker_only", "owner_first_person_fallback", "manual_review_only"]
-ExtractionMode = Literal["per_domain", "combined_legacy"]
+ExtractionMode = Literal["per_domain", "combined_legacy", "llm_first"]
 
 
 class ApiActorPolicy(BaseModel):

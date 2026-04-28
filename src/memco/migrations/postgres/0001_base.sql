@@ -341,6 +341,7 @@ CREATE TABLE IF NOT EXISTS retrieval_logs (
   fact_hit_count INTEGER NOT NULL DEFAULT 0,
   fallback_hit_count INTEGER NOT NULL DEFAULT 0,
   unsupported_premise_detected INTEGER NOT NULL DEFAULT 0,
+  field_constraints_json TEXT NOT NULL DEFAULT '[]',
   fact_ids_json TEXT NOT NULL DEFAULT '[]',
   fallback_refs_json TEXT NOT NULL DEFAULT '[]',
   latency_ms INTEGER NOT NULL DEFAULT 0,

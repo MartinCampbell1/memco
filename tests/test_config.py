@@ -53,14 +53,14 @@ def test_write_settings_roundtrip(tmp_path):
     settings = Settings(root=tmp_path / "project")
     settings.api.port = 9898
     settings.llm.model = "fixture-y"
-    settings.extraction.mode = "combined_legacy"
+    settings.extraction.mode = "llm_first"
 
     write_settings(settings)
     loaded = load_settings(settings.root)
 
     assert loaded.api.port == 9898
     assert loaded.llm.model == "fixture-y"
-    assert loaded.extraction.mode == "combined_legacy"
+    assert loaded.extraction.mode == "llm_first"
     assert loaded.logging.query_hash_salt
 
 

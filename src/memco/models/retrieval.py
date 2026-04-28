@@ -22,6 +22,7 @@ class RetrievalDomainPlan(BaseModel):
     domain: str
     category: str | None = None
     field_query: str = ""
+    field_constraints: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
 
 

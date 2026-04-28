@@ -15,6 +15,8 @@ from memco.extractors.base import (
     overcaptured_payload_reasons,
     validate_candidate_payload,
 )
+from memco.extractors.domain_schemas import CANONICAL_LLM_DOMAINS, build_domain_schema
+from memco.extractors.llm_structured import build_structured_extraction_prompt
 from memco.extractors.text_units import context_for_clause, split_atomic_assertions
 from memco.extractors.biography import extract as extract_biography
 from memco.extractors.experiences import extract as extract_experiences
@@ -494,6 +496,20 @@ def test_prompt_payload_embeds_output_contract():
     assert payload["output_contract"]["top_level_output"]["required_keys"] == ["items"]
     domains = {item["domain"] for item in payload["output_contract"]["domains"]}
     assert {"biography", "preferences", "social_circle", "work", "experiences", "psychometrics"} <= domains
+
+
+def test_phase8_structured_extraction_modules_expose_domain_contracts():
+    schema = build_domain_schema(include_psychometrics=True)
+    domains = {domain["domain"] for domain in schema["domains"]}
+    assert set(CANONICAL_LLM_DOMAINS).issubset(domains)
+
+    prompt = build_structured_extraction_prompt(
+        _context("I used to prefer tea, but now I prefer coffee."),
+        domain_names=("preferences",),
+    )
+    assert prompt.schema_name == "memory_fact_candidates"
+    assert prompt.payload["extraction_mode"] == "llm_first_structured_extraction"
+    assert [domain["domain"] for domain in prompt.payload["output_contract"]["domains"]] == ["preferences"]
 
 
 def test_extract_candidates_from_conversation_returns_typed_p0a_candidates(settings, tmp_path):
